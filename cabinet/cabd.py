@@ -79,6 +79,12 @@ async def fifo_reader():
                     events_buf.append((now, l))
                 if ss["on"]:
                     asyncio.create_task(screensaver_off())
+                # HOME_COMBO (EMU-2/spec §5.2 #4): kill the foreground
+                # game/stream, back to the frontend. Sim delivers the combo
+                # as a COMBO_HOME event line; real evdev combo grabbing is
+                # hardware scope (A-13).
+                if any(l.startswith("COMBO_HOME") for l in got):
+                    asyncio.create_task(game_kill())
         await asyncio.sleep(0.05)
 
 
@@ -212,6 +218,26 @@ async def idle_loop():
                 await asyncio.sleep(5)
 
 
+MOONLIGHT_BIN = os.environ.get("MOONLIGHT_BIN", "/fakes/moonlight")
+GREENLIGHT_BIN = os.environ.get("GREENLIGHT_BIN", "/fakes/greenlight")
+DESKTOP_HOST = os.environ.get("STREAM_DESKTOP_HOST", "desktop.lan")
+
+
+def _stream_session(path):
+    """path: 'moonlight:<app>' or 'greenlight:<title>' (spec §5.8)."""
+    kind, _, target = path.partition(":")
+    if kind == "moonlight":
+        argv = [MOONLIGHT_BIN, "stream", DESKTOP_HOST, target]
+        title = f"moonlight-fake {target}"
+    elif kind == "greenlight":
+        argv = [GREENLIGHT_BIN, target]
+        title = f"greenlight-fake {target}"
+    else:
+        raise ValueError(f"unknown stream kind {kind}")
+    return launcher.GameSession(path, argv=argv, title=title, probe=False,
+                                window_timeout=15)
+
+
 async def game_launch(system, path, args=()):
     async with game_lock:
         if ss["on"]:
@@ -221,6 +247,12 @@ async def game_launch(system, path, args=()):
             await asyncio.to_thread(game["session"].kill)
             game["session"] = None
             game["rom"] = None
+        if system == "stream":
+            sess = await asyncio.to_thread(_stream_session, path)
+            game["session"] = sess
+            game["rom"] = f"stream/{path}"
+            log("stream launched:", game["rom"])
+            return {"running": game["rom"]}
         # CTL-4: re-render configs from the state cache before EVERY launch
         rendered = await asyncio.to_thread(renderer.render, state["bundle"], system)
         log("rendered configs:", rendered)
@@ -274,6 +306,8 @@ async def watchdog_loop():
             if await _recover_if_current(s, hung=False):
                 log("watchdog: game died, frontend refocused")
             silent_since = None
+        elif not s.probe:
+            silent_since = None   # streams have no UDP iface: never "hung"
         elif launcher.probe_responsive():
             silent_since = None
         else:

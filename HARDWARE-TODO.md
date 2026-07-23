@@ -26,3 +26,6 @@ Things that can only be verified on real hardware. Not faked green in the sim.
   (sim null sink needed an anchor stream — A-12).
 - [ ] input.monitor + global hotkey combos on real evdev devices (sim uses a FIFO
   event source per A-13); includes HOME/SCREENSAVER/LIFELINE combo grabs.
+- [ ] M5 real-scale: Sunshine/Apollo on the desktop, real Moonlight pairing, SF6
+  playable at 60fps over Wi-Fi 6E; Greenlight real sign-in + xCloud title
+  (best-effort — document failure mode if Microsoft breaks it).

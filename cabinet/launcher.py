@@ -72,40 +72,49 @@ def focus_frontend():
 
 
 class GameSession:
-    """One running game. Not thread-safe; cabd serializes launches."""
+    """One running game or stream session. Not thread-safe; cabd serializes.
 
-    def __init__(self, rom, extra_args=()):
+    probe=True (emulators): UDP liveness probing + polite UDP QUIT.
+    probe=False (Moonlight/Greenlight streams): no command interface —
+    SIGTERM-first kill, and the watchdog must NOT treat UDP silence as a
+    hang."""
+
+    def __init__(self, rom, extra_args=(), argv=None, title=None, probe=True,
+                 window_timeout=5):
         self.rom = rom
+        self.probe = probe
+        self.title = title or GAME_TITLE_PREFIX
         env = dict(os.environ)
         env["PULSE_PROP_media.role"] = "games"   # audio class tag (spec §5.6)
+        cmd = argv if argv else [RETROARCH_BIN, rom, *extra_args]
         self.proc = subprocess.Popen(
-            [RETROARCH_BIN, rom, *extra_args],
-            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, env=env)
+            cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, env=env)
         self.window = None
-        deadline = time.monotonic() + 5
+        deadline = time.monotonic() + window_timeout
         while time.monotonic() < deadline:
             if self.proc.poll() is not None:
-                raise RuntimeError(f"emulator exited rc={self.proc.returncode} before window")
-            self.window = find_window(GAME_TITLE_PREFIX)
+                raise RuntimeError(f"session exited rc={self.proc.returncode} before window")
+            self.window = find_window(self.title)
             if self.window:
                 break
             time.sleep(0.05)
         if not self.window:
             self.proc.kill()
-            raise RuntimeError("emulator window never appeared")
+            raise RuntimeError("session window never appeared")
         focus_window(self.window)
 
     def alive(self):
-        return self.proc.poll() is None and find_window(GAME_TITLE_PREFIX) is not None
+        return self.proc.poll() is None and find_window(self.title) is not None
 
     def kill(self):
-        """QUIT -> SIGTERM -> SIGKILL escalation; returns when process is gone."""
-        try:
-            s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-            s.sendto(b"QUIT", ("127.0.0.1", UDP_PORT))
-            s.close()
-        except OSError:
-            pass
+        """QUIT (emulators) -> SIGTERM -> SIGKILL; returns when gone."""
+        if self.probe:
+            try:
+                s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+                s.sendto(b"QUIT", ("127.0.0.1", UDP_PORT))
+                s.close()
+            except OSError:
+                pass
         for _ in range(10):                      # <=0.5s for polite exit
             if self.proc.poll() is not None:
                 break
@@ -120,7 +129,7 @@ class GameSession:
         # window teardown is async wrt process death; wait so the next
         # launch can't bind to the dying window
         deadline = time.monotonic() + 1
-        while time.monotonic() < deadline and find_window(GAME_TITLE_PREFIX):
+        while time.monotonic() < deadline and find_window(self.title):
             time.sleep(0.05)
         focus_frontend()
 
