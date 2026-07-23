@@ -672,3 +672,16 @@ fallback" log; crash → flag cleared → self-healed relaunch; suppression hono
 expiry). Regressions: TEST-SCREENSAVER, TEST-M1 PASS.
 
 **Outcome:** GREEN pending fresh soak audit.
+
+---
+
+## Iteration 28 — 2026-07-23 — M3 CERTIFIED (3/3)
+
+**Soak check:** SOAK CLEAN (fresh stack on current images).
+
+**Evidence (bpardmxzr exit 0):** ACCEPT-M3 PASS x3 consecutive — each run: live stream
+852x480 (mpv decoded params), crop margins negative-only, brightness apply 25-47ms with
+screenshot luma 126.6->25.4 and continuous playback, screensaver audio muted, source
+toggling, params CLI round-trip, idle-in/input-out.
+
+**M3 status: DONE** (sim scope; physical 4:3 panel verification in HARDWARE-TODO).
