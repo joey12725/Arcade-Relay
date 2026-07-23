@@ -82,4 +82,16 @@ echo "== 6. frontend death: cabd respawns it =="
 cab pkill -f "/fakes/pegasus" || true
 cab sh -c 'for i in $(seq 1 16); do xdotool search --name pegasus-fake >/dev/null 2>&1 && exit 0; sleep 0.25; done; echo "frontend not respawned within 4s"; exit 1'
 
+echo "== 7. kill -9 cabd mid-game: supervisor respawns, state converges =="
+srv arcadectl games launch --system snes --path /roms/snes/smw.sfc >/dev/null
+wait_running "snes/smw.sfc" 5
+cab pkill -9 -f cabd.py || true
+t=0; until srv arcadectl --json status | grep -q '"online": true'; do
+    t=$((t+1)); [ $t -ge 30 ] && { echo "FAIL: cabd never came back online after kill -9"; exit 1; }; sleep 0.5
+done
+wait_running "" 8    # respawned cabd owns no game; stale state must clear
+cab sh -c 'pgrep -f "[s]mw.sfc" >/dev/null 2>&1' && { echo "FAIL: orphaned game survived cabd crash"; exit 1; } || true
+cab sh -c 'n=$(xdotool search --name pegasus-fake 2>/dev/null | wc -l); [ "$n" -eq 1 ]' \
+    || { echo "FAIL: expected exactly 1 pegasus-fake window after cabd respawn"; exit 1; }
+
 echo "TEST-M1 PASS"

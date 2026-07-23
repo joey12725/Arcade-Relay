@@ -18,9 +18,11 @@ pipewire &
 pipewire-pulse &
 wireplumber &
 
-# cabd under a Restart=always-style supervisor (systemd analog, spec §5.1)
+# cabd under a Restart=always-style supervisor (systemd analog, spec §5.1).
+# `|| true` is load-bearing: set -e is inherited by the subshell, and without
+# it a non-zero cabd exit (any crash/kill) kills the supervisor loop itself.
 (while true; do
-    python3 /cabinet/cabd.py >> /tmp/cabd.log 2>&1
+    python3 /cabinet/cabd.py >> /tmp/cabd.log 2>&1 || true
     echo "cabd exited, respawning" >> /tmp/cabd.log
     sleep 0.5
 done) &

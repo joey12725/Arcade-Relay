@@ -65,6 +65,21 @@ async def game_kill():
         return {"running": None}
 
 
+async def _recover_if_current(s, hung):
+    """Clear/kill s only if it is still the tracked session (race-safe:
+    game_launch may have replaced it between our snapshot and now)."""
+    async with game_lock:
+        if game["session"] is not s:
+            return False
+        if hung:
+            await asyncio.to_thread(s.kill)   # kill() refocuses frontend
+        else:
+            launcher.focus_frontend()
+        game["session"] = None
+        game["rom"] = None
+        return True
+
+
 async def watchdog_loop():
     """EMU-3: dead or hung game -> frontend back within 2s, state cleared."""
     silent_since = None
@@ -73,10 +88,8 @@ async def watchdog_loop():
         if s is None:
             silent_since = None
         elif not s.alive():
-            launcher.focus_frontend()
-            log("watchdog: game died, frontend refocused")
-            game["session"] = None
-            game["rom"] = None
+            if await _recover_if_current(s, hung=False):
+                log("watchdog: game died, frontend refocused")
             silent_since = None
         elif launcher.probe_responsive():
             silent_since = None
@@ -85,10 +98,8 @@ async def watchdog_loop():
             if silent_since is None:
                 silent_since = now
             elif now - silent_since >= launcher.HANG_UNRESPONSIVE_S:
-                log("watchdog: game hung, killing")
-                await asyncio.to_thread(s.kill)
-                game["session"] = None
-                game["rom"] = None
+                if await _recover_if_current(s, hung=True):
+                    log("watchdog: game hung, killed")
                 silent_since = None
         await asyncio.sleep(launcher.WATCHDOG_POLL_S)
 
@@ -101,7 +112,8 @@ async def frontend_loop():
     while True:
         proc = subprocess.Popen([FRONTEND_BIN],
                                 stdout=subprocess.DEVNULL,
-                                stderr=subprocess.DEVNULL)
+                                stderr=subprocess.DEVNULL,
+                                preexec_fn=launcher.die_with_parent())
         log("frontend started, pid", proc.pid)
         while proc.poll() is None:
             await asyncio.sleep(0.5)
@@ -173,6 +185,10 @@ async def main():
     def reset_backoff():
         nonlocal backoff
         backoff = BACKOFF_START
+
+    # post-crash convergence: a previous cabd life may have left an emulator
+    # running with no one tracking it — reality must match our empty state
+    launcher.kill_strays()
 
     asyncio.create_task(frontend_loop())
     asyncio.create_task(watchdog_loop())

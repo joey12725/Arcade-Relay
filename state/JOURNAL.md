@@ -309,3 +309,28 @@ steps, external kill-9 timing).
 - Regressions: TEST-M0 PASS, SIM-TEST PASS, SOAK CLEAN.
 
 **Outcome:** GREEN pending verifier.
+
+---
+
+## Iteration 12 — 2026-07-23 — Verifier FAIL on M1 lifecycle → supervisor + race fixes
+
+**Verifier verdict:** FAIL — tests were green but the adversarial probe (kill -9 cabd
+mid-game) exposed: entrypoint supervisor subshell inherits `set -e`, so any non-zero
+cabd exit KILLED the supervisor → cabinet permanently offline, orphaned game+frontend,
+stale running state forever. Exactly the failure mode this project exists to prevent.
+
+**Fixes (all verifier findings):**
+1. Supervisor: `|| true` on the cabd invocation (load-bearing comment added).
+2. cabd startup: `launcher.kill_strays()` — post-crash reality convergence.
+3. Frontend spawned with PR_SET_PDEATHSIG(SIGTERM) → dies with cabd, no double windows.
+4. Watchdog race: recovery goes through `_recover_if_current()` under game_lock with
+   identity check — can no longer clear/focus over a newly-launched session.
+5. GameSession.kill() waits <=1s for window teardown → next launch can't bind the
+   dying window.
+6. test-m1 step 7 (permanent): launch → kill -9 cabd → online again <=15s, stale state
+   cleared, orphan killed, exactly 1 frontend window.
+
+**Evidence:** TEST-M1 PASS 7/7 (kill-9→frontend 514ms external); TEST-M0 PASS;
+SIM-TEST PASS; SOAK CLEAN. (Soak supervisor already safe: cabinet-soak.sh is set -u.)
+
+**Outcome:** GREEN.

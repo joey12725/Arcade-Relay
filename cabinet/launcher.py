@@ -13,8 +13,10 @@ Standalone: `python3 launcher.py selftest` runs the full scenario matrix
 inside the cabinet container (requires DISPLAY + /fakes + a frontend
 window). cabd imports this module once M0 acceptance is certified.
 """
+import ctypes
 import os
 import shutil
+import signal
 import socket
 import subprocess
 import sys
@@ -27,6 +29,19 @@ UDP_PORT = int(os.environ.get("RETROARCH_UDP_PORT", "55355"))
 WATCHDOG_POLL_S = 0.25
 RECOVERY_BUDGET_S = 2.0
 HANG_UNRESPONSIVE_S = 2.0   # UDP silence with live window => hung game
+
+
+def die_with_parent(sig=signal.SIGTERM):
+    """preexec_fn: child gets `sig` when its parent (cabd) dies — no orphans."""
+    def _pre():
+        ctypes.CDLL("libc.so.6", use_errno=True).prctl(1, sig)
+    return _pre
+
+
+def kill_strays():
+    """Kill emulator processes from a previous cabd life (post-crash cleanup)."""
+    subprocess.run(["pkill", "-9", "-f", RETROARCH_BIN],
+                   capture_output=True)
 
 
 def _xdotool(*args):
@@ -100,6 +115,11 @@ class GameSession:
             except subprocess.TimeoutExpired:
                 self.proc.kill()
                 self.proc.wait(timeout=2)
+        # window teardown is async wrt process death; wait so the next
+        # launch can't bind to the dying window
+        deadline = time.monotonic() + 1
+        while time.monotonic() < deadline and find_window(GAME_TITLE_PREFIX):
+            time.sleep(0.05)
         focus_frontend()
 
 
