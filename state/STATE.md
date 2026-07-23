@@ -1,16 +1,16 @@
 # STATE
 
-**Updated:** 2026-07-23 iteration 26
+**Updated:** 2026-07-23 iteration 27
 
 ## Current position
 - Milestone: **M-SIM** (simulation rig — prerequisite before M0)
-- Current unit: M3 unit B DONE (928c078: screensaver engine, test-screensaver 7/7;
-  verifier running incl. panscan-negative-control + mpv-kill robustness probe).
-  Verifier F1/F2 from unit A already fixed (timeout, session cache).
-- NEXT: unit C — offline fallback (local clips cache pre-pushed, dim-clock fallback,
-  screensaver survives link cut mid-play or falls back cleanly) + screensaver
-  disable --for + accept-m3 (SCR-1..7 demonstrated + measured 480p + brightness
-  <500ms) x3. Then M4 (ROM pipeline w/ faked ROMDL per A-5).
+- Current unit: accept-m3 3-run chain EXECUTING (bpardmxzr; smoke passed with luma
+  126.6->25.4, 852x480 live stream). Unit C done (fallback clips offline-proven,
+  crash self-heal, disable --for). Soak refreshed onto current images; audit-race
+  fix (mid-write line) applied.
+- NEXT after M3 certification: verifier for units C+accept, then M4 ROM pipeline
+  (faked ROMDL backend per A-5: search/download contract; request->deliver->rescan;
+  roms CLI family; art scrape optional).
 - Iter 12 done: verifier FAIL (supervisor died on cabd crash) -> fixed supervisor,
   kill_strays convergence, frontend pdeathsig, watchdog identity check under lock,
   window-teardown wait; test-m1 step 7 added (kill -9 cabd -> converge). 7/7 green.
@@ -42,7 +42,7 @@
 | M0 | **DONE** (3/3 accept passes: 1.0004/1.0004/1.0006) | 3/3 |
 | M1 | **DONE** (3/3 on strengthened harness; 3600 clean cycles total) | 3/3 |
 | M2 | **DONE** (accept-m2 3/3; wireplumber-zombie reliability fix en route) | 3/3 |
-| M3 | units A+B done; fallback + accept remain | 0/3 |
+| M3 | feature-complete; acceptance chain running | 0/3 |
 | M1–M6 | not started | 0/3 each |
 
 ## Done units
