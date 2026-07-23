@@ -12,9 +12,10 @@ Violation rules (v1, placeholder-heartbeat era — tighten when cabd lands):
 
 Exit 0 = clean, exit 1 = violations found, exit 2 = can't read logs.
 """
-import sys, time, pathlib
+import os, sys, time, pathlib
 
-DATA = pathlib.Path(__file__).resolve().parent.parent / ".data"
+DATA = pathlib.Path(os.environ.get(
+    "SOAK_DATA", pathlib.Path(__file__).resolve().parent.parent / ".data"))
 GAP_MS = 5000        # supervisor must restart heartbeat within 5s of a kill
 RECOVER_MS = 10000   # heartbeats must recover within 10s of partition end
 SLACK_MS = 1500      # in-flight requests around partition edges
@@ -73,7 +74,11 @@ def near_kill(ts):
 violations = []
 prev_ts = hb[0][0]
 for ts, msg in hb[1:]:
-    if ts - prev_ts > GAP_MS and not any(k <= prev_ts + GAP_MS and ts >= k for k in kills):
+    # A gap is excused only if a kill actually falls inside it AND the
+    # heartbeat resumed within the respawn SLA measured from that kill.
+    if ts - prev_ts > GAP_MS and not any(
+            prev_ts - SLACK_MS <= k <= ts and ts <= k + GAP_MS + SLACK_MS
+            for k in kills):
         violations.append(f"V1 gap {ts - prev_ts}ms ending at {ts}")
     prev_ts = ts
 

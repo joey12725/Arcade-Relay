@@ -79,3 +79,24 @@ partition, V3 FAIL outside chaos window, V4 stale). Makefile: soak-up/down/statu
   verdict appended in a follow-up entry when it completes.
 
 **Outcome:** GREEN (audit clean; verification verdict pending, will fix forward if flagged).
+
+---
+
+## Iteration 3b — 2026-07-23 — Verifier verdict + V1 fix
+
+**Verifier verdict on soak unit:** FAIL — V1 (gap w/o respawn) was dead code: the kill
+exemption `k <= prev_ts+GAP and ts >= k` is trivially true for any earlier kill.
+V2/V3/V4 confirmed genuine by executed injections (each exit 1). Timestamps, grace
+windows, and no-test-weakening all confirmed.
+
+**Fix:** V1 exemption now requires the kill to fall inside the gap AND resume within
+kill+GAP+SLACK. Also: SOAK_DATA env override so negative tests are scriptable.
+
+**Evidence:**
+- Injected 8s heartbeat hole ≥15s from every kill (script in journal-referenced
+  commit): `SOAK_DATA=<copy> soak-status.py` → exit 1, "V1 gap 8093ms" (+V2, hole
+  crossed a partition end). Detection works.
+- Live audit after fix: `make soak-status` exit 0 — 1319 heartbeats (84.31% OK),
+  15 partitions, 9 kills, SOAK CLEAN — real kill-respawn gaps correctly excused.
+
+**Outcome:** GREEN (verifier's confirmed bug fixed, negative-tested, live clean).
