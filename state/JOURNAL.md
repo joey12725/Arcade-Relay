@@ -615,3 +615,30 @@ direct-play cannot pass the assertion). 4 findings, all applied:
 **Evidence:** TEST-JELLYFIN PASS x2 consecutive (exit 0, 480px).
 
 **Outcome:** GREEN.
+
+---
+
+## Iteration 26 — 2026-07-23 — M3 unit B: screensaver engine
+
+**Soak check:** SOAK CLEAN.
+
+**Unit:** cabinet/screensaver.py (mpv --fs --panscan=1.0 --keepaspect, JSON IPC w/
+request_id filtering, colorchannelmixer brightness tint, audio class screensaver,
+pdeathsig); cabd: screensaver.on/off/set RPCs, continuous fifo_reader (activity
+tracking, instant screensaver exit on input, feeds input.monitor via ring buffer),
+idle_loop (fetches playlist over the tunnel at idle_seconds), game-launch preemption,
+heartbeat carries screensaver state. New `make test-screensaver`.
+
+**Evidence (TEST-SCREENSAVER PASS, exit 0):**
+- Real Jellyfin 480p transcode streamed via toxiproxy into mpv (window up, status true).
+- SCR-2 crop-to-fill proven by mpv osd-dimensions: margins [-170,-171,0,0] @1024x768 —
+  negative (overflow/crop), never positive (bars). (Initially asserted ==0, corrected:
+  panscan overflow is negative by design.)
+- SCR-7: screensaver audio node muted by policy.
+- SCR-3: brightness 80→30 applied in 32ms via IPC, vf updated, time-pos continuous
+  (2.0→3.0s, no restart); remote path (arcadectl screensaver set --brightness) applied.
+- Input → screensaver gone in 334ms, frontend focused, status false.
+- Idle=3s auto-start; game launch preempts.
+- Regressions: TEST-M1, TEST-AUDIO PASS.
+
+**Outcome:** GREEN pending verifier. Next: unit C (offline fallback clips) + accept-m3.

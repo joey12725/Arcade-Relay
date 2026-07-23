@@ -56,3 +56,6 @@ media:
 
 test-jellyfin:
 	bash sim/scripts/test-jellyfin.sh
+
+test-screensaver:
+	bash sim/scripts/test-screensaver.sh

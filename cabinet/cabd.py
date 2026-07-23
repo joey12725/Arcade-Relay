@@ -25,6 +25,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import audio  # noqa: E402
 import launcher  # noqa: E402
 import renderer  # noqa: E402
+import screensaver  # noqa: E402
 
 WS_URL = os.environ.get("SERVER_WS_URL", "ws://toxiproxy:8666/cab")
 HB = float(os.environ.get("HEARTBEAT_SECONDS", "5"))
@@ -49,19 +50,20 @@ def init_input_fifo():
         log(f"input fifo unavailable: {e}")
 
 
-def read_input_events(seconds):
-    """Drain stale bytes, then collect events for `seconds`."""
-    if _fifo_fd is None:
-        return []
-    while True:   # drain backlog
-        try:
-            if not os.read(_fifo_fd, 65536):
-                break
-        except BlockingIOError:
-            break
-    out, buf = [], ""
-    deadline = time.monotonic() + seconds
-    while time.monotonic() < deadline:
+import collections
+
+events_buf = collections.deque(maxlen=1000)   # (monotonic_ts, line)
+activity = {"last": time.monotonic()}
+
+
+async def fifo_reader():
+    """Continuous input reader: feeds input.monitor, tracks idle activity,
+    and exits the screensaver instantly on any input (spec §5.2 #3)."""
+    buf = ""
+    while True:
+        if _fifo_fd is None:
+            await asyncio.sleep(1)
+            continue
         try:
             chunk = os.read(_fifo_fd, 4096)
         except BlockingIOError:
@@ -69,11 +71,21 @@ def read_input_events(seconds):
         if chunk:
             buf += chunk.decode(errors="replace")
             *lines, buf = buf.split("\n")
-            out.extend(l for l in lines if l)
-        time.sleep(0.05)
-    if buf.strip():
-        out.append(buf.strip())
-    return out
+            got = [l for l in lines if l]
+            if got:
+                now = time.monotonic()
+                activity["last"] = now
+                for l in got:
+                    events_buf.append((now, l))
+                if ss["on"]:
+                    asyncio.create_task(screensaver_off())
+        await asyncio.sleep(0.05)
+
+
+async def monitor_events(seconds):
+    start = time.monotonic()
+    await asyncio.sleep(seconds)
+    return [l for ts, l in events_buf if ts >= start]
 
 # Local state cache (spec §5.2 #7): boots and renders fully offline.
 state = {"bundle": {}}
@@ -107,10 +119,56 @@ def log(*a):
 
 game = {"session": None, "rom": None}
 game_lock = asyncio.Lock()
+ss = {"on": False}
+
+
+async def screensaver_on(playlist, brightness):
+    async with game_lock:   # never fight a game launch for the screen
+        if game["session"] is not None:
+            return {"screensaver": False, "note": "game running"}
+        ok = await asyncio.to_thread(screensaver.start, playlist, brightness)
+        ss["on"] = bool(ok)
+        log(f"screensaver on -> {ss['on']}")
+        return {"screensaver": ss["on"]}
+
+
+async def screensaver_off():
+    if not ss["on"]:
+        return {"screensaver": False}
+    ss["on"] = False
+    await asyncio.to_thread(screensaver.stop)
+    log("screensaver off")
+    return {"screensaver": False}
+
+
+async def idle_loop():
+    """SCR: idle timeout -> screensaver (playlist fetched over the tunnel)."""
+    while True:
+        await asyncio.sleep(0.5)
+        cfg = state["bundle"].get("screensaver.yaml") or {}
+        idle_s = float(cfg.get("idle_seconds", 300))
+        if ss["on"] or game["session"] is not None:
+            continue
+        if time.monotonic() - activity["last"] < idle_s:
+            continue
+        try:
+            tmo = aiohttp.ClientTimeout(total=10)
+            async with aiohttp.ClientSession(timeout=tmo) as s:
+                async with s.get(screensaver.MEDIA_BASE
+                                 + "/screensaver/playlist") as r:
+                    pl = await r.json()
+            if pl.get("playlist"):
+                await screensaver_on(pl["playlist"], pl.get("brightness", 80))
+        except Exception as e:  # noqa: BLE001 — offline fallback is unit C
+            log(f"idle: playlist fetch failed: {e!r}")
+            await asyncio.sleep(5)
 
 
 async def game_launch(system, path, args=()):
     async with game_lock:
+        if ss["on"]:
+            ss["on"] = False
+            await asyncio.to_thread(screensaver.stop, False)
         if game["session"] is not None:
             await asyncio.to_thread(game["session"].kill)
             game["session"] = None
@@ -282,8 +340,18 @@ async def handle_req(ws, data):
             result = {"running": game["rom"]}
         elif method == "input.monitor":
             secs = min(float(params.get("seconds", 2)), 30)
-            events = await asyncio.to_thread(read_input_events, secs)
-            result = {"events": events}
+            result = {"events": await monitor_events(secs)}
+        elif method == "screensaver.on":
+            result = await screensaver_on(params.get("playlist", []),
+                                          params.get("brightness", 80))
+        elif method == "screensaver.off":
+            result = await screensaver_off()
+        elif method == "screensaver.set":
+            if ss["on"]:
+                await asyncio.to_thread(screensaver.set_brightness,
+                                        params["brightness"])
+            result = {"screensaver": ss["on"],
+                      "brightness": params["brightness"]}
         elif method == "state.sync":
             bundle = params["bundle"]
             if not isinstance(bundle, dict):
@@ -313,7 +381,8 @@ async def heartbeat_loop(ws):
     next_t = loop.time()
     while True:
         await ws.send_json({"kind": "event", "event": "heartbeat", "interval": HB,
-                            "state": {"running": game["rom"], "screensaver": False}})
+                            "state": {"running": game["rom"],
+                                      "screensaver": ss["on"]}})
         next_t += HB
         delay = next_t - loop.time()
         if delay < 0:
@@ -359,6 +428,8 @@ async def main():
     asyncio.create_task(frontend_loop())
     asyncio.create_task(watchdog_loop())
     asyncio.create_task(audio_loop())
+    asyncio.create_task(fifo_reader())
+    asyncio.create_task(idle_loop())
 
     async with aiohttp.ClientSession() as sess:
         while True:  # NET-2: reconnect forever

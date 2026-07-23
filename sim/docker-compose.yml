@@ -59,6 +59,7 @@ services:
       CABD_BACKOFF_CAP: "2"       # fast reconnect assertions in sim
       FRONTEND_BIN: /fakes/pegasus
       RETROARCH_BIN: /fakes/retroarch
+      CABD_MEDIA_BASE: http://toxiproxy:8666
     healthcheck:
       # X up AND the full audio stack alive — a dead wireplumber means sets
       # silently no-op, which must fail health, not pass silently
