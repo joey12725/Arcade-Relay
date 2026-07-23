@@ -213,3 +213,20 @@ recreates the container).
 
 **Outcome:** GREEN (manual validation; scripted test + subagent verify after accept run 1).
 Committed as c782ada (journal entry landed one commit later due to a cwd slip).
+
+---
+
+## Iteration 8 — 2026-07-23 — accept-m0 run 1 + heartbeat drift fix
+
+**Evidence:**
+- accept-m0 run 1/3 (pre-fix code): exit 0 — ACCEPT-M0 PASS, delivered=4780/4800
+  ratio=0.99583, router reboot recovered, exec OK.
+- Ratio margin only 0.58pp above floor; root cause = cabd send-then-sleep heartbeat
+  period drift (~0.251s), predicted by the harness verifier. Fixed: absolute-time
+  scheduling in heartbeat_loop (resync-don't-burst on stall). Acceptance series
+  RESTARTED so all 3 passes certify final code (run 1 pre-fix pass discarded).
+- `make test-fakes` → TEST-FAKES PASS (scripted, /fakes mount, cabinet recreated).
+- `make test-m0` → TEST-M0 PASS with drift-fixed cabd.
+- 3-run acceptance chain launched in background.
+
+**Outcome:** GREEN; acceptance passes 0/3 (series restarted on final code).

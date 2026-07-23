@@ -50,10 +50,19 @@ async def handle_req(ws, data):
 
 
 async def heartbeat_loop(ws):
+    # Absolute-time scheduling: send time must not stretch the period, or
+    # delivered-beat counts drift below expectation over long windows.
+    loop = asyncio.get_event_loop()
+    next_t = loop.time()
     while True:
         await ws.send_json({"kind": "event", "event": "heartbeat", "interval": HB,
                             "state": {"running": None, "screensaver": False}})
-        await asyncio.sleep(HB)
+        next_t += HB
+        delay = next_t - loop.time()
+        if delay < 0:
+            next_t = loop.time()  # fell behind (stall); resync, don't burst
+            delay = 0
+        await asyncio.sleep(delay)
 
 
 async def session(sess, on_connect):
