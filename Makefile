@@ -65,3 +65,6 @@ test-fallback:
 
 accept-m3:
 	bash sim/scripts/accept-m3.sh
+
+accept-m4:
+	bash sim/scripts/accept-m4.sh

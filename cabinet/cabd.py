@@ -287,6 +287,31 @@ async def watchdog_loop():
         await asyncio.sleep(launcher.WATCHDOG_POLL_S)
 
 
+async def file_fetch(path, dest, sha256=None):
+    """ROM/media delivery over the tunnel (spec file.*): stream to .part,
+    verify checksum, atomic rename."""
+    import hashlib
+    os.makedirs(os.path.dirname(dest), exist_ok=True)
+    tmo = aiohttp.ClientTimeout(total=None, sock_connect=15, sock_read=120)
+    h = hashlib.sha256()
+    n = 0
+    async with aiohttp.ClientSession(timeout=tmo) as s:
+        async with s.get(screensaver.MEDIA_BASE + path) as r:
+            if r.status != 200:
+                raise RuntimeError(f"fetch {path}: HTTP {r.status}")
+            with open(dest + ".part", "wb") as f:
+                async for chunk in r.content.iter_chunked(65536):
+                    f.write(chunk)
+                    h.update(chunk)
+                    n += len(chunk)
+    if sha256 and h.hexdigest() != sha256:
+        os.unlink(dest + ".part")
+        raise RuntimeError(f"checksum mismatch for {dest}")
+    os.replace(dest + ".part", dest)
+    log(f"file fetched: {dest} ({n} bytes)")
+    return {"dest": dest, "bytes": n, "sha256": h.hexdigest()}
+
+
 async def handle_local(reader, writer):
     """Local control socket (prime directive 1): Pegasus launches games via
     cabd-launch -> this socket, never through the server. One JSON line in,
@@ -412,6 +437,16 @@ async def handle_req(ws, data):
             if secs > 0 and ss["on"]:
                 await screensaver_off()
             result = {"suppressed_for_s": secs}
+        elif method == "file.fetch":
+            result = await file_fetch(params["path"], params["dest"],
+                                      params.get("sha256"))
+        elif method == "library.rescan":
+            # sim frontend has no library; the marker is what test/accept
+            # assert, and real Pegasus gets a real rescan trigger here
+            with open("/tmp/pegasus-rescan", "a") as f:
+                f.write(f"{time.time()}\n")
+            log("library rescan triggered")
+            result = {"rescanned": True}
         elif method == "state.sync":
             bundle = params["bundle"]
             if not isinstance(bundle, dict):

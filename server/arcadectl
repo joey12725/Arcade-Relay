@@ -10,6 +10,7 @@ import json
 import os
 import sys
 import urllib.error
+import urllib.parse
 import urllib.request
 
 BASE = os.environ.get("ARCADED_URL", "http://localhost:8000")
@@ -48,6 +49,15 @@ def main():
     gl.add_argument("--args", default="", help="extra emulator args (space-separated)")
     gsub.add_parser("kill")
     gsub.add_parser("running")
+
+    roms = sub.add_parser("roms")
+    rsub = roms.add_subparsers(dest="romscmd", required=True)
+    rs = rsub.add_parser("search")
+    rs.add_argument("query")
+    rr = rsub.add_parser("request")
+    rr.add_argument("query")
+    rsub.add_parser("queue")
+    rsub.add_parser("status")
 
     ss = sub.add_parser("screensaver")
     sssub = ss.add_subparsers(dest="sscmd", required=True)
@@ -132,6 +142,17 @@ def main():
         else:  # running
             res = {"running": call("GET", "/status")["cabinet_state"].get("running")}
         print(json.dumps(res) if args.as_json else res.get("running") or "nothing")
+        sys.exit(0)
+
+    if args.cmd == "roms":
+        if args.romscmd == "search":
+            res = call("GET", "/roms/search?q=" +
+                       urllib.parse.quote(args.query))
+        elif args.romscmd == "request":
+            res = call("POST", "/roms/request", {"query": args.query})
+        else:
+            res = call("GET", "/roms/status")
+        print(json.dumps(res))
         sys.exit(0)
 
     if args.cmd == "screensaver":

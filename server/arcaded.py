@@ -23,6 +23,7 @@ import yaml
 from aiohttp import WSMsgType, web
 
 import jellyfin
+import romdl
 
 RPC_TIMEOUT = float(os.environ.get("ARCADED_RPC_TIMEOUT", "15"))
 MISSED_BEATS_OFFLINE = 3  # spec §5.2: offline after 3 missed heartbeats
@@ -444,6 +445,80 @@ async def screensaver_cmd(request):
     return web.json_response(res["result"])
 
 
+# --------------------------------------------------------------- ROM queue
+
+rom_queue = []       # [{id, title, status, detail}]
+rom_lock = asyncio.Lock()
+
+
+def _queue_entry(rid):
+    return next((e for e in rom_queue if e["id"] == rid), None)
+
+
+async def rom_worker(entry):
+    """request -> download (ROMDL) -> deliver over the tunnel -> rescan."""
+    try:
+        entry["status"] = "downloading"
+        files = await asyncio.to_thread(romdl.download, entry["id"])
+        entry["status"] = "delivering"
+        dest = f"/roms/{files['system']}/{files['filename']}"
+        res = await hub.rpc("file.fetch", {
+            "path": f"/roms/files/{files['filename']}",
+            "dest": dest, "sha256": files["sha256"]})
+        if not res.get("ok"):
+            raise RuntimeError(res.get("error", "delivery failed"))
+        art = await hub.rpc("file.fetch", {
+            "path": f"/roms/files/{files['filename']}.png",
+            "dest": f"/roms/art/{files['filename']}.png"})
+        if not art.get("ok"):
+            raise RuntimeError("art delivery failed")
+        rescan = await hub.rpc("library.rescan", {})
+        if not rescan.get("ok"):
+            raise RuntimeError("rescan failed")
+        entry["status"] = "ready"
+        entry["detail"] = dest
+        hub.log_event(f"ROM ready: {entry['title']} at {dest}")
+    except Exception as e:  # noqa: BLE001
+        entry["status"] = "error"
+        entry["detail"] = repr(e)
+        hub.log_event(f"ROM failed: {entry['title']}: {e!r}")
+
+
+async def roms_search(request):
+    q = request.query.get("q", "")
+    return web.json_response(await asyncio.to_thread(romdl.search, q))
+
+
+async def roms_request(request):
+    body = await request.json()
+    cands = await asyncio.to_thread(romdl.search, body["query"])
+    if not cands:
+        return web.json_response({"error": "no match"}, status=404)
+    cand = cands[0]
+    async with rom_lock:
+        entry = _queue_entry(cand["id"])
+        if entry is None or entry["status"] == "error":
+            if entry:
+                rom_queue.remove(entry)
+            entry = {"id": cand["id"], "title": cand["title"],
+                     "status": "queued", "detail": ""}
+            rom_queue.append(entry)
+            asyncio.get_event_loop().create_task(rom_worker(entry))
+    return web.json_response(entry)
+
+
+async def roms_status(request):
+    return web.json_response({"queue": rom_queue})
+
+
+async def roms_file(request):
+    fname = request.match_info["fname"]
+    path = os.path.join(romdl.STAGING, os.path.basename(fname))
+    if not os.path.exists(path):
+        raise web.HTTPNotFound(text=f"no staged file {fname}")
+    return web.FileResponse(path)
+
+
 AUDIO_REL = "audio.yaml"
 
 
@@ -551,6 +626,10 @@ app.add_routes([
     web.post("/screensaver/disable", screensaver_disable),
     web.post("/screensaver/{action}", screensaver_cmd),
     web.get("/media/{video_id}", media_proxy),
+    web.get("/roms/search", roms_search),
+    web.post("/roms/request", roms_request),
+    web.get("/roms/status", roms_status),
+    web.get("/roms/files/{fname}", roms_file),
     web.get("/volume", volume_get),
     web.post("/volume/set", volume_set),
     web.get("/favorites", favorites_list),
