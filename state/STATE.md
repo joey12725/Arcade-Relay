@@ -1,10 +1,10 @@
 # STATE
 
-**Updated:** 2026-07-23 iteration 3
+**Updated:** 2026-07-23 iteration 3b
 
 ## Current position
 - Milestone: **M-SIM** (simulation rig — prerequisite before M0)
-- Current unit: soak verification verdict pending; next unit = M0 arcaded/cabd skeleton
+- Current unit: M0 skeleton (arcaded + cabd + WS link) — next iteration
 - Consecutive failures on current unit: 0
 - NOTE: loop is now self-paced (user request: continuous, iterations chained
   back-to-back; 60s wakeup between turns — scheduler minimum).
@@ -24,7 +24,7 @@
 ## Milestone status
 | Milestone | Status | accept passes |
 |-----------|--------|---------------|
-| M-SIM | done pending verifier verdict | – |
+| M-SIM | **DONE** (rig + soak verified; V1 auditor bug found & fixed) | – |
 | M0–M6 | not started | 0/3 each |
 
 ## Done units

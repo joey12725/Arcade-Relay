@@ -1,17 +1,17 @@
 # NIGHTLY REPORT
 
-**As of:** 2026-07-23, iteration 2
+**As of:** 2026-07-23, iteration 3b
 
 ## TL;DR
-Sim rig up and green: 4-container Docker stack (toxiproxy-isolated cabinet with real Xvfb/mpv/PipeWire, real Jellyfin). `make sim-test` passes with chaos assertions.
-Next: soak stack (chaos driver, `make soak-up`/`soak-status`), then M0.
+M-SIM DONE: sim rig green AND detached soak stack running (4Hz heartbeats, random partitions + kill -9s, violation auditor). Adversarial verification caught a dead violation rule (V1); fixed and negative-tested.
+Next: M0 — arcaded/cabd skeleton over the toxiproxy link, `arcadectl status`.
 
 ## Milestones
-- M-SIM: in progress (1 unit done: rig skeleton green; soak stack remains)
+- M-SIM: DONE (rig + soak, subagent-verified)
 - M0–M6: not started
 
 ## Soak
-Not running yet — next unit.
+RUNNING (arcade-soak): last audit SOAK CLEAN — 1319 heartbeats, 84% OK (all FAILs inside chaos windows), 15 partitions, 9 kill -9s, zero violations.
 
 ## Blockers / risks
 None. Docker + Compose confirmed working in this environment.
