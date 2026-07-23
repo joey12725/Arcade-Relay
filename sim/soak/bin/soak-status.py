@@ -9,6 +9,9 @@ Violation rules (v1, placeholder-heartbeat era — tighten when cabd lands):
   V3  spontaneous failure: any FAIL not inside a partition window
       (+/- slack) and not within RECOVER_MS after one.
   V4  liveness: newest heartbeat line older than STALE_MS.
+  V5  server view: poller sample OFFLINE/POLLERR outside any partition
+      window and not within CABD_GRACE_MS after a cabd kill -9 (cabd must
+      reconnect fast enough that arcaded never reports the cabinet down).
 
 Exit 0 = clean, exit 1 = violations found, exit 2 = can't read logs.
 """
@@ -20,6 +23,8 @@ GAP_MS = 5000        # supervisor must restart heartbeat within 5s of a kill
 RECOVER_MS = 10000   # heartbeats must recover within 10s of partition end
 SLACK_MS = 1500      # in-flight requests around partition edges
 STALE_MS = 15000
+CABD_GRACE_MS = 8000  # cabd kill -> respawn (0.2s) + reconnect (backoff cap 2s)
+                      # + offline threshold (3*0.25s) + margin
 
 def read(name):
     p = DATA / name
@@ -52,7 +57,8 @@ if not hb:
     sys.exit(2)
 
 partitions = []   # (start_ms, end_ms)
-kills = []
+kills = []        # heartbeat.sh kills (V1/V3 exemptions)
+cabd_kills = []   # cabd kills (V5 exemptions)
 start = None
 for ts, msg in chaos:
     if msg.startswith("PARTITION-START"):
@@ -60,6 +66,8 @@ for ts, msg in chaos:
     elif msg.startswith("PARTITION-END") and start is not None:
         partitions.append((start, ts))
         start = None
+    elif msg.startswith("KILL9 cabd"):
+        cabd_kills.append(ts)
     elif msg.startswith("KILL9"):
         kills.append(ts)
 if start is not None:
@@ -94,6 +102,25 @@ for s, e in partitions:
 age = time.time() * 1000 - hb[-1][0]
 if age > STALE_MS:
     violations.append(f"V4 heartbeat stale: last line {int(age)}ms old")
+
+# V5: arcaded's own view of the cabinet, sampled by poller.py
+status = read("status.log")
+status = [(ts, m) for ts, m in status if ts >= ready + BOOT_GRACE_MS]
+if not status:
+    print("soak-status: status.log empty/pre-ready — poller not running?",
+          file=sys.stderr)
+    sys.exit(2)
+
+def near_cabd_kill(ts):
+    return any(k - SLACK_MS <= ts <= k + CABD_GRACE_MS for k in cabd_kills)
+
+for ts, m in status:
+    if m != "ONLINE" and not in_partition(ts) and not near_cabd_kill(ts):
+        violations.append(f"V5 server saw {m} outside chaos window at {ts}")
+
+sage = time.time() * 1000 - status[-1][0]
+if sage > STALE_MS:
+    violations.append(f"V4 status.log stale: last line {int(sage)}ms old")
 
 ok = sum(1 for _, m in hb if m == "OK")
 fail = sum(1 for _, m in hb if m == "FAIL")

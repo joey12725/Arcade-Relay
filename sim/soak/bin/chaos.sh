@@ -37,7 +37,12 @@ while true; do
         $TP toggle cab_link >/dev/null 2>&1
         echo "$(now_ms) PARTITION-END" >> "$LOG"
     else
-        echo "$(now_ms) KILL9 heartbeat" >> "$LOG"
-        docker exec soak-cabinet pkill -9 -f heartbeat.sh >/dev/null 2>&1
+        if [ "$(rand 0 1)" -eq 0 ]; then
+            echo "$(now_ms) KILL9 heartbeat" >> "$LOG"
+            docker exec soak-cabinet pkill -9 -f heartbeat.sh >/dev/null 2>&1
+        else
+            echo "$(now_ms) KILL9 cabd" >> "$LOG"
+            docker exec soak-cabinet pkill -9 -f cabd.py >/dev/null 2>&1
+        fi
     fi
 done

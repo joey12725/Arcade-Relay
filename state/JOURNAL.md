@@ -165,3 +165,25 @@ delivered-beats counter to /status.
 - Full run 1/3 (1200s window) launched in background; result in next entry.
 
 **Outcome:** GREEN (harness); acceptance passes 0/3 so far.
+
+---
+
+## Iteration 6 — 2026-07-23 — Soak migrated to real daemons + V5 rule
+
+**Context:** accept-m0 run 1/3 (1200s) executing in background; accept-m0 harness
+verifier returned PASS (design honest; minor findings: HB duplication, ratio >1
+cosmetic — deferred until run 1 finishes since editing a script bash is executing
+corrupts it).
+
+**Unit:** Soak stack now runs the real product: soak-server = arcaded (build
+server/), soak-cabinet runs real cabd (supervised, SERVER_WS_URL via toxiproxy,
+hb 0.25s, backoff cap 2s) alongside the HTTP prober; chaos now kill -9s cabd too
+(50/50 vs heartbeat.sh); new soak-poller samples arcaded /status every 0.5s to
+status.log; soak-status.py gains V5 (server saw OFFLINE/POLLERR outside partition
+windows and beyond 8s cabd-kill grace) + status.log staleness under V4.
+
+**Evidence:**
+- `make soak-up` → all 6 containers healthy (exit 0).
+- 120s chaos audit running in background (bc55j798b); result in next entry.
+
+**Outcome:** stack green at bring-up; audit pending.
