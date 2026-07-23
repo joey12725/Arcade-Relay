@@ -1,0 +1,78 @@
+#!/usr/bin/env python3
+"""Fake RetroArch (ASSUMPTIONS A-8): real X window, fake emulator.
+
+Mimics the surfaces cabd relies on (spec §5.4):
+  - opens a genuine X11 window on $DISPLAY (via mpv testsrc) titled
+    "retroarch-fake <rom>", so watchdog/focus logic sees real windows
+  - listens on the RetroArch network command interface (UDP 55355):
+    QUIT exits cleanly, PAUSE_TOGGLE is acked and logged
+  - exits on SIGTERM/SIGINT like the real thing
+  - --crash-after N / --hang-after N flags let tests inject misbehavior
+    (process death, unresponsive window) for EMU-3 watchdog assertions
+
+Usage: retroarch <rom-path> [--crash-after N] [--hang-after N]
+"""
+import argparse
+import os
+import signal
+import socket
+import subprocess
+import sys
+import time
+
+UDP_PORT = int(os.environ.get("RETROARCH_UDP_PORT", "55355"))
+
+
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("rom")
+    ap.add_argument("--crash-after", type=float, default=None)
+    ap.add_argument("--hang-after", type=float, default=None)
+    args = ap.parse_args()
+
+    title = f"retroarch-fake {os.path.basename(args.rom)}"
+    mpv = subprocess.Popen(
+        ["mpv", "--no-config", "--vo=x11", "--loop=inf", "--really-quiet",
+         f"--title={title}", "av://lavfi:testsrc"],
+        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+    def bail(*_):
+        mpv.terminate()
+        sys.exit(0)
+
+    signal.signal(signal.SIGTERM, bail)
+    signal.signal(signal.SIGINT, bail)
+
+    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    sock.bind(("127.0.0.1", UDP_PORT))
+    sock.settimeout(0.25)
+
+    start = time.monotonic()
+    paused = False
+    while True:
+        if args.crash_after and time.monotonic() - start > args.crash_after:
+            mpv.kill()
+            os._exit(70)  # simulated emulator crash
+        if args.hang_after and time.monotonic() - start > args.hang_after:
+            sock.close()  # stop answering UDP but keep window: a hang
+            while True:
+                time.sleep(3600)
+        try:
+            data, addr = sock.recvfrom(1024)
+        except socket.timeout:
+            if mpv.poll() is not None:
+                sys.exit(1)  # window process died under us
+            continue
+        cmd = data.decode(errors="replace").strip()
+        if cmd == "QUIT":
+            bail()
+        elif cmd == "PAUSE_TOGGLE":
+            paused = not paused
+            sock.sendto(b"PAUSE_TOGGLE ack\n", addr)
+        elif cmd == "GET_STATUS":
+            state = "PAUSED" if paused else "PLAYING"
+            sock.sendto(f"GET_STATUS {state} {args.rom}\n".encode(), addr)
+
+
+if __name__ == "__main__":
+    main()

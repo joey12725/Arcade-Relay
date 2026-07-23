@@ -48,6 +48,7 @@ services:
     networks: [cabnet]
     volumes:
       - ../cabinet:/cabinet:ro
+      - ./fakes:/fakes:ro
     environment:
       SERVER_WS_URL: ws://toxiproxy:8666/cab
       HEARTBEAT_SECONDS: "0.25"   # ~20x accelerated (ASSUMPTIONS A-7)

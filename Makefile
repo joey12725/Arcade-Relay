@@ -15,6 +15,9 @@ test-m0:
 accept-m0:
 	bash sim/scripts/accept-m0.sh
 
+test-fakes:
+	bash sim/scripts/test-fakes.sh
+
 soak-up:
 	cd sim/soak && docker compose up -d --build --wait --wait-timeout 300
 
