@@ -1,12 +1,12 @@
 # STATE
 
-**Updated:** 2026-07-23 iteration 4b
+**Updated:** 2026-07-23 iteration 5
 
 ## Current position
 - Milestone: **M-SIM** (simulation rig — prerequisite before M0)
-- Current unit: accept-m0 (next iteration) — accelerated 24h-equivalent heartbeat
-  delivery >=99% under chaos + router-reboot (proxy restart) reconnect; needs
-  delivered-beat counters on arcaded. Then: migrate soak cabinet to real cabd.
+- Current unit: accept-m0 runs — harness committed (4700f46), smoke PASS; full run
+  1/3 (1200s window) in background + design verifier subagent running. Next: collect
+  run 1, runs 2-3, then migrate soak cabinet to real cabd.
 - Consecutive failures on current unit: 0
 - NOTE: loop is now self-paced (user request: continuous, iterations chained
   back-to-back; 60s wakeup between turns — scheduler minimum).
@@ -27,7 +27,7 @@
 | Milestone | Status | accept passes |
 |-----------|--------|---------------|
 | M-SIM | **DONE** (rig + soak verified; V1 auditor bug found & fixed) | – |
-| M0 | in progress (skeleton verified PASS + hardened; accept-m0 pending) | 0/3 |
+| M0 | in progress (harness done, smoke PASS; full run 1/3 executing) | 0/3 |
 | M1–M6 | not started | 0/3 each |
 
 ## Done units
