@@ -438,3 +438,15 @@ final code.
 - Certification chain on FINAL harness launched (bagisy5yr); M1 counts only these runs.
 
 **Outcome:** GREEN; M1 certification 0/3 on final harness (rehearsal evidence recorded).
+
+---
+
+## Iteration 18 — 2026-07-23 — M1 CERTIFIED (3/3 on final harness)
+
+**Evidence (bagisy5yr exit 0):** ACCEPT-M1 PASS x3 consecutive on the F4-strengthened
+harness — 600 cycles/run (100 x 6 systems), retroarch.cfg + <system>.rmp cleanliness
+asserted every cycle incl. forced scrambles, 5/5 kill-9 recoveries <2s per run.
+Combined with rehearsal: 3600 consecutive clean cycles today.
+
+**M1 status: DONE** (sim scope; UI-4 audit, real theme, real-duration cycles ledgered
+in HARDWARE-TODO.md per A-10).
