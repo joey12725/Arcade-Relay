@@ -1,15 +1,15 @@
 # STATE
 
-**Updated:** 2026-07-23 iteration 14
+**Updated:** 2026-07-23 iteration 15
 
 ## Current position
 - Milestone: **M-SIM** (simulation rig — prerequisite before M0)
-- Current unit: local launch surface DONE (8569fdc, test-local green, verifier
-  running). NEXT = favorites (state/library/favorites.yaml + arcadectl favorites
-  add/remove/list, server-authoritative w/ git commit per change) + accept-m1
-  harness (per system: 100 launch->0.5s->exit cycles, zero hangs, zero drift —
-  verify rendered configs each cycle; plus kill -9 recovery <2s assertions), then
-  the 3-run chain. While verifier runs, write code but don't run make targets.
+- Current unit: accept-m1 3-run chain EXECUTING in background (100 cycles x 6
+  systems per run + 5x kill-9 recovery; smoke passed 18/18). Static verifier
+  reviewing harness+favorites design concurrently.
+- CONSTRAINT: no conflicting make targets against arcade-sim until chain done.
+- After M1 certification: M2 (audio classes on real PipeWire, presets, controls
+  monitor, state rollback).
 - Iter 12 done: verifier FAIL (supervisor died on cabd crash) -> fixed supervisor,
   kill_strays convergence, frontend pdeathsig, watchdog identity check under lock,
   window-teardown wait; test-m1 step 7 added (kill -9 cabd -> converge). 7/7 green.
@@ -39,7 +39,7 @@
 |-----------|--------|---------------|
 | M-SIM | **DONE** (rig + soak verified; V1 auditor bug found & fixed) | – |
 | M0 | **DONE** (3/3 accept passes: 1.0004/1.0004/1.0006) | 3/3 |
-| M1 | lifecycle integrated end-to-end (test-m1 green); config rendering + favorites + accept remain | 0/3 |
+| M1 | all units done (lifecycle, rendering, local launch, favorites); acceptance chain running | 0/3 |
 | M1–M6 | not started | 0/3 each |
 
 ## Done units

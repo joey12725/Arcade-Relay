@@ -1,14 +1,14 @@
 # NIGHTLY REPORT
 
-**As of:** 2026-07-23, iteration 11b
+**As of:** 2026-07-23, iteration 15
 
 ## TL;DR
-M0 CERTIFIED: accept-m0 passed 3/3 consecutive (delivery ratios 1.0004/1.0004/1.0006 + router-reboot recovery each run). M1 lifecycle live end-to-end: arcadectl games launch/kill -> cabd -> launcher; watchdog recovers kill -9 (668ms external clock) AND hangs; cabd supervises the frontend. TEST-M1/M0/SIM + soak all green. Remaining M1: config rendering from state repo, favorites, accept-m1 x3.
+M0 CERTIFIED (3/3). M1 feature-complete and acceptance chain running: remote+LOCAL game lifecycle (launches work with the network cut — proven), config-as-code rendering stomps drift before every launch, favorites are git-committed server-side and sync to the cabinet, watchdog recovers deaths AND hangs, cabd survives kill -9 (a verifier caught the supervisor dying with it — fixed). Smoke: 18/18 cycles, recoveries <500ms.
 
 ## Milestones
 - M-SIM: DONE (rig + soak, subagent-verified)
 - M0: DONE (3/3 certified)
-- M1: lifecycle integrated (test-m1 6/6); config rendering + favorites + accept-m1 remain
+- M1: feature-complete; accept-m1 3-run chain executing
 - M0–M6: not started
 
 ## Soak
