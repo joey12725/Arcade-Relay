@@ -52,3 +52,30 @@ physically cannot bypass chaos injection.
 - Re-run after tightening: `SIM-TEST PASS`, latency 689ms (exit 0).
 
 **Outcome:** GREEN.
+
+---
+
+## Iteration 3 — 2026-07-23 — M-SIM: detached soak stack
+
+**Unit:** `sim/soak/`: standalone compose project (arcade-soak: toxiproxy, server,
+cabinet, chaos driver w/ docker.sock), supervised 4Hz heartbeat (~20x accel, A-7),
+chaos.sh (random 5-20s cadence: partitions 2-8s via toxiproxy toggle, kill -9 of
+heartbeat), soak-status.py violation audit (V1 gap/no-respawn, V2 no-recovery after
+partition, V3 FAIL outside chaos window, V4 stale). Makefile: soak-up/down/status.
+
+**Soak check (rule):** stack didn't exist before this unit — N/A.
+
+**Evidence:**
+- Bugs found & fixed during bring-up: busybox date lacks %3N → chaos.log was in
+  seconds (fixed: now_ms = %s*1000); busybox lacks %N → awk rand() seed was constant
+  (fixed: counter+pid seed); FAILs logged just after READY were pre-proxy attempts
+  stamped at curl completion (fixed: BOOT_GRACE_MS=3000).
+- First audit attempt (90s, raced restart): correctly flagged V3s from pre-grace data
+  — checker detects violations.
+- Final audit after 120s of chaos: `make soak-status` exit 0 —
+  "heartbeats: 467 (86.51% OK), partitions: 5, kills: 4, SOAK CLEAN".
+  All FAILs inside chaos windows; supervisor respawned heartbeat after all 4 kill -9s.
+- Subagent verification: launched (adversarial fake-violation injection included);
+  verdict appended in a follow-up entry when it completes.
+
+**Outcome:** GREEN (audit clean; verification verdict pending, will fix forward if flagged).

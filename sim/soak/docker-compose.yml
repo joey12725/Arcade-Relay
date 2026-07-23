@@ -1,0 +1,64 @@
+name: arcade-soak
+
+# Detached soak stack (ROADMAP M-SIM): same topology as the sim rig, but with
+# an accelerated heartbeat (4 Hz) and a chaos driver injecting random
+# partitions and kill -9s, forever. `make soak-status` audits the logs for
+# reliability violations. Jellyfin is omitted — soak targets the control link.
+#
+# Until cabd exists (M0), the heartbeat is a supervised placeholder loop in
+# the cabinet container; the harness and violation rules are the deliverable.
+
+services:
+  toxiproxy:
+    image: ghcr.io/shopify/toxiproxy:2.12.0
+    container_name: soak-toxiproxy
+    networks: [cabnet, srvnet]
+    healthcheck:
+      test: ["CMD", "/toxiproxy-cli", "list"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  server:
+    image: python:3.12-slim
+    container_name: soak-server
+    command: python -m http.server 8000
+    networks: [srvnet]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request as u; u.urlopen('http://localhost:8000/', timeout=2)"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  cabinet:
+    build: ../cabinet
+    container_name: soak-cabinet
+    entrypoint: ["/bin/sh", "/soak-bin/cabinet-soak.sh"]
+    networks: [cabnet]
+    volumes:
+      - ./bin:/soak-bin:ro
+      - ./.data:/soak
+    healthcheck:
+      test: ["CMD", "sh", "-c", "pgrep -f heartbeat.sh >/dev/null"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+      start_period: 10s
+
+  chaos:
+    image: docker:27-cli
+    container_name: soak-chaos
+    entrypoint: ["/bin/sh", "/soak-bin/chaos.sh"]
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./bin:/soak-bin:ro
+      - ./.data:/soak
+    depends_on:
+      toxiproxy:
+        condition: service_healthy
+      cabinet:
+        condition: service_started
+
+networks:
+  cabnet: {}
+  srvnet: {}
