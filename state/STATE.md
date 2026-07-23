@@ -1,12 +1,12 @@
 # STATE
 
-**Updated:** 2026-07-23 iteration 4
+**Updated:** 2026-07-23 iteration 4b
 
 ## Current position
 - Milestone: **M-SIM** (simulation rig — prerequisite before M0)
-- Current unit: M0 skeleton committed (fb531b5), verifier verdict pending;
-  next unit = accept-m0 (accelerated 24h-equivalent heartbeat delivery + router-reboot
-  reconnect), then migrate soak stack to real cabd heartbeats
+- Current unit: accept-m0 (next iteration) — accelerated 24h-equivalent heartbeat
+  delivery >=99% under chaos + router-reboot (proxy restart) reconnect; needs
+  delivered-beat counters on arcaded. Then: migrate soak cabinet to real cabd.
 - Consecutive failures on current unit: 0
 - NOTE: loop is now self-paced (user request: continuous, iterations chained
   back-to-back; 60s wakeup between turns — scheduler minimum).
@@ -27,7 +27,7 @@
 | Milestone | Status | accept passes |
 |-----------|--------|---------------|
 | M-SIM | **DONE** (rig + soak verified; V1 auditor bug found & fixed) | – |
-| M0 | in progress (skeleton green: TEST-M0 + SIM-TEST pass) | 0/3 |
+| M0 | in progress (skeleton verified PASS + hardened; accept-m0 pending) | 0/3 |
 | M1–M6 | not started | 0/3 each |
 
 ## Done units

@@ -1,13 +1,14 @@
 # NIGHTLY REPORT
 
-**As of:** 2026-07-23, iteration 3b
+**As of:** 2026-07-23, iteration 4b
 
 ## TL;DR
-M-SIM DONE: sim rig green AND detached soak stack running (4Hz heartbeats, random partitions + kill -9s, violation auditor). Adversarial verification caught a dead violation rule (V1); fixed and negative-tested.
-Next: M0 — arcaded/cabd skeleton over the toxiproxy link, `arcadectl status`.
+M0 skeleton LIVE and verified: real arcaded (WS hub + REST) + cabd (heartbeats, jittered backoff, exec RPC) + arcadectl over the toxiproxy link. test-m0 covers partition, hang (socket-open/heartbeats-blocked), reconnect, exec round-trip. Verifier PASS; 4 hardening fixes applied.
+Next: `make accept-m0` (accelerated 24h-equivalent, >=99% heartbeat delivery, router-reboot recovery), then soak migrates to real cabd.
 
 ## Milestones
 - M-SIM: DONE (rig + soak, subagent-verified)
+- M0: skeleton done + verified; acceptance runs pending (0/3)
 - M0–M6: not started
 
 ## Soak
