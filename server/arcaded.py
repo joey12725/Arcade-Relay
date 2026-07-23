@@ -13,13 +13,26 @@ Protocol (spec §7): JSON messages, req/res + events.
 import asyncio
 import json
 import os
+import pathlib
 import time
 import uuid
 
+import yaml
 from aiohttp import WSMsgType, web
 
 RPC_TIMEOUT = float(os.environ.get("ARCADED_RPC_TIMEOUT", "15"))
 MISSED_BEATS_OFFLINE = 3  # spec §5.2: offline after 3 missed heartbeats
+STATE_DIR = os.environ.get("STATE_DIR", "/state")
+
+
+def build_bundle():
+    """Parse every YAML in the state repo into {relpath: data} (SRV-2)."""
+    bundle = {}
+    root = pathlib.Path(STATE_DIR)
+    if root.is_dir():
+        for p in sorted(root.rglob("*.yaml")):
+            bundle[str(p.relative_to(root))] = yaml.safe_load(p.read_text())
+    return bundle
 
 
 class Hub:
@@ -73,6 +86,14 @@ async def cab_ws(request):
     hub.connects += 1
     hub.last_hb = time.monotonic()
     hub.log_event("cabinet connected")
+
+    async def push_state():
+        try:
+            res = await hub.rpc("state.sync", {"bundle": build_bundle()})
+            hub.log_event(f"state pushed on connect: {res.get('result')}")
+        except web.HTTPException as e:
+            hub.log_event(f"state push on connect failed: {e.reason}")
+    asyncio.get_event_loop().create_task(push_state())
     try:
         async for msg in ws:
             if msg.type != WSMsgType.TEXT:
@@ -141,6 +162,18 @@ async def games_launch(request):
     return web.json_response(res["result"])
 
 
+async def state_bundle(request):
+    return web.json_response(build_bundle())
+
+
+async def state_push(request):
+    res = await hub.rpc("state.sync", {"bundle": build_bundle()})
+    if not res.get("ok"):
+        return web.json_response(res, status=500)
+    hub.log_event("state pushed (manual)")
+    return web.json_response(res["result"])
+
+
 async def games_kill(request):
     res = await hub.rpc("game.kill", {})
     if not res.get("ok"):
@@ -159,6 +192,8 @@ app.add_routes([
     web.post("/cab/exec", cab_exec),
     web.post("/games/launch", games_launch),
     web.post("/games/kill", games_kill),
+    web.get("/state/bundle", state_bundle),
+    web.post("/state/push", state_push),
 ])
 
 if __name__ == "__main__":

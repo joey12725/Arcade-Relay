@@ -334,3 +334,24 @@ stale running state forever. Exactly the failure mode this project exists to pre
 SIM-TEST PASS; SOAK CLEAN. (Soak supervisor already safe: cabinet-soak.sh is set -u.)
 
 **Outcome:** GREEN.
+
+---
+
+## Iteration 13 — 2026-07-23 — M1: config rendering from state repo (CTL-4)
+
+**Soak check:** SOAK CLEAN (exit 0).
+
+**Unit:** State pipeline end-to-end: state/ YAMLs (cabinet.yaml, controllers/global.yaml,
+controllers/systems/{snes,nes}.yaml) → arcaded builds bundle (pyyaml, STATE_DIR mount)
+and pushes state.sync on every cabinet connect (+ POST /state/push, GET /state/bundle,
+arcadectl state push|bundle) → cabd caches bundle atomically at /var/cache/
+arcade-state.json (loads at startup: offline-first) → renderer.py renders
+retroarch.cfg + <system>.rmp atomically before EVERY launch. New `make test-render`.
+
+**Evidence:**
+- TEST-RENDER PASS (exit 0): cache lands on connect; snes render shows a->b remap +
+  stomp header; scrambled files stomped clean on relaunch; offline render (link cut,
+  cabd kill -9 + respawn) works purely from cache; link restored, back online.
+- Regressions: TEST-M1 PASS (7/7), TEST-M0 PASS.
+
+**Outcome:** GREEN pending verifier.

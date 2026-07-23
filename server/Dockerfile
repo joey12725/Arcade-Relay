@@ -1,7 +1,7 @@
 FROM debian:trixie-slim
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-        python3 python3-aiohttp \
+        python3 python3-aiohttp python3-yaml \
     && rm -rf /var/lib/apt/lists/*
 
 COPY arcaded.py /app/arcaded.py

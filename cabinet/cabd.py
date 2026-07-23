@@ -23,12 +23,34 @@ import aiohttp
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import launcher  # noqa: E402
+import renderer  # noqa: E402
 
 WS_URL = os.environ.get("SERVER_WS_URL", "ws://toxiproxy:8666/cab")
 HB = float(os.environ.get("HEARTBEAT_SECONDS", "5"))
 BACKOFF_CAP = float(os.environ.get("CABD_BACKOFF_CAP", "10"))
 BACKOFF_START = 0.5
 FRONTEND_BIN = os.environ.get("FRONTEND_BIN", "/fakes/pegasus")
+STATE_CACHE = os.environ.get("STATE_CACHE", "/var/cache/arcade-state.json")
+
+# Local state cache (spec §5.2 #7): boots and renders fully offline.
+state = {"bundle": {}}
+
+
+def load_state_cache():
+    try:
+        with open(STATE_CACHE) as f:
+            state["bundle"] = json.load(f)
+        return True
+    except (OSError, ValueError):
+        return False
+
+
+def save_state_cache(bundle):
+    os.makedirs(os.path.dirname(STATE_CACHE), exist_ok=True)
+    tmp = STATE_CACHE + ".tmp"
+    with open(tmp, "w") as f:
+        json.dump(bundle, f)
+    os.replace(tmp, STATE_CACHE)
 
 
 def log(*a):
@@ -47,6 +69,9 @@ async def game_launch(system, path, args=()):
             await asyncio.to_thread(game["session"].kill)
             game["session"] = None
             game["rom"] = None
+        # CTL-4: re-render configs from the state cache before EVERY launch
+        rendered = await asyncio.to_thread(renderer.render, state["bundle"], system)
+        log("rendered configs:", rendered)
         sess = await asyncio.to_thread(launcher.GameSession, path, tuple(args))
         game["session"] = sess
         game["rom"] = f"{system}/{os.path.basename(path)}"
@@ -136,6 +161,12 @@ async def handle_req(ws, data):
             result = await game_kill()
         elif method == "game.running":
             result = {"running": game["rom"]}
+        elif method == "state.sync":
+            bundle = params["bundle"]
+            save_state_cache(bundle)
+            state["bundle"] = bundle
+            result = {"applied": True, "files": len(bundle)}
+            log(f"state synced: {len(bundle)} files cached")
         else:
             await ws.send_json({"id": data.get("id"), "kind": "res", "ok": False,
                                 "error": f"unknown method {method}"})
@@ -189,6 +220,11 @@ async def main():
     # post-crash convergence: a previous cabd life may have left an emulator
     # running with no one tracking it — reality must match our empty state
     launcher.kill_strays()
+
+    if load_state_cache():
+        log(f"state cache loaded: {len(state['bundle'])} files (offline-capable)")
+    else:
+        log("no state cache yet; waiting for first state.sync")
 
     asyncio.create_task(frontend_loop())
     asyncio.create_task(watchdog_loop())

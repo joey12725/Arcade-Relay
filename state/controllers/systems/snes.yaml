@@ -1,0 +1,4 @@
+# SNES layout swaps accept/cancel vs the panel default (spec §5.7 layer 2).
+remap:
+  a: b
+  b: a

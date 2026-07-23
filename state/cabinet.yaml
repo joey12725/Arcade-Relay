@@ -1,0 +1,9 @@
+# Cabinet identity + hardware config (spec §4.1). Server-authoritative.
+systems: [nes, snes, genesis, arcade, gba, psx]   # ASSUMPTIONS A-4 (OQ-3)
+display:
+  width: 1024      # ASSUMPTIONS A-3 (OQ-1)
+  height: 768
+hotkeys:
+  home_combo: "hold:start:2s"
+  screensaver_combo: "hold:select:2s"
+  lifeline_combo: "hold:start+select:5s"

@@ -1,0 +1,8 @@
+# Global scope (spec §5.7 layer 1): physical panel -> logical pad.
+buttons:
+  a: a
+  b: b
+  x: x
+  y: y
+  start: start
+  select: select

@@ -21,6 +21,9 @@ test-fakes:
 test-m1:
 	bash sim/scripts/test-m1.sh
 
+test-render:
+	bash sim/scripts/test-render.sh
+
 soak-up:
 	cd sim/soak && docker compose up -d --build --wait --wait-timeout 300
 

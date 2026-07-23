@@ -49,6 +49,11 @@ def main():
     gsub.add_parser("kill")
     gsub.add_parser("running")
 
+    st = sub.add_parser("state")
+    stsub = st.add_subparsers(dest="statecmd", required=True)
+    stsub.add_parser("push")
+    stsub.add_parser("bundle")
+
     cab = sub.add_parser("cab")
     cabsub = cab.add_subparsers(dest="cabcmd", required=True)
     ex = cabsub.add_parser("exec")
@@ -78,6 +83,14 @@ def main():
         else:  # running
             res = {"running": call("GET", "/status")["cabinet_state"].get("running")}
         print(json.dumps(res) if args.as_json else res.get("running") or "nothing")
+        sys.exit(0)
+
+    if args.cmd == "state":
+        if args.statecmd == "push":
+            res = call("POST", "/state/push")
+        else:
+            res = call("GET", "/state/bundle")
+        print(json.dumps(res))
         sys.exit(0)
 
     if args.cmd == "cab" and args.cabcmd == "exec":
