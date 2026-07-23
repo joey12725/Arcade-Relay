@@ -1,14 +1,14 @@
 # NIGHTLY REPORT
 
-**As of:** 2026-07-23, iteration 10
+**As of:** 2026-07-23, iteration 11b
 
 ## TL;DR
-M0 acceptance in flight: run 1 passed (99.58% delivery + router-reboot recovery); heartbeat drift found and fixed; certified 3-run chain executing now. Soak upgraded: real arcaded/cabd under chaos with server-view auditing (V5) — clean. M1 underway: fake retroarch/pegasus (UDP iface, crash/hang injection, pdeathsig) and the launcher/watchdog module (launch, kill escalation, death AND hang recovery to frontend <2s) — verifier-PASSed.
+M0 CERTIFIED: accept-m0 passed 3/3 consecutive (delivery ratios 1.0004/1.0004/1.0006 + router-reboot recovery each run). M1 lifecycle live end-to-end: arcadectl games launch/kill -> cabd -> launcher; watchdog recovers kill -9 (668ms external clock) AND hangs; cabd supervises the frontend. TEST-M1/M0/SIM + soak all green. Remaining M1: config rendering from state repo, favorites, accept-m1 x3.
 
 ## Milestones
 - M-SIM: DONE (rig + soak, subagent-verified)
-- M0: 3-run acceptance chain executing on drift-fixed cabd
-- M1: fakes + launcher/watchdog done+verified; cabd integration next
+- M0: DONE (3/3 certified)
+- M1: lifecycle integrated (test-m1 6/6); config rendering + favorites + accept-m1 remain
 - M0–M6: not started
 
 ## Soak

@@ -1,14 +1,15 @@
 # STATE
 
-**Updated:** 2026-07-23 iteration 10
+**Updated:** 2026-07-23 iteration 11b
 
 ## Current position
 - Milestone: **M-SIM** (simulation rig — prerequisite before M0)
-- Current unit: accept-m0 3-run chain executing (bm3qlf3ge, ~40min left) on
-  drift-fixed cabd. While it runs: M1 units that don't touch loaded files.
-  Next M1 unit: cabd integration of launcher (game.launch/game.kill RPCs +
-  arcadectl games launch/kill) — AFTER the accept chain finishes.
-  CONSTRAINT while chain runs: exec-only on arcade-sim; don't edit cabd.py/server//sim configs.
+- Current unit: M1 lifecycle integration committed (3b4ee6d), verifier running.
+- Next units (M1 remainder): config rendering from state repo before every launch
+  (retroarch.cfg + remaps from state/, scramble->relaunch->clean test); favorites
+  (state/library/favorites.yaml + arcadectl favorites); then accept-m1 (100
+  launch/exit cycles x 6 systems, kill -9 recovery <2s, zero drift) x3.
+- Real-Pegasus QML theme + UI-4 navigation audit -> HARDWARE-TODO (fake frontend in sim).
 - Consecutive failures on current unit: 0
 - NOTE: loop is now self-paced (user request: continuous, iterations chained
   back-to-back; 60s wakeup between turns — scheduler minimum).
@@ -29,8 +30,8 @@
 | Milestone | Status | accept passes |
 |-----------|--------|---------------|
 | M-SIM | **DONE** (rig + soak verified; V1 auditor bug found & fixed) | – |
-| M0 | acceptance chain running (run 1 pre-fix passed 0.9958; series restarted on drift-fixed cabd) | 0/3 |
-| M1 | early units done: fakes + launcher/watchdog (verified) | 0/3 |
+| M0 | **DONE** (3/3 accept passes: 1.0004/1.0004/1.0006) | 3/3 |
+| M1 | lifecycle integrated end-to-end (test-m1 green); config rendering + favorites + accept remain | 0/3 |
 | M1–M6 | not started | 0/3 each |
 
 ## Done units
