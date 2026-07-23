@@ -1,12 +1,14 @@
 # STATE
 
-**Updated:** 2026-07-23 iteration 5
+**Updated:** 2026-07-23 iteration 10
 
 ## Current position
 - Milestone: **M-SIM** (simulation rig — prerequisite before M0)
-- Current unit: accept-m0 runs — harness committed (4700f46), smoke PASS; full run
-  1/3 (1200s window) in background + design verifier subagent running. Next: collect
-  run 1, runs 2-3, then migrate soak cabinet to real cabd.
+- Current unit: accept-m0 3-run chain executing (bm3qlf3ge, ~40min left) on
+  drift-fixed cabd. While it runs: M1 units that don't touch loaded files.
+  Next M1 unit: cabd integration of launcher (game.launch/game.kill RPCs +
+  arcadectl games launch/kill) — AFTER the accept chain finishes.
+  CONSTRAINT while chain runs: exec-only on arcade-sim; don't edit cabd.py/server//sim configs.
 - Consecutive failures on current unit: 0
 - NOTE: loop is now self-paced (user request: continuous, iterations chained
   back-to-back; 60s wakeup between turns — scheduler minimum).
@@ -27,7 +29,8 @@
 | Milestone | Status | accept passes |
 |-----------|--------|---------------|
 | M-SIM | **DONE** (rig + soak verified; V1 auditor bug found & fixed) | – |
-| M0 | in progress (harness done, smoke PASS; full run 1/3 executing) | 0/3 |
+| M0 | acceptance chain running (run 1 pre-fix passed 0.9958; series restarted on drift-fixed cabd) | 0/3 |
+| M1 | early units done: fakes + launcher/watchdog (verified) | 0/3 |
 | M1–M6 | not started | 0/3 each |
 
 ## Done units
