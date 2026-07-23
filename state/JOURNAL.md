@@ -267,3 +267,20 @@ path returns from kill() with process alive). 3 findings, all fixed:
 **Evidence:** in-container selftest → LAUNCHER-SELFTEST PASS (exit 0), all 5 scenarios.
 
 **Outcome:** GREEN. Accept-m0 3-run chain still executing (bm3qlf3ge).
+
+---
+
+## Iteration 11 — 2026-07-23 — M0 CERTIFIED (3/3 acceptance passes)
+
+**Soak check:** exit 0 — 17841 probes, 199 partitions, SOAK CLEAN.
+
+**Evidence (bm3qlf3ge, `for i in 1 2 3; do make accept-m0; done` exit 0):**
+- Run 1: ACCEPT-M0 PASS delivered=4802/4800 ratio=1.00042
+- Run 2: ACCEPT-M0 PASS delivered=4802/4800 ratio=1.00042
+- Run 3: ACCEPT-M0 PASS delivered=4803/4800 ratio=1.00063
+- Every run includes: offline detection on router reboot, unaided reconnect on a NEW
+  WS connection, exec round-trip. Drift-fixed cabd delivers at theoretical max
+  (ratios >=1.0 vs pre-fix 0.9958).
+
+**M0 status: DONE** (accept-m0 passed 3 consecutive times per loop rules; real-scale
+24h/tunnel/router run remains in HARDWARE-TODO.md per A-9).
