@@ -748,3 +748,19 @@ presets + input monitor, ROM queue — red/blue, same REST API).
 **MILESTONE STATUS: M-SIM, M0, M1, M2, M3, M4, M5, M6 — ALL DONE (3/3 each).**
 Remaining gate for DONE.md: 8h clean soak (current soak epoch started ~07:00Z at the
 iteration-27 refresh onto current images; violations reset the clock per rules).
+
+---
+
+## Iteration 32 — 2026-07-23 — M6 verifier PASS (cold-start round 4) + diagnosability fix
+
+**Verifier verdict:** PASS — accept gate proven non-vacuous (check FAILS after setup
+with no agent action, exit 2; PASSES after the verifier itself did the task cold as
+round 4); skills spot-checks accurate (favorites, monitor, disable --for 10s); 17/18
+UI endpoints 200 (18th = semantic 404 for unknown title); screenshots proven LIVE
+(frontend luma 3.08 vs screensaver 12.98; consecutive shots byte-different).
+
+**Fix applied (verifier nit):** `screensaver on` with zero enabled sources now returns
+a clear 400 ("no enabled screensaver sources — enable one with ...") instead of
+silently no-opping. Verified: arcadectl exits 4 with the message.
+
+**Soak-watch:** epoch 07:08:57Z, gate 15:08:57Z. Clean so far.

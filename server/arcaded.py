@@ -452,6 +452,11 @@ async def screensaver_cmd(request):
         return web.json_response({"error": "on|off"}, status=400)
     if action == "on":
         pl = json.loads((await screensaver_playlist(request)).text)
+        if not pl.get("playlist"):
+            return web.json_response(
+                {"error": "no enabled screensaver sources — enable one with "
+                          "`arcadectl screensaver enable-source <id>`"},
+                status=400)
         res = await hub.rpc("screensaver.on", pl)
     else:
         res = await hub.rpc("screensaver.off", {})
