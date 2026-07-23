@@ -18,8 +18,11 @@ import subprocess
 import time
 import uuid
 
+import aiohttp
 import yaml
 from aiohttp import WSMsgType, web
+
+import jellyfin
 
 RPC_TIMEOUT = float(os.environ.get("ARCADED_RPC_TIMEOUT", "15"))
 MISSED_BEATS_OFFLINE = 3  # spec §5.2: offline after 3 missed heartbeats
@@ -312,6 +315,119 @@ async def state_rollback(request):
     return web.json_response({"rolled_back_to": commit})
 
 
+SCREENSAVER_REL = "screensaver.yaml"
+
+
+def load_screensaver():
+    d = _read_yaml(SCREENSAVER_REL)
+    d.setdefault("idle_seconds", 300)
+    d.setdefault("brightness", 80)
+    d.setdefault("mode", "shuffle_episodes")
+    d.setdefault("sources", [])
+    d.setdefault("fallback", "local_clips")
+    return d
+
+
+async def screensaver_sources(request):
+    """Every series/movie in Jellyfin, merged with enabled flags (SCR-4)."""
+    lib = await jellyfin.items()
+    cfg = load_screensaver()
+    enabled = {s["jellyfin_id"]: s.get("enabled", False)
+               for s in cfg["sources"]}
+    return web.json_response([
+        {**i, "enabled": enabled.get(i["id"], False)} for i in lib])
+
+
+async def screensaver_set_source(request):
+    body = await request.json()
+    sid, enable = body["id"], bool(body["enabled"])
+    cfg = load_screensaver()
+    for s in cfg["sources"]:
+        if s["jellyfin_id"] == sid:
+            s["enabled"] = enable
+            break
+    else:
+        cfg["sources"].append({"jellyfin_id": sid, "enabled": enable})
+    _write_yaml(SCREENSAVER_REL, cfg)
+    git_commit(f"arcadectl: screensaver {'enable' if enable else 'disable'}-source {sid}")
+    push_state_soon()
+    hub.log_event(f"screensaver source {sid} -> {enable}")
+    return web.json_response(cfg)
+
+
+async def screensaver_playlist(request):
+    """Stream URLs (via our /media proxy) for all enabled sources, 480p cap.
+    The cabinet reaches these through the same tunnel path as everything
+    else (SCR-1)."""
+    cfg = load_screensaver()
+    out = []
+    for s in cfg["sources"]:
+        if not s.get("enabled"):
+            continue
+        for vid in await jellyfin.episodes_of(s["jellyfin_id"]):
+            out.append(f"/media/{vid}")
+    return web.json_response({"playlist": out,
+                              "brightness": cfg["brightness"],
+                              "mode": cfg["mode"]})
+
+
+async def media_proxy(request):
+    """Reverse-proxy a transcoded Jellyfin stream so media rides the
+    cabinet<->server link (Cloudflare tunnel in prod, toxiproxy in sim)."""
+    video_id = request.match_info["video_id"]
+    path = await jellyfin.stream_path(video_id)
+    resp = web.StreamResponse()
+    async with aiohttp.ClientSession() as sess:
+        async with sess.get(jellyfin.JF_URL + path) as up:
+            resp.set_status(up.status)
+            if "Content-Type" in up.headers:
+                resp.headers["Content-Type"] = up.headers["Content-Type"]
+            await resp.prepare(request)
+            async for chunk in up.content.iter_chunked(64 * 1024):
+                await resp.write(chunk)
+    await resp.write_eof()
+    return resp
+
+
+async def screensaver_get(request):
+    return web.json_response(load_screensaver())
+
+
+async def screensaver_set(request):
+    body = await request.json()
+    cfg = load_screensaver()
+    changes = []
+    for k in ("brightness", "idle_seconds", "mode", "fallback"):
+        if k in body:
+            cfg[k] = body[k]
+            changes.append(f"{k}={body[k]}")
+    _write_yaml(SCREENSAVER_REL, cfg)
+    git_commit(f"arcadectl: screensaver set {' '.join(changes)}")
+    push_state_soon()
+    # live-adjust a running screensaver (brightness <500ms budget)
+    if "brightness" in body and hub.ws is not None and not hub.ws.closed:
+        try:
+            await hub.rpc("screensaver.set", {"brightness": cfg["brightness"]})
+        except web.HTTPException:
+            pass
+    return web.json_response(cfg)
+
+
+async def screensaver_cmd(request):
+    action = request.match_info["action"]
+    if action not in ("on", "off"):
+        return web.json_response({"error": "on|off"}, status=400)
+    if action == "on":
+        pl = json.loads((await screensaver_playlist(request)).text)
+        res = await hub.rpc("screensaver.on", pl)
+    else:
+        res = await hub.rpc("screensaver.off", {})
+    if not res.get("ok"):
+        return web.json_response(res, status=500)
+    hub.log_event(f"screensaver {action}")
+    return web.json_response(res["result"])
+
+
 AUDIO_REL = "audio.yaml"
 
 
@@ -411,6 +527,13 @@ app.add_routes([
     web.post("/controls/load-preset", controls_load_preset),
     web.post("/controls/map", controls_map),
     web.post("/controls/monitor", controls_monitor),
+    web.get("/screensaver", screensaver_get),
+    web.post("/screensaver/set", screensaver_set),
+    web.get("/screensaver/sources", screensaver_sources),
+    web.post("/screensaver/set-source", screensaver_set_source),
+    web.get("/screensaver/playlist", screensaver_playlist),
+    web.post("/screensaver/{action}", screensaver_cmd),
+    web.get("/media/{video_id}", media_proxy),
     web.get("/volume", volume_get),
     web.post("/volume/set", volume_set),
     web.get("/favorites", favorites_list),

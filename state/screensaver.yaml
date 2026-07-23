@@ -1,0 +1,7 @@
+# Screensaver config (SCR-1..7). Sources are per-Jellyfin-item enable flags;
+# ids are filled in by `arcadectl screensaver enable-source`.
+idle_seconds: 300
+brightness: 80
+mode: shuffle_episodes
+sources: []
+fallback: local_clips

@@ -566,3 +566,32 @@ both applied:
 **Evidence:** ACCEPT-M2 3/3 consecutive on hardened harness (am2c-1..3, exit 0).
 
 **M2 remains DONE (re-certified on final harness).**
+
+---
+
+## Iteration 24 — 2026-07-23 — M3 unit A: Jellyfin adapter + 480p tunnel streaming
+
+**Soak check:** SOAK CLEAN.
+
+**Unit:** sim/scripts/gen-media.sh (deterministic 720p test library: Series A x2 eps,
+Series B x1, Redline movie — gitignored, `make media`); server/jellyfin.py (idempotent
+bootstrap: wizard + arcade user + Shows/Movies libraries; enumeration; episodes_of;
+PlaybackInfo-based 480p transcode); arcaded: /screensaver
+{,/set,/sources,/set-source,/playlist,/on,/off} + /media/<id> reverse proxy so media
+rides the cabinet<->server link (SCR-1); arcadectl screensaver family;
+state/screensaver.yaml seed.
+
+**Bugs found & fixed (all empirical):**
+1. Movie ParentId query: Jellyfin ignores non-folder ParentId and returns the ENTIRE
+   library — playlist had 6 entries instead of 3. episodes_of now type-checks first.
+2. /Videos/<id>/stream.ts ignores maxHeight/height/allowVideoStreamCopy entirely
+   (three variants measured at 720p). Correct path: PlaybackInfo + DeviceProfile with
+   empty DirectPlayProfiles AND BOTH Height+Width codec conditions — Height alone
+   still emitted 720p (scale expr capped at width 1280). Verified: 852x480 output.
+
+**Evidence:** TEST-JELLYFIN PASS (exit 0): enumerated 3 items; enable x2 → playlist 3
+(2 eps + movie); git commits present; cabinet curl through toxiproxy → measured
+height 480px <= 480; disable → playlist 2.
+
+**Outcome:** GREEN pending verifier. Next: unit B (cabinet mpv screensaver engine:
+IPC, panscan, brightness live, idle in/out).

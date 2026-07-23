@@ -7,3 +7,4 @@ node_modules/
 sim/.data/
 soak/.data/
 .pytest_cache/
+sim/media/**/*.mkv

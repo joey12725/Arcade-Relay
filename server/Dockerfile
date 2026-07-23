@@ -5,6 +5,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 COPY arcaded.py /app/arcaded.py
+COPY jellyfin.py /app/jellyfin.py
 COPY arcadectl /usr/local/bin/arcadectl
 COPY entrypoint.sh /entrypoint.sh
 RUN chmod +x /usr/local/bin/arcadectl /entrypoint.sh

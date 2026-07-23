@@ -49,6 +49,18 @@ def main():
     gsub.add_parser("kill")
     gsub.add_parser("running")
 
+    ss = sub.add_parser("screensaver")
+    sssub = ss.add_subparsers(dest="sscmd", required=True)
+    for c in ("status", "sources", "playlist", "on", "off"):
+        sssub.add_parser(c)
+    sset = sssub.add_parser("set")
+    sset.add_argument("--brightness", type=int)
+    sset.add_argument("--idle", type=int, dest="idle_seconds")
+    sset.add_argument("--mode")
+    for c in ("enable-source", "disable-source"):
+        sp = sssub.add_parser(c)
+        sp.add_argument("id")
+
     vol = sub.add_parser("volume")
     vsub = vol.add_subparsers(dest="volcmd", required=True)
     vsub.add_parser("get")
@@ -117,6 +129,28 @@ def main():
         else:  # running
             res = {"running": call("GET", "/status")["cabinet_state"].get("running")}
         print(json.dumps(res) if args.as_json else res.get("running") or "nothing")
+        sys.exit(0)
+
+    if args.cmd == "screensaver":
+        c = args.sscmd
+        if c == "status":
+            res = call("GET", "/screensaver")
+        elif c == "sources":
+            res = call("GET", "/screensaver/sources")
+        elif c == "playlist":
+            res = call("GET", "/screensaver/playlist")
+        elif c in ("on", "off"):
+            res = call("POST", f"/screensaver/{c}")
+        elif c == "set":
+            body = {k: v for k, v in
+                    (("brightness", args.brightness),
+                     ("idle_seconds", args.idle_seconds),
+                     ("mode", args.mode)) if v is not None}
+            res = call("POST", "/screensaver/set", body)
+        else:
+            res = call("POST", "/screensaver/set-source",
+                       {"id": args.id, "enabled": c == "enable-source"})
+        print(json.dumps(res))
         sys.exit(0)
 
     if args.cmd == "volume":

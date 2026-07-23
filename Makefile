@@ -1,4 +1,4 @@
-.PHONY: sim-up sim-down sim-test test-m0 accept-m0 test-fakes test-m1 soak-up soak-down soak-status
+.PHONY: media sim-up sim-down sim-test test-m0 accept-m0 test-fakes test-m1 soak-up soak-down soak-status
 
 sim-up:
 	cd sim && docker compose up -d --build --wait --wait-timeout 300
@@ -50,3 +50,9 @@ soak-down:
 
 soak-status:
 	python3 sim/soak/bin/soak-status.py
+
+media:
+	bash sim/scripts/gen-media.sh
+
+test-jellyfin:
+	bash sim/scripts/test-jellyfin.sh
