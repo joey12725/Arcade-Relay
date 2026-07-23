@@ -74,3 +74,9 @@ accept-m5:
 
 test-m6:
 	bash sim/scripts/test-m6.sh
+
+accept-m6-setup:
+	bash sim/scripts/accept-m6.sh setup
+
+accept-m6-check:
+	bash sim/scripts/accept-m6.sh check

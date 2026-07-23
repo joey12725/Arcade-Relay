@@ -725,3 +725,26 @@ frontend focused + state cleared, greenlight tile launch + remote kill.
 
 **M5 status: DONE** (sim scope; real Sunshine/Moonlight SF6@60fps + real Greenlight
 sign-in ledgered in HARDWARE-TODO).
+
+---
+
+## Iteration 31 — 2026-07-23 — M6 CERTIFIED (3/3 cold-agent rounds) — ALL MILESTONES DONE
+
+**Units:** AGENTS.md/CLAUDE.md onboarding; skills/{screensaver,audio,controllers,roms,
+games,diagnostics}/SKILL.md with worked examples; system.screenshot RPC (ImageMagick,
+real 1024x768 panel PNG via REST + arcadectl cab screenshot); web UI at /ui (dashboard
+w/ live screenshot, audio class toggles, screensaver controls + sources, remapper w/
+presets + input monitor, ROM queue — red/blue, same REST API).
+
+**Evidence:**
+- TEST-M6 PASS (exit 0): UI sections served; PNG 1024x768; CLI screenshot round-trip;
+  docs+skills present; every skill-referenced command parses.
+- ACCEPT-M6 3/3: three INDEPENDENT cold subagents, each given only the repo path +
+  the task sentence (dev-history files off-limits), each navigated CLAUDE.md → skill →
+  arcadectl, each outcome mechanically verified (brightness 80→40, Redline disabled,
+  changes git-committed). Setup reseeded state between rounds.
+- SOAK CLEAN throughout.
+
+**MILESTONE STATUS: M-SIM, M0, M1, M2, M3, M4, M5, M6 — ALL DONE (3/3 each).**
+Remaining gate for DONE.md: 8h clean soak (current soak epoch started ~07:00Z at the
+iteration-27 refresh onto current images; violations reset the clock per rules).

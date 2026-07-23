@@ -3,12 +3,12 @@
 **As of:** 2026-07-23, iteration 29
 
 ## TL;DR
-M0-M5 ALL CERTIFIED (3/3 each). M5: stream tiles (moonlight/greenlight fakes) launch from the Pegasus path, the watchdog correctly never hang-kills probe-less streams, HOME_COMBO exits in ~900ms. M4 verifier proved transfer integrity end-to-end (wrong sha rejected; truncated transfer -> clean error). Remaining: M6 (web UI, skills, agent cold-start test), then 8h clean soak and DONE.
+ALL MILESTONES CERTIFIED (M-SIM, M0-M6; 3/3 acceptance runs each). M6 finale: three independent cold agents, given only the repo and "make the screensaver dimmer and disable Redline", each completed it via CLI from the onboarding docs alone — mechanically verified. Web UI live at /ui with real cabinet screenshots. Now riding out the 8h clean soak; DONE.md follows.
 
 ## Milestones
 - M-SIM: DONE (rig + soak, subagent-verified)
-- M0-M5: DONE (3/3 each)
-- M6 (web UI + skills + agent cold-start acceptance): final milestone, in progress
+- ALL MILESTONES DONE: M-SIM + M0-M6, 3/3 acceptance each
+- Remaining: 8h clean soak -> DONE.md (epoch started ~07:00Z)
 - M0–M6: not started
 
 ## Soak
