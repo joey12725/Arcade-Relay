@@ -48,3 +48,9 @@
   events from a FIFO (/tmp/input-events) in sim — there are no evdev devices in a
   container. On real hardware cabd reads evdev (grabbing combos too); that path is in
   HARDWARE-TODO.md. The RPC surface and CLI are identical either way.
+- **A-14 (accept-m2 mute-observation budget):** The spec's 100ms figure (§5.6) is the
+  ENGINE's reaction budget, verified by direct event-timestamp measurement at 17-27ms
+  (journal iter 20). accept-m2's external observation loop allows 500ms from
+  first-unmuted-observation to muted, covering pactl-subprocess polling overhead —
+  an observation allowance, not an engine budget. The 5s reconcile backstop cannot
+  satisfy the 500ms leg, so acceptance still proves the event path.

@@ -548,3 +548,21 @@ anchor mpv died at boot for the same race.
 
 **M2 status: DONE** (accept-m2 3/3; controller-remap web UI is M6 scope; real evdev
 input per A-13 ledgered).
+
+---
+
+## Iteration 23 — 2026-07-23 — M2 verifier PASS + acceptance hardening + re-cert
+
+**Verifier verdict:** PASS (both suites re-run exit 0; supervision verified live —
+wireplumber killed, new pid <2s, enforcement intact after respawn; healthcheck fails
+when session manager dead; no suite weakening; A-13 honest). Two hardening items,
+both applied:
+1. accept-m2 criterion 2 was partially theater on fresh stacks (vandalism no-op'd via
+   || true when /tmp/rendered absent; intermediate state unasserted). Now: launch +
+   assert a="SCRAMBLED" rendered BEFORE restoring; vandalism unguarded.
+2. A-14 records the 500ms observation allowance vs the engine's measured 17-27ms /
+   spec 100ms budget (reconcile backstop cannot satisfy it).
+
+**Evidence:** ACCEPT-M2 3/3 consecutive on hardened harness (am2c-1..3, exit 0).
+
+**M2 remains DONE (re-certified on final harness).**

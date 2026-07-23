@@ -70,7 +70,13 @@ echo "== criterion 2: preset round-trip =="
 srv arcadectl controls save-preset accept >/dev/null
 srv arcadectl controls map --scope system:snes --set a=SCRAMBLED >/dev/null
 sleep 1
-cab sh -c 'echo "GARBAGE" > /tmp/rendered/snes.rmp 2>/dev/null || true'
+# the scramble must PROVABLY land before we restore: launch and assert the
+# SCRAMBLED mapping actually rendered (also guarantees /tmp/rendered exists)
+cab python3 /cabinet/cabd-launch snes /roms/snes/game.rom >/dev/null
+cab grep -q 'a = "SCRAMBLED"' /tmp/rendered/snes.rmp \
+    || { echo "FAIL: intermediate scramble never rendered"; exit 1; }
+cab python3 /cabinet/cabd-launch kill >/dev/null
+cab sh -c 'echo "GARBAGE" > /tmp/rendered/snes.rmp'
 srv arcadectl controls load-preset accept >/dev/null
 sleep 1
 cab python3 /cabinet/cabd-launch snes /roms/snes/game.rom >/dev/null
