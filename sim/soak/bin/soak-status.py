@@ -36,8 +36,15 @@ def read(name):
     if not p.exists():
         print(f"soak-status: missing {p}", file=sys.stderr)
         sys.exit(2)
+    text = p.read_text()
+    lines = text.splitlines()
+    # the writer may be mid-line: a truncated final line can misclassify an
+    # event (e.g. "KILL9 cab" != "KILL9 cabd" flips an exemption bucket) —
+    # drop it unless the file ends with a clean newline
+    if lines and not text.endswith("\n"):
+        lines = lines[:-1]
     out = []
-    for line in p.read_text().splitlines():
+    for line in lines:
         parts = line.split(None, 1)
         if len(parts) == 2 and parts[0].isdigit():
             out.append((int(parts[0]), parts[1]))

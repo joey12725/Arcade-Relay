@@ -60,6 +60,9 @@ def main():
     for c in ("enable-source", "disable-source"):
         sp = sssub.add_parser(c)
         sp.add_argument("id")
+    sd = sssub.add_parser("disable")
+    sd.add_argument("--for", dest="duration", required=True,
+                    help="e.g. 2h, 30m, 45 (seconds); 0 clears")
 
     vol = sub.add_parser("volume")
     vsub = vol.add_subparsers(dest="volcmd", required=True)
@@ -141,6 +144,11 @@ def main():
             res = call("GET", "/screensaver/playlist")
         elif c in ("on", "off"):
             res = call("POST", f"/screensaver/{c}")
+        elif c == "disable":
+            d = args.duration
+            mult = {"h": 3600, "m": 60, "s": 1}.get(d[-1], None)
+            secs = float(d[:-1]) * mult if mult else float(d)
+            res = call("POST", "/screensaver/disable", {"seconds": secs})
         elif c == "set":
             body = {k: v for k, v in
                     (("brightness", args.brightness),

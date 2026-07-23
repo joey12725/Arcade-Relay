@@ -67,7 +67,12 @@ def start(playlist, brightness):
     global _proc
     stop(refocus=False)
     with open(PLAYLIST_PATH, "w") as f:
-        f.write("\n".join(MEDIA_BASE + p for p in playlist) + "\n")
+        # server-relative paths ride the tunnel; absolute paths are the
+        # local offline clip cache
+        f.write("\n".join(
+            p if p.startswith("/var/") or p.startswith("/tmp/")
+            else MEDIA_BASE + p
+            for p in playlist) + "\n")
     env = dict(os.environ)
     env["PULSE_PROP_media.role"] = "screensaver"
     try:

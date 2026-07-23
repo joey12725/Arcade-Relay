@@ -59,3 +59,6 @@ test-jellyfin:
 
 test-screensaver:
 	bash sim/scripts/test-screensaver.sh
+
+test-fallback:
+	bash sim/scripts/test-fallback.sh

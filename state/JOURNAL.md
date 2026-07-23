@@ -642,3 +642,33 @@ heartbeat carries screensaver state. New `make test-screensaver`.
 - Regressions: TEST-M1, TEST-AUDIO PASS.
 
 **Outcome:** GREEN pending verifier. Next: unit C (offline fallback clips) + accept-m3.
+
+---
+
+## Iteration 27 — 2026-07-23 — M3 unit C + soak audit race fix + soak refresh
+
+**Screensaver verifier verdict (unit B):** PASS — SCR-2 empirically counter-verified
+(panscan=0 yields +96px letterbox margins and FAILS the assertion; panscan=1 yields
+negative overflow). Findings: (1) crashed mpv left ss flag stale forever, no self-heal;
+(2) luma screenshot check → carried to accept-m3.
+
+**Unit C (all fixed/built):**
+- Screensaver crash-watchdog in watchdog_loop (flag cleared, frontend refocused,
+  idle relaunches). 
+- Offline fallback: clips_sync_loop pre-pulls 2 clips over the tunnel to
+  /var/cache/arcade-clips; idle_loop falls back to local clips when the playlist
+  fetch fails (prime directive 6). screensaver.start handles local paths.
+- `arcadectl screensaver disable --for 2h|30m|45s` (suppress_until in cabd).
+
+**SOAK VIOLATION (preempted; resolved as audit race):** V5 OFFLINE at ...435413 was
+1.4s after a KILL9 cabd — legitimately exempt — but the audit read chaos.log mid-write:
+truncated "KILL9 cab" fell into the wrong exemption bucket. Re-run with the complete
+line: CLEAN. Fix: read() drops a final line lacking its newline. Also discovered the
+soak stack ran STALE images (no pactl, pre-screensaver arcaded) → rebuilt from current
+code, fresh 120s audit running (b4a9hweum).
+
+**Evidence:** TEST-FALLBACK PASS (clips cached: 2; offline start via "local clips
+fallback" log; crash → flag cleared → self-healed relaunch; suppression honored +
+expiry). Regressions: TEST-SCREENSAVER, TEST-M1 PASS.
+
+**Outcome:** GREEN pending fresh soak audit.

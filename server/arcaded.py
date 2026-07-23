@@ -420,6 +420,15 @@ async def screensaver_set(request):
     return web.json_response(cfg)
 
 
+async def screensaver_disable(request):
+    body = await request.json()
+    res = await hub.rpc("screensaver.disable", {"seconds": body.get("seconds", 0)})
+    if not res.get("ok"):
+        return web.json_response(res, status=500)
+    hub.log_event(f"screensaver suppressed for {body.get('seconds')}s")
+    return web.json_response(res["result"])
+
+
 async def screensaver_cmd(request):
     action = request.match_info["action"]
     if action not in ("on", "off"):
@@ -539,6 +548,7 @@ app.add_routes([
     web.get("/screensaver/sources", screensaver_sources),
     web.post("/screensaver/set-source", screensaver_set_source),
     web.get("/screensaver/playlist", screensaver_playlist),
+    web.post("/screensaver/disable", screensaver_disable),
     web.post("/screensaver/{action}", screensaver_cmd),
     web.get("/media/{video_id}", media_proxy),
     web.get("/volume", volume_get),

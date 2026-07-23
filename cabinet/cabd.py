@@ -119,7 +119,45 @@ def log(*a):
 
 game = {"session": None, "rom": None}
 game_lock = asyncio.Lock()
-ss = {"on": False}
+ss = {"on": False, "suppress_until": 0.0}
+CLIPS_DIR = os.environ.get("CABD_CLIPS_DIR", "/var/cache/arcade-clips")
+
+
+def local_clips():
+    try:
+        return sorted(os.path.join(CLIPS_DIR, f) for f in os.listdir(CLIPS_DIR)
+                      if f.endswith(".ts") and
+                      os.path.getsize(os.path.join(CLIPS_DIR, f)) > 100_000)
+    except OSError:
+        return []
+
+
+async def clips_sync_loop():
+    """Offline fallback cache (SCR §5.5): keep a couple of 480p clips
+    pre-pulled over the tunnel so the screensaver works with the link cut."""
+    os.makedirs(CLIPS_DIR, exist_ok=True)
+    while True:
+        try:
+            if len(local_clips()) < 2:
+                tmo = aiohttp.ClientTimeout(total=None, sock_connect=10,
+                                            sock_read=60)
+                async with aiohttp.ClientSession(timeout=tmo) as s:
+                    async with s.get(screensaver.MEDIA_BASE
+                                     + "/screensaver/playlist") as r:
+                        pl = (await r.json()).get("playlist", [])
+                    for n, path in enumerate(pl[:2]):
+                        dst = os.path.join(CLIPS_DIR, f"clip-{n}.ts")
+                        if os.path.exists(dst) and os.path.getsize(dst) > 100_000:
+                            continue
+                        async with s.get(screensaver.MEDIA_BASE + path) as up:
+                            with open(dst + ".part", "wb") as f:
+                                async for chunk in up.content.iter_chunked(65536):
+                                    f.write(chunk)
+                        os.replace(dst + ".part", dst)
+                        log(f"clip cached: {dst} ({os.path.getsize(dst)} bytes)")
+        except Exception as e:  # noqa: BLE001
+            log(f"clips sync: {e!r}")
+        await asyncio.sleep(15)
 
 
 async def screensaver_on(playlist, brightness):
@@ -149,6 +187,8 @@ async def idle_loop():
         idle_s = float(cfg.get("idle_seconds", 300))
         if ss["on"] or game["session"] is not None:
             continue
+        if time.monotonic() < ss["suppress_until"]:
+            continue
         if time.monotonic() - activity["last"] < idle_s:
             continue
         try:
@@ -159,9 +199,17 @@ async def idle_loop():
                     pl = await r.json()
             if pl.get("playlist"):
                 await screensaver_on(pl["playlist"], pl.get("brightness", 80))
-        except Exception as e:  # noqa: BLE001 — offline fallback is unit C
-            log(f"idle: playlist fetch failed: {e!r}")
-            await asyncio.sleep(5)
+        except Exception as e:  # noqa: BLE001
+            # graceful degradation (prime directive 6): server unreachable ->
+            # local clip cache; dim clock comes with real hardware polish
+            clips = local_clips()
+            fallback = cfg.get("fallback", "local_clips")
+            if clips and fallback == "local_clips":
+                log(f"idle: server unreachable ({e!r}); local clips fallback")
+                await screensaver_on(clips, cfg.get("brightness", 80))
+            else:
+                log(f"idle: playlist fetch failed: {e!r}; no fallback available")
+                await asyncio.sleep(5)
 
 
 async def game_launch(system, path, args=()):
@@ -210,9 +258,15 @@ async def _recover_if_current(s, hung):
 
 
 async def watchdog_loop():
-    """EMU-3: dead or hung game -> frontend back within 2s, state cleared."""
+    """EMU-3: dead or hung game -> frontend back within 2s, state cleared.
+    Also detects a crashed screensaver (mpv died) so the flag can't go
+    stale and idle_loop can relaunch it."""
     silent_since = None
     while True:
+        if ss["on"] and not screensaver.running():
+            ss["on"] = False
+            launcher.focus_frontend()
+            log("watchdog: screensaver died, flag cleared")
         s = game["session"]
         if s is None:
             silent_since = None
@@ -352,6 +406,12 @@ async def handle_req(ws, data):
                                         params["brightness"])
             result = {"screensaver": ss["on"],
                       "brightness": params["brightness"]}
+        elif method == "screensaver.disable":
+            secs = float(params.get("seconds", 0))
+            ss["suppress_until"] = time.monotonic() + secs
+            if secs > 0 and ss["on"]:
+                await screensaver_off()
+            result = {"suppressed_for_s": secs}
         elif method == "state.sync":
             bundle = params["bundle"]
             if not isinstance(bundle, dict):
@@ -430,6 +490,7 @@ async def main():
     asyncio.create_task(audio_loop())
     asyncio.create_task(fifo_reader())
     asyncio.create_task(idle_loop())
+    asyncio.create_task(clips_sync_loop())
 
     async with aiohttp.ClientSession() as sess:
         while True:  # NET-2: reconnect forever
