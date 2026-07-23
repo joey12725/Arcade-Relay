@@ -6,16 +6,23 @@ This fake gives the sim a genuine frontend window ("pegasus-fake") that cabd
 can locate/raise with xdotool, and that survives games coming and going.
 Exits on SIGTERM. No UI logic — theming is M1 hardware/real-Pegasus work.
 """
+import ctypes
 import os
 import signal
 import subprocess
 import sys
 
+
+def _die_with_parent():
+    ctypes.CDLL("libc.so.6", use_errno=True).prctl(1, signal.SIGKILL)
+
+
 mpv = subprocess.Popen(
     ["mpv", "--no-config", "--vo=x11", "--loop=inf", "--really-quiet",
      "--title=pegasus-fake",
      "av://lavfi:color=c=0x102040"],  # calm blue: visibly 'the frontend'
-    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+    preexec_fn=_die_with_parent)
 
 
 def bail(*_):

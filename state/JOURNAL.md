@@ -248,3 +248,22 @@ poll adds <=0.25s), crash->frontend 0.02s. Exit 0. Committed as 8aec21d.
 Verifier subagent running (exec-only constraint; independently times kill-9->focus).
 
 **Outcome:** GREEN (selftest); external kill->focus timing lands in test-m1/accept-m1.
+
+---
+
+## Iteration 10 — 2026-07-23 — Launcher verifier verdict + hang detection
+
+**Verifier verdict on launcher unit:** PASS (re-ran selftest exit 0; independent external
+measurement death->focus 0.230s; hung QUIT-deaf game killed in 0.54s by escalation; no
+path returns from kill() with process alive). 3 findings, all fixed:
+1. Orphaned mpv windows on wrapper SIGKILL → PR_SET_PDEATHSIG in both fakes
+   (verified: "PDEATHSIG OK: window died with wrapper").
+2. Hangs invisible to watchdog → watch() now probes UDP GET_STATUS each poll;
+   2s of silence with a live window = hung → kill escalation + refocus. New selftest
+   scenario with --hang-after: "hang detected+killed+refocused in 3.28s total".
+3. Timing honesty: kill-9 scenario now measures WALL time from SIGKILL (0.50s incl.
+   detection); labels say detection->frontend where applicable; fe.wait() added.
+
+**Evidence:** in-container selftest → LAUNCHER-SELFTEST PASS (exit 0), all 5 scenarios.
+
+**Outcome:** GREEN. Accept-m0 3-run chain still executing (bm3qlf3ge).

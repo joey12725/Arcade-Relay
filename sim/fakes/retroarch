@@ -13,6 +13,7 @@ Mimics the surfaces cabd relies on (spec §5.4):
 Usage: retroarch <rom-path> [--crash-after N] [--hang-after N]
 """
 import argparse
+import ctypes
 import os
 import signal
 import socket
@@ -21,6 +22,12 @@ import sys
 import time
 
 UDP_PORT = int(os.environ.get("RETROARCH_UDP_PORT", "55355"))
+
+
+def _die_with_parent():
+    # PR_SET_PDEATHSIG: like real RetroArch, the window must not outlive the
+    # process — even on SIGKILL of the wrapper (no orphaned mpv windows).
+    ctypes.CDLL("libc.so.6", use_errno=True).prctl(1, signal.SIGKILL)
 
 
 def main():
@@ -34,7 +41,8 @@ def main():
     mpv = subprocess.Popen(
         ["mpv", "--no-config", "--vo=x11", "--loop=inf", "--really-quiet",
          f"--title={title}", "av://lavfi:testsrc"],
-        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        preexec_fn=_die_with_parent)
 
     def bail(*_):
         mpv.terminate()

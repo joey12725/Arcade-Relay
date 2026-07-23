@@ -26,6 +26,7 @@ GAME_TITLE_PREFIX = "retroarch-fake"
 UDP_PORT = int(os.environ.get("RETROARCH_UDP_PORT", "55355"))
 WATCHDOG_POLL_S = 0.25
 RECOVERY_BUDGET_S = 2.0
+HANG_UNRESPONSIVE_S = 2.0   # UDP silence with live window => hung game
 
 
 def _xdotool(*args):
@@ -102,25 +103,43 @@ class GameSession:
         focus_frontend()
 
 
-def watchdog_once(session):
-    """One poll. Returns 'ok' or 'recovered' (frontend refocused)."""
-    if session.alive():
-        return "ok"
+def probe_responsive(timeout=0.2):
+    """RetroArch-style UDP GET_STATUS liveness probe."""
     try:
-        session.proc.wait(timeout=0)
-    except Exception:  # noqa: BLE001
-        pass
-    focus_frontend()
-    return "recovered"
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.settimeout(timeout)
+        s.sendto(b"GET_STATUS", ("127.0.0.1", UDP_PORT))
+        s.recvfrom(1024)
+        s.close()
+        return True
+    except OSError:
+        return False
 
 
 def watch(session):
-    """Blocking watchdog loop; returns seconds from death to frontend focus."""
+    """Blocking watchdog loop.
+
+    Returns (reason, dt): reason 'died' (process/window gone) or 'hung'
+    (window alive but UDP silent for HANG_UNRESPONSIVE_S — killed by us).
+    dt is detection->frontend-focused time (detection latency itself is
+    bounded by WATCHDOG_POLL_S + probe timeout).
+    """
+    silent_since = None
     while True:
         if not session.alive():
             t0 = time.monotonic()
             focus_frontend()
-            return time.monotonic() - t0
+            return "died", time.monotonic() - t0
+        if probe_responsive():
+            silent_since = None
+        else:
+            now = time.monotonic()
+            if silent_since is None:
+                silent_since = now
+            elif now - silent_since >= HANG_UNRESPONSIVE_S:
+                t0 = time.monotonic()
+                session.kill()   # escalation handles QUIT-deaf processes
+                return "hung", time.monotonic() - t0
         time.sleep(WATCHDOG_POLL_S)
 
 
@@ -159,24 +178,45 @@ def selftest():
 
         print("== kill -9: watchdog refocuses frontend within 2s ==")
         s = GameSession("/roms/snes/smw.sfc")
+        t_kill = time.monotonic()
         s.proc.kill()          # SIGKILL, as chaos would
-        dt = watch(s)          # watchdog notices death, refocuses
+        reason, _ = watch(s)   # watchdog notices death, refocuses
+        wall = time.monotonic() - t_kill
+        _assert(reason == "died", f"expected died, got {reason}")
         _assert(focused_window() == find_window(FRONTEND_TITLE),
                 "frontend not focused after kill -9")
-        _assert(dt < RECOVERY_BUDGET_S, f"recovery took {dt:.2f}s (budget 2s)")
-        print(f"   death->frontend in {dt:.2f}s")
+        _assert(wall < RECOVERY_BUDGET_S, f"kill->focus wall {wall:.2f}s (budget 2s)")
+        print(f"   kill->frontend (incl. detection) in {wall:.2f}s")
 
         print("== self-crash (--crash-after): watchdog recovers ==")
         s = GameSession("/roms/snes/smw.sfc", extra_args=["--crash-after", "0.5"])
-        dt = watch(s)
+        reason, dt = watch(s)
+        _assert(reason == "died", f"expected died, got {reason}")
         _assert(focused_window() == find_window(FRONTEND_TITLE),
                 "frontend not focused after crash")
         _assert(dt < RECOVERY_BUDGET_S, f"crash recovery took {dt:.2f}s (budget 2s)")
-        print(f"   crash->frontend in {dt:.2f}s")
+        print(f"   crash: detection->frontend in {dt:.2f}s")
+
+        print("== hang (--hang-after): UDP-silent game is killed + recovered ==")
+        s = GameSession("/roms/snes/smw.sfc", extra_args=["--hang-after", "0.3"])
+        t0 = time.monotonic()
+        reason, dt = watch(s)
+        wall = time.monotonic() - t0
+        _assert(reason == "hung", f"expected hung, got {reason}")
+        _assert(s.proc.poll() is not None, "hung game process still alive")
+        _assert(focused_window() == find_window(FRONTEND_TITLE),
+                "frontend not focused after hang recovery")
+        _assert(wall < HANG_UNRESPONSIVE_S + 3,
+                f"hang total {wall:.2f}s (budget {HANG_UNRESPONSIVE_S + 3}s)")
+        print(f"   hang detected+killed+refocused in {wall:.2f}s total")
 
         print("LAUNCHER-SELFTEST PASS")
     finally:
         fe.terminate()
+        try:
+            fe.wait(timeout=3)
+        except subprocess.TimeoutExpired:
+            fe.kill()
 
 
 if __name__ == "__main__":
