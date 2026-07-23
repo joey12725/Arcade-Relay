@@ -24,3 +24,6 @@ state/JOURNAL.md, ASSUMPTIONS.md, HARDWARE-TODO.md, NIGHTLY-REPORT.md, .gitignor
 first code unit (sim rig skeleton, iteration 2).
 
 **Outcome:** GREEN (bootstrap complete).
+
+**Commit:** 4081676 "Bootstrap: spec, roadmap, state tracking, assumptions" — pushed to
+origin/claude/arcade-cabinet-impl-nn0cka (exit 0, new branch created).
