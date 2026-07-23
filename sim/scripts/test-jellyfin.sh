@@ -12,7 +12,7 @@ tp() { compose exec -T toxiproxy /toxiproxy-cli "$@"; }
 
 echo "== 0. stack up (jellyfin + server) =="
 bash scripts/gen-media.sh
-compose up -d --build --wait --wait-timeout 300
+compose up -d --build --force-recreate --wait --wait-timeout 300 server cabinet jellyfin toxiproxy
 if ! tp inspect cab_link >/dev/null 2>&1; then
     tp create --listen 0.0.0.0:8666 --upstream server:8000 cab_link
 fi

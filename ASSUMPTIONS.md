@@ -54,3 +54,8 @@
   first-unmuted-observation to muted, covering pactl-subprocess polling overhead —
   an observation allowance, not an engine budget. The 5s reconcile backstop cannot
   satisfy the 500ms leg, so acceptance still proves the event path.
+- **A-15 (Jellyfin auth, OQ-7):** In sim, arcaded bootstraps a fresh Jellyfin (wizard +
+  user arcade/arcade + libraries). On a REAL pre-configured Jellyfin, set
+  JELLYFIN_TOKEN (API key) — bootstrap is skipped entirely. Without a token and
+  without an arcade/arcade user, screensaver endpoints fail loudly (500 w/ 401
+  upstream) until one of the two is provided.

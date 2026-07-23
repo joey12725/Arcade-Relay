@@ -377,8 +377,15 @@ async def media_proxy(request):
     video_id = request.match_info["video_id"]
     path = await jellyfin.stream_path(video_id)
     resp = web.StreamResponse()
-    async with aiohttp.ClientSession() as sess:
-        async with sess.get(jellyfin.JF_URL + path) as up:
+    # total=None is load-bearing: the default 300s total timeout would kill
+    # any stream longer than 5 minutes mid-play (Jellyfin transcodes are
+    # throttled to near-realtime)
+    tmo = aiohttp.ClientTimeout(total=None, sock_connect=30, sock_read=120)
+    fwd_headers = {}
+    if "Range" in request.headers:
+        fwd_headers["Range"] = request.headers["Range"]
+    async with aiohttp.ClientSession(timeout=tmo) as sess:
+        async with sess.get(jellyfin.JF_URL + path, headers=fwd_headers) as up:
             resp.set_status(up.status)
             if "Content-Type" in up.headers:
                 resp.headers["Content-Type"] = up.headers["Content-Type"]

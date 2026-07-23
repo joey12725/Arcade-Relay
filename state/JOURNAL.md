@@ -595,3 +595,23 @@ height 480px <= 480; disable → playlist 2.
 
 **Outcome:** GREEN pending verifier. Next: unit B (cabinet mpv screensaver engine:
 IPC, panscan, brightness live, idle in/out).
+
+---
+
+## Iteration 25 — 2026-07-23 — Jellyfin verifier findings applied
+
+**Verifier verdict on unit A:** PASS (480px measured on real cabinet-fetched bytes;
+direct-play cannot pass the assertion). 4 findings, all applied:
+1. F1 HIGH: /media proxy had aiohttp's default 300s total timeout — any stream >5min
+   would die mid-play. Now total=None (sock_connect=30, sock_read=120) + Range
+   forwarding.
+2. F2 MED: every /media fetch minted a NEW transcode session (3 fetches = 3 concurrent
+   ffmpegs, verified). TranscodingUrl now cached per video.
+3. F3 MED: real pre-configured Jellyfin path documented + JELLYFIN_TOKEN env bypasses
+   bootstrap (A-15).
+4. F4 LOW: test now force-recreates (statework reseed deterministic; passed twice
+   back-to-back).
+
+**Evidence:** TEST-JELLYFIN PASS x2 consecutive (exit 0, 480px).
+
+**Outcome:** GREEN.

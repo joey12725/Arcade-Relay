@@ -17,9 +17,10 @@ MAX_HEIGHT = int(os.environ.get("SCREENSAVER_MAX_HEIGHT", "480"))
 MAX_WIDTH = int(os.environ.get("SCREENSAVER_MAX_WIDTH", "854"))
 VIDEO_BITRATE = int(os.environ.get("SCREENSAVER_VIDEO_BITRATE", "1500000"))
 
-_token = None
+_token = os.environ.get("JELLYFIN_TOKEN") or None  # pre-provisioned API key
 _user_id = None
 _setup_lock = asyncio.Lock()
+_stream_cache = {}   # video_id -> TranscodingUrl (one session per video)
 
 AUTH_HEADER = ('MediaBrowser Client="arcaded", Device="server", '
                'DeviceId="arcaded", Version="1.0"')
@@ -68,14 +69,15 @@ def _bootstrap_sync():
 
 
 async def token():
+    """With JELLYFIN_TOKEN set (real pre-configured server, OQ-7/A-15) we
+    skip the wizard/user bootstrap entirely; otherwise bootstrap (sim)."""
     global _token, _user_id
-    if _token is None:
-        async with _setup_lock:
-            if _token is None:
-                _token = await asyncio.to_thread(_bootstrap_sync)
-                me = await asyncio.to_thread(_req, "GET", "/Users/Me",
-                                             None, _token)
-                _user_id = me["Id"]
+    async with _setup_lock:
+        if _token is None:
+            _token = await asyncio.to_thread(_bootstrap_sync)
+        if _user_id is None:
+            me = await asyncio.to_thread(_req, "GET", "/Users/Me", None, _token)
+            _user_id = me["Id"]
     return _token
 
 
@@ -113,7 +115,13 @@ async def stream_path(video_id):
     a transcode session, and BOTH Height and Width codec conditions are
     load-bearing — with only Height, Jellyfin's scale filter caps width at
     the source and emits the original resolution (verified empirically:
-    stream.ts?maxHeight=... alone is ignored entirely)."""
+    stream.ts?maxHeight=... alone is ignored entirely).
+
+    Cached per video: each PlaybackInfo mints a new transcode session (a
+    near-realtime ffmpeg on the server) — verified: 3 uncached fetches of
+    one video ran 3 concurrent ffmpegs."""
+    if video_id in _stream_cache:
+        return _stream_cache[video_id]
     t = await token()
     body = {"DeviceProfile": {
         "MaxStreamingBitrate": VIDEO_BITRATE,
@@ -134,4 +142,5 @@ async def stream_path(video_id):
     turl = info["MediaSources"][0].get("TranscodingUrl")
     if not turl:
         raise RuntimeError(f"no TranscodingUrl for {video_id}")
+    _stream_cache[video_id] = turl
     return turl
