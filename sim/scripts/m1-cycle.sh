@@ -16,6 +16,9 @@ python3 /cabinet/cabd-launch "$SYS" "/roms/$SYS/game.rom" >/dev/null
 
 grep -qF "$EXPECT" "/tmp/rendered/$SYS.rmp" || { echo "drift: $SYS.rmp wrong"; exit 1; }
 grep -q "GARBAGE" "/tmp/rendered/$SYS.rmp" && { echo "drift: scramble survived"; exit 1; } || true
+# the global config must be stomped clean too, not just the per-system remap
+grep -qF 'input_player1_a = "a"' /tmp/rendered/retroarch.cfg || { echo "drift: retroarch.cfg wrong"; exit 1; }
+grep -q "^drift" /tmp/rendered/retroarch.cfg && { echo "drift: retroarch.cfg scramble survived"; exit 1; } || true
 xdotool search --name retroarch-fake >/dev/null || { echo "no game window"; exit 1; }
 
 sleep 0.3
