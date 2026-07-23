@@ -1,13 +1,16 @@
 # STATE
 
-**Updated:** 2026-07-23 iteration 29
+**Updated:** 2026-07-23 iteration 30
 
 ## Current position
 - Milestone: **M-SIM** (simulation rig — prerequisite before M0)
-- Current unit: M4 CERTIFIED. NEXT = M5 streaming (fake moonlight/greenlight
-  binaries per A-8: real X windows, killable, HOME-combo exit via cabd game path;
-  Pegasus entries = launch via cabd-launch stream ...; accept-m5 = stream tile
-  launch->HOME exit clean x3; real SF6/xCloud → HARDWARE-TODO).
+- Current unit: M5 CERTIFIED. NEXT = M6 (final milestone): web UI (dashboard w/
+  status+screenshot+quick actions, controller remapper, screensaver sources page,
+  ROM queue — served by arcaded, red/blue), AGENTS.md/CLAUDE.md onboarding,
+  skills/*/SKILL.md (screensaver, audio, controllers, roms, games, diagnostics),
+  system.screenshot RPC; accept-m6 = fresh agent given repo + "make the screensaver
+  dimmer and disable Redline" completes via CLI (subagent AS the fresh agent) x3.
+  Then: 8h clean soak -> DONE.md.
 - Iter 12 done: verifier FAIL (supervisor died on cabd crash) -> fixed supervisor,
   kill_strays convergence, frontend pdeathsig, watchdog identity check under lock,
   window-teardown wait; test-m1 step 7 added (kill -9 cabd -> converge). 7/7 green.
@@ -41,7 +44,8 @@
 | M2 | **DONE** (accept-m2 3/3; wireplumber-zombie reliability fix en route) | 3/3 |
 | M3 | **DONE** (3/3 + verifier CONFIRMED) | 3/3 |
 | M4 | **DONE** (3/3) | 3/3 |
-| M5 | next | 0/3 |
+| M5 | **DONE** (3/3) | 3/3 |
+| M6 | next (final) | 0/3 |
 | M1–M6 | not started | 0/3 each |
 
 ## Done units

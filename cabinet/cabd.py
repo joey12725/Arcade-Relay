@@ -329,18 +329,24 @@ async def file_fetch(path, dest, sha256=None):
     tmo = aiohttp.ClientTimeout(total=None, sock_connect=15, sock_read=120)
     h = hashlib.sha256()
     n = 0
-    async with aiohttp.ClientSession(timeout=tmo) as s:
-        async with s.get(screensaver.MEDIA_BASE + path) as r:
-            if r.status != 200:
-                raise RuntimeError(f"fetch {path}: HTTP {r.status}")
-            with open(dest + ".part", "wb") as f:
-                async for chunk in r.content.iter_chunked(65536):
-                    f.write(chunk)
-                    h.update(chunk)
-                    n += len(chunk)
-    if sha256 and h.hexdigest() != sha256:
-        os.unlink(dest + ".part")
-        raise RuntimeError(f"checksum mismatch for {dest}")
+    try:
+        async with aiohttp.ClientSession(timeout=tmo) as s:
+            async with s.get(screensaver.MEDIA_BASE + path) as r:
+                if r.status != 200:
+                    raise RuntimeError(f"fetch {path}: HTTP {r.status}")
+                with open(dest + ".part", "wb") as f:
+                    async for chunk in r.content.iter_chunked(65536):
+                        f.write(chunk)
+                        h.update(chunk)
+                        n += len(chunk)
+        if sha256 and h.hexdigest() != sha256:
+            raise RuntimeError(f"checksum mismatch for {dest}")
+    except BaseException:
+        try:
+            os.unlink(dest + ".part")   # no stale partials on any failure
+        except FileNotFoundError:
+            pass
+        raise
     os.replace(dest + ".part", dest)
     log(f"file fetched: {dest} ({n} bytes)")
     return {"dest": dest, "bytes": n, "sha256": h.hexdigest()}

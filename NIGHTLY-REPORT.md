@@ -3,12 +3,12 @@
 **As of:** 2026-07-23, iteration 29
 
 ## TL;DR
-M0-M4 ALL CERTIFIED (3/3 acceptance each). M3: real Jellyfin 480p over the chaos link into mpv, photon-verified brightness, offline clip fallback + crash self-heal (proven with link cut). M4: 'arcadectl roms request "metal slug 3"' → checksum-verified ROM + art on the cabinet + rescan, launchable — no human touches (fake ROMDL backend behind the A-5 contract).
+M0-M5 ALL CERTIFIED (3/3 each). M5: stream tiles (moonlight/greenlight fakes) launch from the Pegasus path, the watchdog correctly never hang-kills probe-less streams, HOME_COMBO exits in ~900ms. M4 verifier proved transfer integrity end-to-end (wrong sha rejected; truncated transfer -> clean error). Remaining: M6 (web UI, skills, agent cold-start test), then 8h clean soak and DONE.
 
 ## Milestones
 - M-SIM: DONE (rig + soak, subagent-verified)
-- M0/M1/M2/M3/M4: DONE (3/3 each)
-- M5 (streaming tiles): next; then M6 (web UI + skills)
+- M0-M5: DONE (3/3 each)
+- M6 (web UI + skills + agent cold-start acceptance): final milestone, in progress
 - M0–M6: not started
 
 ## Soak

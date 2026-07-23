@@ -705,3 +705,23 @@ TEST-M1 PASS. SOAK CLEAN.
 
 **M3 status: DONE (confirmed). M4 status: DONE** (real ROMDL package swap-in is the
 only outstanding piece — interface per A-5, adapter isolated in server/romdl.py).
+
+---
+
+## Iteration 30 — 2026-07-23 — M4 verifier PASS + M5 CERTIFIED (3/3)
+
+**M4 verifier verdict:** PASS — cabd-side sha256 independently proven (wrong-sha
+rejected, truncated transfer via limit_data toxic → clean queue error, never a
+corrupt "ready" ROM); delivery genuinely traverses toxiproxy (no shared mounts);
+queue dedupe/404/concurrency clean; partition mid-delivery → clean error + manual
+re-request recovers. Minor fix applied: file_fetch now unlinks .part on ANY failure.
+
+**M5 (built iter 29, certified this iter):** ACCEPT-M5 PASS x3 consecutive:
+moonlight tile launch (window + server-visible state), watchdog does NOT hang-kill
+probe-less streams (4s > hang threshold), HOME_COMBO exits stream in ~900ms with
+frontend focused + state cleared, greenlight tile launch + remote kill.
+
+**Regressions:** ACCEPT-M4 PASS (post .part fix), TEST-M1 PASS, SOAK CLEAN.
+
+**M5 status: DONE** (sim scope; real Sunshine/Moonlight SF6@60fps + real Greenlight
+sign-in ledgered in HARDWARE-TODO).
