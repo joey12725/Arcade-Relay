@@ -27,10 +27,18 @@ STATE_DIR = os.environ.get("STATE_DIR", "/state")
 
 
 def git_commit(msg):
-    """SRV-2: every state mutation is a git commit in the state repo."""
+    """SRV-2: every state mutation is a git commit in the state repo.
+
+    NB: called from request handlers with NO awaits between the state read
+    and this commit — that synchronous window is what makes read-modify-
+    write mutations race-free on the single event loop. Adding an await
+    inside load->save->commit would reintroduce lost updates.
+    """
     subprocess.run(["git", "-C", STATE_DIR, "add", "-A"], capture_output=True)
-    subprocess.run(["git", "-C", STATE_DIR, "commit", "-qm", msg],
-                   capture_output=True)
+    r = subprocess.run(["git", "-C", STATE_DIR, "commit", "-qm", msg],
+                       capture_output=True, text=True)
+    if r.returncode != 0:
+        hub.log_event(f"git commit FAILED ({r.returncode}): {msg}: {r.stderr.strip()}")
 
 
 FAVORITES_REL = "library/favorites.yaml"

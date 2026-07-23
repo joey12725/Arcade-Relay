@@ -403,3 +403,24 @@ pdeathsig — mitigated by kill_strays).
 - Full 3-run chain (100 cycles/system) launching in background.
 
 **Outcome:** GREEN; M1 acceptance 0/3 (chain starting).
+
+---
+
+## Iteration 16 — 2026-07-23 — Static verifier verdict (accept-m1 harness): FAIL(narrow) → fixes
+
+**Verdict:** harness assertions genuine (drift scramble real, kill-9 externally clocked,
+favorites chain honest, favorites mutations race-free by construction) but two ledger
+omissions = FAIL: UI-4/theme entries referenced but absent from HARDWARE-TODO.md; play
+5s→0.3s acceleration unrecorded.
+
+**Fixes applied now (safe while chain runs — docs + baked-image server code only):**
+- HARDWARE-TODO.md: UI-4 navigation audit, pegasus-redblue theme, real-duration EMU-1.
+- ASSUMPTIONS A-10 (play-time acceleration), A-11 (/statework ephemerality).
+- arcaded.git_commit: logs failed commits to event log; race-safety comment.
+
+**Deferred until chain completes (m1-cycle.sh is live-mounted into the running
+acceptance):** F4 — assert retroarch.cfg cleanliness too, not just <system>.rmp.
+The 3-run series will be RESTARTED on the strengthened harness so all passes certify
+final code.
+
+**Outcome:** fixes committed; M1 certification restarts after current chain ends.

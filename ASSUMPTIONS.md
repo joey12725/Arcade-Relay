@@ -29,3 +29,14 @@
   wiped = dead link) + proxy recreation, cabinet back unaided <=60s with a NEW WS
   connection and a working exec round-trip. 24h wall-clock validation on real
   hardware -> HARDWARE-TODO.md.
+- **A-10 (accept-m1 scaling):** Spec play window is 5s per cycle; sim cycles use 0.3s
+  (~17x, same acceleration convention as A-7/A-9) because the faked emulator has no
+  play-time-dependent behavior — the cycle asserts launch, window, config cleanliness,
+  kill, and focus recovery. Real-duration EMU-1 cycles on real cores are ledgered in
+  HARDWARE-TODO.md.
+- **A-11 (/statework ephemerality in sim):** The server's writable git state repo
+  (/statework) is seeded from the RO-mounted repo state/ at container start and lives
+  in the container fs — container recreation resets runtime mutations (e.g. favorites
+  added during a test) and git history. Acceptable in sim (each accept run is
+  self-contained); on real hardware the state repo is a persistent git repo on the
+  server's disk, and seed-vs-work divergence doesn't apply.

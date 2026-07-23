@@ -14,3 +14,11 @@ Things that can only be verified on real hardware. Not faked green in the sim.
 - [ ] 24h wall-clock heartbeat ≥99% on real network (accept-m0 ran accelerated in sim).
 - [ ] accept-m0 at real scale: 24h wall-clock, 5s beats, real Cloudflare tunnel, real
   router reboot (A-9 runs it accelerated in sim).
+- [ ] UI-4 navigation audit on the real Pegasus + redblue QML theme: every reachable
+  screen operable with joystick + 2 buttons (spec §8 M1 accept; sim uses a fake
+  frontend window, so this is real-hardware/real-Pegasus scope).
+- [ ] pegasus-redblue QML theme itself (favorites-default boot collection, oversized
+  tiles, muted trailers) — buildable off-cabinet but only meaningfully testable
+  against real Pegasus.
+- [ ] EMU-1 cycles at real play duration (spec: launch->play-5s->exit; sim runs 0.3s
+  per A-10) on real RetroArch cores.
