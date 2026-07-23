@@ -192,3 +192,24 @@ windows and beyond 8s cabd-kill grace) + status.log staleness under V4.
 467 HTTP probes (88.44% OK), 4 partitions, 3 cabd kill -9s (chaos randomly picked cabd
 every time), cabd logged 8 connects (respawn+reconnect after every kill/partition),
 status.log all ONLINE outside chaos windows: V5 active and clean. SOAK CLEAN.
+
+---
+
+## Iteration 7 — 2026-07-23 — M1 unit 1: fake game binaries (A-8)
+
+**Soak check:** covered this turn by iter-6 audit (SOAK CLEAN on real daemons).
+
+**Unit:** `sim/fakes/retroarch` (real mpv X window titled retroarch-fake, RetroArch-style
+UDP command iface on 55355: QUIT/PAUSE_TOGGLE/GET_STATUS, SIGTERM-clean, --crash-after N
+exits 70, --hang-after N stops answering but keeps window — for EMU-3 watchdog tests) and
+`sim/fakes/pegasus` (persistent frontend window, SIGTERM-clean). `/fakes` volume added to
+sim cabinet; `make test-fakes` scripted (runs post-accept-run since the new mount
+recreates the container).
+
+**Evidence (live validation in running cabinet via docker cp — zero link impact):**
+- pegasus window OK; retroarch window OK (xdotool search by title)
+- UDP: "GET_STATUS PLAYING /roms/snes/smw.sfc"; QUIT OK: window gone
+- SIGTERM OK: pegasus gone; crash exit: 70
+
+**Outcome:** GREEN (manual validation; scripted test + subagent verify after accept run 1).
+Committed as c782ada (journal entry landed one commit later due to a cwd slip).

@@ -1,4 +1,4 @@
-.PHONY: sim-up sim-down sim-test test-m0 accept-m0 soak-up soak-down soak-status
+.PHONY: sim-up sim-down sim-test test-m0 accept-m0 test-fakes soak-up soak-down soak-status
 
 sim-up:
 	cd sim && docker compose up -d --build --wait --wait-timeout 300
