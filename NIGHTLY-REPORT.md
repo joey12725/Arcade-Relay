@@ -1,15 +1,14 @@
 # NIGHTLY REPORT
 
-**As of:** 2026-07-23, iteration 27
+**As of:** 2026-07-23, iteration 29
 
 ## TL;DR
-M0/M1/M2 CERTIFIED (3/3 each). M3 feature-complete, acceptance chain running: real Jellyfin 480p transcodes streamed through the chaos link into mpv (panscan crop proven from render margins, brightness tint verified by screenshot luma), idle in/out, offline local-clip fallback (proven with the link cut), screensaver crash self-heal, disable --for. Soak refreshed onto current product images after finding it ran stale ones; auditor mid-write read race fixed.
+M0-M4 ALL CERTIFIED (3/3 acceptance each). M3: real Jellyfin 480p over the chaos link into mpv, photon-verified brightness, offline clip fallback + crash self-heal (proven with link cut). M4: 'arcadectl roms request "metal slug 3"' → checksum-verified ROM + art on the cabinet + rescan, launchable — no human touches (fake ROMDL backend behind the A-5 contract).
 
 ## Milestones
 - M-SIM: DONE (rig + soak, subagent-verified)
-- M0/M1/M2: DONE (3/3 each)
-- M3: feature-complete; accept chain executing
-- M4 (ROM pipeline): next
+- M0/M1/M2/M3/M4: DONE (3/3 each)
+- M5 (streaming tiles): next; then M6 (web UI + skills)
 - M0–M6: not started
 
 ## Soak

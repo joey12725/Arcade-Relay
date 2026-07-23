@@ -685,3 +685,23 @@ screenshot luma 126.6->25.4 and continuous playback, screensaver audio muted, so
 toggling, params CLI round-trip, idle-in/input-out.
 
 **M3 status: DONE** (sim scope; physical 4:3 panel verification in HARDWARE-TODO).
+
+---
+
+## Iteration 29 — 2026-07-23 — M3 verifier CONFIRMED + M4 CERTIFIED (3/3)
+
+**M3 verifier verdict:** PASS/CONFIRMED (pinned-commit verification; luma threshold
+sound — ratio 0.2006 reproduced; watchdog has no startup misfire window; soak read()
+fix fail-noisy in every direction; adversarial offline-crash-self-heal probe passed:
+link cut + mpv kill -9 → relaunched from local clips in ~1s). Recommendation applied:
+test-fallback now asserts mpv's path property is a local clip.
+
+**M4 (built iter 28, tested this iter):** ACCEPT-M4 PASS x3 consecutive (am4-1..3,
+exit 0): search finds Metal Slug 3; one-liner request → queue
+queued→downloading→delivering→ready; ROM delivered over the tunnel via file.fetch
+(sha256 verified server-value vs cabinet-side sum), art delivered, rescan marker,
+launch from delivered path. Regressions: TEST-FALLBACK (with locality assert),
+TEST-M1 PASS. SOAK CLEAN.
+
+**M3 status: DONE (confirmed). M4 status: DONE** (real ROMDL package swap-in is the
+only outstanding piece — interface per A-5, adapter isolated in server/romdl.py).

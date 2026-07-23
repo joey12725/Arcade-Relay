@@ -37,6 +37,12 @@ tp toggle cab_link          # cut
 cab sh -c 'echo "BTN_A down" > /tmp/input-events'   # reset idle clock, offline
 cab sh -c 'for i in $(seq 1 60); do xdotool search --name arcade-screensaver >/dev/null 2>&1 && exit 0; sleep 0.5; done; echo offline-ss-never-started; exit 1'
 cab grep -q "local clips fallback" /tmp/cabd.log || { echo "FAIL: not the fallback path"; exit 1; }
+cab python3 -c "
+import sys; sys.path.insert(0, '/cabinet')
+import screensaver
+p = screensaver.get_prop('path')
+assert p and p.startswith('/var/cache/arcade-clips/'), f'not playing a local clip: {p}'
+print('playing local file:', p)"
 cab sh -c 'echo "BTN_B down" > /tmp/input-events'   # exit it
 sleep 2
 tp toggle cab_link          # restore
