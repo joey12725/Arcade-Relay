@@ -100,3 +100,31 @@ kill+GAP+SLACK. Also: SOAK_DATA env override so negative tests are scriptable.
   15 partitions, 9 kills, SOAK CLEAN — real kill-respawn gaps correctly excused.
 
 **Outcome:** GREEN (verifier's confirmed bug fixed, negative-tested, live clean).
+
+---
+
+## Iteration 4 — 2026-07-23 — M0: arcaded + cabd skeleton over the chaos link
+
+**Soak check:** `make soak-status` exit 0 — 2022 heartbeats (84.17% OK), 24 partitions,
+13 kills, SOAK CLEAN.
+
+**Unit:** Real daemons replace the placeholder: `server/arcaded.py` (aiohttp: WS hub
+/cab, REST /status /events /cab/exec, RPC w/ pending-future map, newest-connection-wins),
+`cabinet/cabd.py` (outbound WS via toxiproxy, heartbeats @HEARTBEAT_SECONDS, exp backoff
+0.5→cap jittered ±20% forever, system.exec RPC), `server/arcadectl` (stdlib CLI: status,
+cab exec, --json, meaningful exit codes). Sim: cabd supervised in cabinet entrypoint
+(Restart=always analog), hb 0.25s (~20x), backoff cap 2s. New `make test-m0`.
+
+**Evidence:**
+- pip TLS blocked by agent proxy in docker build (SSL: CERTIFICATE_VERIFY_FAILED) →
+  switched server image to debian + python3-aiohttp via apt (same as cabinet). Journaled
+  as env constraint, not code fault.
+- `make test-m0` → TEST-M0 PASS (exit 0): online via heartbeats; exec round-trip
+  "m0-roundtrip"; remote `false` exits non-zero; partition → offline; unaided reconnect;
+  exec again post-reconnect.
+- `make sim-test` → SIM-TEST PASS (exit 0), latency toxic 688ms — no regression with
+  real arcaded behind the proxy.
+- Subagent verification launched (re-runs both tests + reviews for weakening); verdict
+  appended when it completes.
+
+**Outcome:** GREEN pending verifier (both suites pass locally).

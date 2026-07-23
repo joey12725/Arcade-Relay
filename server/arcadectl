@@ -1,0 +1,78 @@
+#!/usr/bin/env python3
+"""arcadectl — CLI for arcaded (M0: status, cab exec).
+
+Stdlib only. --json on everything (AGT-1); meaningful exit codes; no prompts.
+Exit: 0 ok, 1 remote/command error, 2 usage, 3 server unreachable.
+"""
+import argparse
+import json
+import os
+import sys
+import urllib.error
+import urllib.request
+
+BASE = os.environ.get("ARCADED_URL", "http://localhost:8000")
+
+
+def call(method, path, body=None):
+    req = urllib.request.Request(BASE + path, method=method)
+    data = None
+    if body is not None:
+        data = json.dumps(body).encode()
+        req.add_header("Content-Type", "application/json")
+    try:
+        with urllib.request.urlopen(req, data=data, timeout=30) as r:
+            return json.loads(r.read() or "{}")
+    except urllib.error.HTTPError as e:
+        print(f"arcadectl: {e.code} {e.read().decode(errors='replace')}",
+              file=sys.stderr)
+        sys.exit(1)
+    except (urllib.error.URLError, OSError) as e:
+        print(f"arcadectl: cannot reach arcaded at {BASE}: {e}", file=sys.stderr)
+        sys.exit(3)
+
+
+def main():
+    ap = argparse.ArgumentParser(prog="arcadectl")
+    ap.add_argument("--json", action="store_true", dest="as_json")
+    sub = ap.add_subparsers(dest="cmd", required=True)
+
+    sub.add_parser("status")
+
+    cab = sub.add_parser("cab")
+    cabsub = cab.add_subparsers(dest="cabcmd", required=True)
+    ex = cabsub.add_parser("exec")
+    ex.add_argument("argv", nargs=argparse.REMAINDER,
+                    help="command to run on the cabinet (after --)")
+
+    args = ap.parse_args()
+
+    if args.cmd == "status":
+        st = call("GET", "/status")
+        if args.as_json:
+            print(json.dumps(st))
+        else:
+            print(f"cabinet: {'ONLINE' if st['online'] else 'OFFLINE'} "
+                  f"(hb age {st['heartbeat_age_s']}s, "
+                  f"interval {st['heartbeat_interval_s']}s, "
+                  f"connects {st['connects']})")
+        sys.exit(0)
+
+    if args.cmd == "cab" and args.cabcmd == "exec":
+        argv = args.argv
+        if argv and argv[0] == "--":
+            argv = argv[1:]
+        if not argv:
+            print("usage: arcadectl cab exec -- <cmd...>", file=sys.stderr)
+            sys.exit(2)
+        res = call("POST", "/cab/exec", {"cmd": " ".join(argv)})
+        if args.as_json:
+            print(json.dumps(res))
+        else:
+            sys.stdout.write(res["stdout"])
+            sys.stderr.write(res["stderr"])
+        sys.exit(0 if res["rc"] == 0 else 1)
+
+
+if __name__ == "__main__":
+    main()

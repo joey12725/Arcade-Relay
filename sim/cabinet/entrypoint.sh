@@ -15,4 +15,11 @@ pipewire &
 pipewire-pulse &
 wireplumber &
 
+# cabd under a Restart=always-style supervisor (systemd analog, spec §5.1)
+(while true; do
+    python3 /cabinet/cabd.py >> /tmp/cabd.log 2>&1
+    echo "cabd exited, respawning" >> /tmp/cabd.log
+    sleep 0.5
+done) &
+
 exec sleep infinity

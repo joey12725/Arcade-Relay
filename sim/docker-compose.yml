@@ -21,13 +21,10 @@ services:
       retries: 5
 
   server:
-    # Placeholder until arcaded exists (M0): a plain HTTP listener so the
-    # chaos path cabinet -> toxiproxy -> server is testable end to end.
-    image: python:3.12-slim
-    command: python -m http.server 8000
+    build: ../server
     networks: [srvnet]
     healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request as u; u.urlopen('http://localhost:8000/', timeout=2)"]
+      test: ["CMD", "python3", "-c", "import urllib.request as u; u.urlopen('http://localhost:8000/health', timeout=2)"]
       interval: 5s
       timeout: 3s
       retries: 5
@@ -49,6 +46,12 @@ services:
   cabinet:
     build: ./cabinet
     networks: [cabnet]
+    volumes:
+      - ../cabinet:/cabinet:ro
+    environment:
+      SERVER_WS_URL: ws://toxiproxy:8666/cab
+      HEARTBEAT_SECONDS: "0.25"   # ~20x accelerated (ASSUMPTIONS A-7)
+      CABD_BACKOFF_CAP: "2"       # fast reconnect assertions in sim
     healthcheck:
       test: ["CMD", "sh", "-c", "xdpyinfo -display :0 >/dev/null"]
       interval: 5s
