@@ -815,3 +815,14 @@ restarted ~21:33Z (uptime 0min, daemon down) — worker restart, not a product f
 
 **Action:** epoch 4 started (soak fresh), new 8h watcher launched. If the environment
 keeps cutting segments, the cumulative fallback completes after ~5h more clean soak.
+
+---
+
+## Iteration 36 — 2026-07-23 — Epoch 4 segment: 2h14m clean; epoch 5
+
+**Evidence:** watcher logged 13/48 clean checks; last audit CLEAN 23:45:26Z; soak wrote
+until ~23:49Z; worker restart at ~23:49Z (uptime 1min at 23:50Z).
+
+**A-16 ledger:** S1 ~58m · S2 ~6m · S3 ~118m · S4 ~134m (21:35–23:49Z) =
+**~5h16m cumulative clean**, zero product violations across all segments.
+Epoch 5 launching; ~2h44m more clean soak completes the 8h cumulative fallback.
