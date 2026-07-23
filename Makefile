@@ -62,3 +62,6 @@ test-screensaver:
 
 test-fallback:
 	bash sim/scripts/test-fallback.sh
+
+accept-m3:
+	bash sim/scripts/accept-m3.sh
