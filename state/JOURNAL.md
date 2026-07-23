@@ -801,3 +801,17 @@ whole window and notifying at the gate. Segments ledger (A-16): S1 07:09-08:07Z 
 (138 partitions); S2 14:08-14:14Z clean-truncated (~6min).
 
 **Outcome:** watch running; DONE.md on clean completion.
+
+---
+
+## Iteration 35 — 2026-07-23 — Epoch 3 segment: 1h58m clean; worker restart; epoch 4
+
+**Evidence:** Watcher (btn8em1qx) logged 11/48 clean checks; final audit before the
+worker restart: 24540 heartbeats (86.23% OK), 245 partitions, SOAK CLEAN. Host
+restarted ~21:33Z (uptime 0min, daemon down) — worker restart, not a product failure.
+
+**A-16 segment ledger:** S1 07:09-08:07Z (~58m, 138 partitions) · S2 14:08-14:14Z
+(~6m) · S3 19:35-21:33Z (~118m, 245 partitions). Cumulative clean: ~3h02m of 8h.
+
+**Action:** epoch 4 started (soak fresh), new 8h watcher launched. If the environment
+keeps cutting segments, the cumulative fallback completes after ~5h more clean soak.
