@@ -1,13 +1,15 @@
 # STATE
 
-**Updated:** 2026-07-23 iteration 13
+**Updated:** 2026-07-23 iteration 14
 
 ## Current position
 - Milestone: **M-SIM** (simulation rig — prerequisite before M0)
-- Current unit: config rendering DONE (ae9fc95, test-render green, verifier running).
-  NEXT = local launch surface (cabd UDS socket + cabd-launch shim so launches never
-  block on the server — prime directive 1; test: partition link, local launch works)
-  + favorites.yaml sync; then accept-m1 harness + 3-run chain.
+- Current unit: local launch surface DONE (8569fdc, test-local green, verifier
+  running). NEXT = favorites (state/library/favorites.yaml + arcadectl favorites
+  add/remove/list, server-authoritative w/ git commit per change) + accept-m1
+  harness (per system: 100 launch->0.5s->exit cycles, zero hangs, zero drift —
+  verify rendered configs each cycle; plus kill -9 recovery <2s assertions), then
+  the 3-run chain. While verifier runs, write code but don't run make targets.
 - Iter 12 done: verifier FAIL (supervisor died on cabd crash) -> fixed supervisor,
   kill_strays convergence, frontend pdeathsig, watchdog identity check under lock,
   window-teardown wait; test-m1 step 7 added (kill -9 cabd -> converge). 7/7 green.
