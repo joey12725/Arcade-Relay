@@ -230,3 +230,21 @@ Committed as c782ada (journal entry landed one commit later due to a cwd slip).
 - 3-run acceptance chain launched in background.
 
 **Outcome:** GREEN; acceptance passes 0/3 (series restarted on final code).
+
+---
+
+## Iteration 9 — 2026-07-23 — M1 unit 2: launcher + watchdog module
+
+**Context:** accept-m0 3-run chain executing in background (bm3qlf3ge); this unit is a
+NEW standalone file (cabinet/launcher.py) — nothing the running stack loads was touched.
+
+**Unit:** GameSession (spawn fake retroarch, wait window <=5s, focus), kill escalation
+(UDP QUIT -> SIGTERM -> SIGKILL, then refocus frontend), watchdog poll 0.25s with 2s
+recovery budget, selftest matrix (launch/clean-kill/kill -9/self-crash) run in-container.
+
+**Evidence:** `docker compose exec cabinet python3 /cabinet/launcher.py selftest` →
+LAUNCHER-SELFTEST PASS: kill->frontend 0.06s, death->frontend 0.01s (post-detection;
+poll adds <=0.25s), crash->frontend 0.02s. Exit 0. Committed as 8aec21d.
+Verifier subagent running (exec-only constraint; independently times kill-9->focus).
+
+**Outcome:** GREEN (selftest); external kill->focus timing lands in test-m1/accept-m1.
