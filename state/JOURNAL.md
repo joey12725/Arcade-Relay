@@ -27,3 +27,28 @@ first code unit (sim rig skeleton, iteration 2).
 
 **Commit:** 4081676 "Bootstrap: spec, roadmap, state tracking, assumptions" — pushed to
 origin/claude/arcade-cabinet-impl-nn0cka (exit 0, new branch created).
+
+---
+
+## Iteration 2 — 2026-07-23 — M-SIM: sim rig skeleton
+
+**Unit:** Docker sim rig: `sim/docker-compose.yml` (toxiproxy 2.12.0, placeholder server,
+real jellyfin, cabinet w/ real Xvfb+mpv+PipeWire), `sim/cabinet/Dockerfile`+entrypoint,
+`sim/scripts/sim-test.sh`, root `Makefile` (sim-up/sim-down/sim-test). Cabinet is on
+`cabnet` only, server/jellyfin on `srvnet` only, toxiproxy straddles both — the cabinet
+physically cannot bypass chaos injection.
+
+**Soak check:** N/A — soak stack is the next M-SIM unit.
+
+**Evidence:**
+- Docker daemon wasn't running; started manually (`dockerd`, DAEMON-OK-MANUAL).
+- First `make sim-test` run: exit 0, `SIM-TEST PASS` (all 4 containers healthy, direct
+  cabinet→server route correctly fails, partition breaks/restores link).
+- Subagent verification: PASS, re-ran sim-test itself (exit 0), no fake-green found;
+  3 tightening findings.
+- Applied all 3: latency toxic now asserted ≥400ms (measured 689ms), mpv now renders a
+  real frame to Xvfb (`--vo=x11 --frames=1 av://lavfi:testsrc`), grep-pipe race replaced
+  with `toxiproxy-cli inspect`.
+- Re-run after tightening: `SIM-TEST PASS`, latency 689ms (exit 0).
+
+**Outcome:** GREEN.

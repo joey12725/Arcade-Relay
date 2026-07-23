@@ -1,11 +1,15 @@
 # STATE
 
-**Updated:** 2026-07-23 iteration 1
+**Updated:** 2026-07-23 iteration 2
 
 ## Current position
 - Milestone: **M-SIM** (simulation rig — prerequisite before M0)
-- Current unit: sim rig compose skeleton (next iteration)
+- Current unit: soak stack (`make soak-up`/`soak-status`) — next iteration
 - Consecutive failures on current unit: 0
+- NOTE: loop is now self-paced (user request: continuous, iterations chained
+  back-to-back; 60s wakeup between turns — scheduler minimum).
+- NOTE: Docker daemon must be started manually in this container (`dockerd &`);
+  check `docker info` at iteration start.
 
 ## Environment facts
 - Dev box: Linux container (not Windows/WSL2 as loop prompt assumed) with native
@@ -25,8 +29,13 @@
 ## Done units
 1. (iter 1) Repo bootstrap: spec copied in, ROADMAP/STATE/JOURNAL/ASSUMPTIONS/
    HARDWARE-TODO/NIGHTLY-REPORT created, committed, pushed.
+2. (iter 2) Sim rig skeleton: compose (toxiproxy/server/jellyfin/cabinet), cabinet
+   image (real Xvfb/mpv/PipeWire), sim-test smoke (isolation + chaos + AV asserts),
+   Makefile. Subagent-verified, findings applied, green twice.
 
 ## Next unit
-Write `sim/docker-compose.yml` skeleton (server, cabinet, jellyfin, toxiproxy) +
-`Makefile` targets `sim-up`/`sim-down`/`sim-test`; smoke test = all containers report
-healthy and toxiproxy can create a proxy between cabinet and server.
+Soak stack: `sim/soak/` — detached compose copy with a chaos driver container doing
+random partitions (toxiproxy toggle) and kill -9s of cabinet processes on an
+accelerated heartbeat cycle; `make soak-up`, `make soak-down`, `make soak-status`
+(reports violations, exit non-zero if any). Placeholder heartbeat until cabd exists
+(M0), then soak drives the real daemons.

@@ -1,0 +1,61 @@
+name: arcade-sim
+
+# Simulation rig (ROADMAP M-SIM).
+# Topology rule: the cabinet may reach the server ONLY through toxiproxy, so
+# network chaos (latency, partitions, bandwidth) is injectable on every path
+# the real system would use over the Cloudflare tunnel (ASSUMPTIONS A-6).
+#
+#   cabnet:  cabinet, toxiproxy
+#   srvnet:  server, jellyfin, toxiproxy
+#
+# Only toxiproxy straddles both networks.
+
+services:
+  toxiproxy:
+    image: ghcr.io/shopify/toxiproxy:2.12.0
+    networks: [cabnet, srvnet]
+    healthcheck:
+      test: ["CMD", "/toxiproxy-cli", "list"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  server:
+    # Placeholder until arcaded exists (M0): a plain HTTP listener so the
+    # chaos path cabinet -> toxiproxy -> server is testable end to end.
+    image: python:3.12-slim
+    command: python -m http.server 8000
+    networks: [srvnet]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request as u; u.urlopen('http://localhost:8000/', timeout=2)"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  jellyfin:
+    image: jellyfin/jellyfin:latest
+    networks: [srvnet]
+    volumes:
+      - ./.data/jellyfin/config:/config
+      - ./.data/jellyfin/cache:/cache
+      - ./media:/media:ro
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8096/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 60s
+
+  cabinet:
+    build: ./cabinet
+    networks: [cabnet]
+    healthcheck:
+      test: ["CMD", "sh", "-c", "xdpyinfo -display :0 >/dev/null"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 10s
+
+networks:
+  cabnet: {}
+  srvnet: {}
