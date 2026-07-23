@@ -27,6 +27,12 @@ test-render:
 test-local:
 	bash sim/scripts/test-local.sh
 
+accept-m1:
+	bash sim/scripts/accept-m1.sh
+
+test-favorites:
+	bash sim/scripts/test-favorites.sh
+
 soak-up:
 	cd sim/soak && docker compose up -d --build --wait --wait-timeout 300
 

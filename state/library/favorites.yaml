@@ -1,0 +1,3 @@
+# Favorites (UI-2): server-authoritative, mirrored to the cabinet via
+# state.sync. Each entry is "<system>/<rom-basename>".
+favorites: []

@@ -14,6 +14,7 @@ import asyncio
 import json
 import os
 import pathlib
+import subprocess
 import time
 import uuid
 
@@ -23,6 +24,44 @@ from aiohttp import WSMsgType, web
 RPC_TIMEOUT = float(os.environ.get("ARCADED_RPC_TIMEOUT", "15"))
 MISSED_BEATS_OFFLINE = 3  # spec §5.2: offline after 3 missed heartbeats
 STATE_DIR = os.environ.get("STATE_DIR", "/state")
+
+
+def git_commit(msg):
+    """SRV-2: every state mutation is a git commit in the state repo."""
+    subprocess.run(["git", "-C", STATE_DIR, "add", "-A"], capture_output=True)
+    subprocess.run(["git", "-C", STATE_DIR, "commit", "-qm", msg],
+                   capture_output=True)
+
+
+FAVORITES_REL = "library/favorites.yaml"
+
+
+def load_favorites():
+    p = pathlib.Path(STATE_DIR) / FAVORITES_REL
+    if not p.exists():
+        return []
+    data = yaml.safe_load(p.read_text()) or {}
+    return data.get("favorites") or []
+
+
+def save_favorites(favs, msg):
+    p = pathlib.Path(STATE_DIR) / FAVORITES_REL
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text(yaml.safe_dump({"favorites": sorted(favs)},
+                                default_flow_style=False))
+    git_commit(msg)
+
+
+def push_state_soon():
+    """Fire-and-forget push after a state change; a cabinet that's offline
+    gets the full bundle on reconnect anyway (push-on-connect)."""
+    async def _push():
+        try:
+            await hub.rpc("state.sync", {"bundle": build_bundle()})
+            hub.log_event("state pushed after change")
+        except web.HTTPException as e:
+            hub.log_event(f"state push deferred (cabinet offline?): {e.reason}")
+    asyncio.get_event_loop().create_task(_push())
 
 
 def build_bundle():
@@ -174,6 +213,40 @@ async def state_push(request):
     return web.json_response(res["result"])
 
 
+async def favorites_list(request):
+    return web.json_response({"favorites": load_favorites()})
+
+
+async def favorites_add(request):
+    body = await request.json()
+    fav_id = body["id"]
+    favs = load_favorites()
+    if fav_id not in favs:
+        favs.append(fav_id)
+        save_favorites(favs, f"arcadectl: favorite add {fav_id}")
+        push_state_soon()
+        hub.log_event(f"favorite added: {fav_id}")
+    return web.json_response({"favorites": sorted(favs)})
+
+
+async def favorites_remove(request):
+    body = await request.json()
+    fav_id = body["id"]
+    favs = load_favorites()
+    if fav_id in favs:
+        favs.remove(fav_id)
+        save_favorites(favs, f"arcadectl: favorite remove {fav_id}")
+        push_state_soon()
+        hub.log_event(f"favorite removed: {fav_id}")
+    return web.json_response({"favorites": sorted(favs)})
+
+
+async def state_log(request):
+    r = subprocess.run(["git", "-C", STATE_DIR, "log", "--oneline", "-20"],
+                       capture_output=True, text=True)
+    return web.json_response({"log": r.stdout.splitlines()})
+
+
 async def games_kill(request):
     res = await hub.rpc("game.kill", {})
     if not res.get("ok"):
@@ -194,6 +267,10 @@ app.add_routes([
     web.post("/games/kill", games_kill),
     web.get("/state/bundle", state_bundle),
     web.post("/state/push", state_push),
+    web.get("/state/log", state_log),
+    web.get("/favorites", favorites_list),
+    web.post("/favorites/add", favorites_add),
+    web.post("/favorites/remove", favorites_remove),
 ])
 
 if __name__ == "__main__":

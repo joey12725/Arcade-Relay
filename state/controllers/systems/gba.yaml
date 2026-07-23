@@ -1,0 +1,3 @@
+# gba layout (distinct value catches cross-system config leakage in accept-m1)
+remap:
+  a: l

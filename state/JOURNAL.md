@@ -376,3 +376,30 @@ never touch the network. New `make test-local`.
 - Regressions: TEST-M1 PASS, TEST-RENDER PASS, SOAK CLEAN.
 
 **Outcome:** GREEN.
+
+---
+
+## Iteration 15 — 2026-07-23 — Favorites + git state repo + accept-m1 harness
+
+**Verifier verdict on local-launch unit:** PASS (offline ordering genuine; shared code
+paths; robust vs malformed/oversized/hanging socket input; failure paths clean; exit
+codes verified live). Minor notes deferred (empty-reply json traceback; GameSession
+pdeathsig — mitigated by kill_strays).
+
+**Units (chained this turn):**
+1. Server state repo is now a real git repo (entrypoint seeds /statework from RO mount;
+   git commit per mutation — SRV-2). arcadectl state log.
+2. Favorites: /favorites add/remove/list + state/library/favorites.yaml + push-on-change
+   (offline cabinets converge via push-on-connect). arcadectl favorites family.
+3. accept-m1 harness: per system 100 local-path cycles (launch → configs clean w/
+   distinct per-system remap values to catch leakage → window → play → kill → frontend
+   focused), every 10th cycle pre-scrambled; then 5x kill -9 recovery <2s external clock.
+4. Remap yamls for genesis/arcade/gba/psx (distinct values).
+
+**Evidence:**
+- TEST-FAVORITES PASS (exit 0): add→list→git commit→cabinet cache; remove→all gone.
+- ACCEPT_M1_CYCLES=3 smoke: ACCEPT-M1 PASS — 18 cycles 6 systems clean, kill-9 reps
+  356-460ms.
+- Full 3-run chain (100 cycles/system) launching in background.
+
+**Outcome:** GREEN; M1 acceptance 0/3 (chain starting).

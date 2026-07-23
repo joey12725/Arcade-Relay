@@ -53,6 +53,14 @@ def main():
     stsub = st.add_subparsers(dest="statecmd", required=True)
     stsub.add_parser("push")
     stsub.add_parser("bundle")
+    stsub.add_parser("log")
+
+    fav = sub.add_parser("favorites")
+    fsub = fav.add_subparsers(dest="favcmd", required=True)
+    for c in ("add", "remove"):
+        fp = fsub.add_parser(c)
+        fp.add_argument("id", help="<system>/<rom-basename>")
+    fsub.add_parser("list")
 
     cab = sub.add_parser("cab")
     cabsub = cab.add_subparsers(dest="cabcmd", required=True)
@@ -88,9 +96,19 @@ def main():
     if args.cmd == "state":
         if args.statecmd == "push":
             res = call("POST", "/state/push")
+        elif args.statecmd == "log":
+            res = call("GET", "/state/log")
         else:
             res = call("GET", "/state/bundle")
         print(json.dumps(res))
+        sys.exit(0)
+
+    if args.cmd == "favorites":
+        if args.favcmd == "list":
+            res = call("GET", "/favorites")
+        else:
+            res = call("POST", f"/favorites/{args.favcmd}", {"id": args.id})
+        print(json.dumps(res) if args.as_json else "\n".join(res["favorites"]) or "(none)")
         sys.exit(0)
 
     if args.cmd == "cab" and args.cabcmd == "exec":

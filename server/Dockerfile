@@ -1,12 +1,13 @@
 FROM debian:trixie-slim
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-        python3 python3-aiohttp python3-yaml \
+        python3 python3-aiohttp python3-yaml git \
     && rm -rf /var/lib/apt/lists/*
 
 COPY arcaded.py /app/arcaded.py
 COPY arcadectl /usr/local/bin/arcadectl
-RUN chmod +x /usr/local/bin/arcadectl
+COPY entrypoint.sh /entrypoint.sh
+RUN chmod +x /usr/local/bin/arcadectl /entrypoint.sh
 
 EXPOSE 8000
-CMD ["python3", "/app/arcaded.py"]
+ENTRYPOINT ["/entrypoint.sh"]
