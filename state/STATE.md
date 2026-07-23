@@ -1,10 +1,12 @@
 # STATE
 
-**Updated:** 2026-07-23 iteration 3b
+**Updated:** 2026-07-23 iteration 4
 
 ## Current position
 - Milestone: **M-SIM** (simulation rig — prerequisite before M0)
-- Current unit: M0 skeleton (arcaded + cabd + WS link) — next iteration
+- Current unit: M0 skeleton committed (fb531b5), verifier verdict pending;
+  next unit = accept-m0 (accelerated 24h-equivalent heartbeat delivery + router-reboot
+  reconnect), then migrate soak stack to real cabd heartbeats
 - Consecutive failures on current unit: 0
 - NOTE: loop is now self-paced (user request: continuous, iterations chained
   back-to-back; 60s wakeup between turns — scheduler minimum).
@@ -25,7 +27,8 @@
 | Milestone | Status | accept passes |
 |-----------|--------|---------------|
 | M-SIM | **DONE** (rig + soak verified; V1 auditor bug found & fixed) | – |
-| M0–M6 | not started | 0/3 each |
+| M0 | in progress (skeleton green: TEST-M0 + SIM-TEST pass) | 0/3 |
+| M1–M6 | not started | 0/3 each |
 
 ## Done units
 1. (iter 1) Repo bootstrap: spec copied in, ROADMAP/STATE/JOURNAL/ASSUMPTIONS/
@@ -36,8 +39,11 @@
 3. (iter 3) Soak stack: arcade-soak compose (chaos driver: partitions + kill -9s),
    supervised 4Hz heartbeat, soak-status violation audit. 120s run SOAK CLEAN.
 
+4. (iter 4) M0 skeleton: arcaded (WS hub/REST/RPC) + cabd (heartbeats, jittered
+   backoff, system.exec) + arcadectl (status, cab exec). TEST-M0 + SIM-TEST pass.
+
 ## Next unit
-M0 skeleton: `server/` (arcaded: FastAPI + WS hub + heartbeat tracking) and
-`cabinet/` (cabd: outbound WS through toxiproxy, 5s heartbeats accelerated in sim,
-exponential backoff reconnect capped 10s jittered), replacing the placeholder
-python http.server in both sim and soak stacks; `arcadectl status` first command.
+`make accept-m0`: scripted acceptance — accelerated 24h-equivalent run asserting
+>=99% heartbeat delivery under chaos + reconnect after full proxy restart ("router
+reboot"); needs a heartbeat-delivery counter on arcaded (/status connects/beats).
+Also: migrate soak stack cabinet to run real cabd instead of heartbeat.sh.
