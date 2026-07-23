@@ -45,6 +45,7 @@ services:
 
   cabinet:
     build: ./cabinet
+    init: true            # PID1 must reap zombies (mpv children of killed games)
     networks: [cabnet]
     volumes:
       - ../cabinet:/cabinet:ro
@@ -53,6 +54,8 @@ services:
       SERVER_WS_URL: ws://toxiproxy:8666/cab
       HEARTBEAT_SECONDS: "0.25"   # ~20x accelerated (ASSUMPTIONS A-7)
       CABD_BACKOFF_CAP: "2"       # fast reconnect assertions in sim
+      FRONTEND_BIN: /fakes/pegasus
+      RETROARCH_BIN: /fakes/retroarch
     healthcheck:
       test: ["CMD", "sh", "-c", "xdpyinfo -display :0 >/dev/null"]
       interval: 5s

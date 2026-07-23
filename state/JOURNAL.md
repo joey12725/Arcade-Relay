@@ -284,3 +284,28 @@ path returns from kill() with process alive). 3 findings, all fixed:
 
 **M0 status: DONE** (accept-m0 passed 3 consecutive times per loop rules; real-scale
 24h/tunnel/router run remains in HARDWARE-TODO.md per A-9).
+
+---
+
+## Iteration 11b — 2026-07-23 — M1: cabd/arcaded/arcadectl game lifecycle integration
+
+**Unit:** cabd imports launcher: game.launch/game.kill/game.running RPCs (serialized via
+lock, launch-over-running kills first), async watchdog task (death + UDP-silence hang →
+kill + refocus + state clear), frontend supervision (spawn FRONTEND_BIN, respawn on
+death). arcaded: POST /games/launch|kill (+args passthrough). arcadectl: games
+launch/kill/running. Heartbeat state now carries running game. New `make test-m1` (6
+steps, external kill-9 timing).
+
+**Bugs found & fixed during bring-up:**
+- Stale /tmp/.X0-lock after `docker compose restart` → Xvfb dead, frontend respawn loop.
+  Entrypoint now clears X locks. (Real-hardware note: N/A — systemd manages X there.)
+- test-m1 pgrep self-match on "hang.sfc" ([h]ang trick).
+- mpv zombies: PID1 sleep can't reap → `init: true` on sim+soak cabinet services.
+
+**Evidence:**
+- `make test-m1` → TEST-M1 PASS (exit 0): launch visible in status; kill → frontend
+  focused; kill -9 → frontend focused in 668ms (external clock, budget 2000ms); hung
+  game auto-killed+recovered; frontend respawned <4s.
+- Regressions: TEST-M0 PASS, SIM-TEST PASS, SOAK CLEAN.
+
+**Outcome:** GREEN pending verifier.

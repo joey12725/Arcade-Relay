@@ -31,6 +31,7 @@ services:
 
   cabinet:
     build: ../cabinet
+    init: true
     container_name: soak-cabinet
     entrypoint: ["/bin/sh", "/soak-bin/cabinet-soak.sh"]
     networks: [cabnet]

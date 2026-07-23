@@ -40,6 +40,15 @@ def main():
 
     sub.add_parser("status")
 
+    games = sub.add_parser("games")
+    gsub = games.add_subparsers(dest="gamescmd", required=True)
+    gl = gsub.add_parser("launch")
+    gl.add_argument("--system", required=True)
+    gl.add_argument("--path", required=True)
+    gl.add_argument("--args", default="", help="extra emulator args (space-separated)")
+    gsub.add_parser("kill")
+    gsub.add_parser("running")
+
     cab = sub.add_parser("cab")
     cabsub = cab.add_subparsers(dest="cabcmd", required=True)
     ex = cabsub.add_parser("exec")
@@ -57,6 +66,18 @@ def main():
                   f"(hb age {st['heartbeat_age_s']}s, "
                   f"interval {st['heartbeat_interval_s']}s, "
                   f"connects {st['connects']})")
+        sys.exit(0)
+
+    if args.cmd == "games":
+        if args.gamescmd == "launch":
+            res = call("POST", "/games/launch",
+                       {"system": args.system, "path": args.path,
+                        "args": args.args.split() if args.args else []})
+        elif args.gamescmd == "kill":
+            res = call("POST", "/games/kill")
+        else:  # running
+            res = {"running": call("GET", "/status")["cabinet_state"].get("running")}
+        print(json.dumps(res) if args.as_json else res.get("running") or "nothing")
         sys.exit(0)
 
     if args.cmd == "cab" and args.cabcmd == "exec":

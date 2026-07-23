@@ -131,6 +131,24 @@ async def cab_exec(request):
     return web.json_response(res["result"])
 
 
+async def games_launch(request):
+    body = await request.json()
+    res = await hub.rpc("game.launch", {"system": body["system"], "path": body["path"],
+                                        "args": body.get("args", [])})
+    if not res.get("ok"):
+        return web.json_response(res, status=500)
+    hub.log_event(f"game launched: {res['result'].get('running')}")
+    return web.json_response(res["result"])
+
+
+async def games_kill(request):
+    res = await hub.rpc("game.kill", {})
+    if not res.get("ok"):
+        return web.json_response(res, status=500)
+    hub.log_event("game killed")
+    return web.json_response(res["result"])
+
+
 app = web.Application()
 app.add_routes([
     web.get("/", root),
@@ -139,6 +157,8 @@ app.add_routes([
     web.get("/events", events),
     web.get("/cab", cab_ws),
     web.post("/cab/exec", cab_exec),
+    web.post("/games/launch", games_launch),
+    web.post("/games/kill", games_kill),
 ])
 
 if __name__ == "__main__":

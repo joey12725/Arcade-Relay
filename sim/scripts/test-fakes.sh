@@ -38,8 +38,10 @@ cab sh -c "timeout 15 $FK/retroarch /roms/snes/crash.sfc --crash-after 1; exit \
 [ "$rc" -eq 70 ] || { echo "FAIL: crash-after exit was $rc (want 70)"; exit 1; }
 cab sh -c 'xdotool search --name "retroarch-fake" >/dev/null 2>&1 && { echo "FAIL: window survived crash"; exit 1; } || true'
 
-echo "== 5. SIGTERM on pegasus fake: clean exit =="
+echo "== 5. SIGTERM on pegasus fake: clean process exit =="
+# cabd supervises its own pegasus-fake window in this container, so assert on
+# OUR process exiting (kill -0), not on window-title absence.
 cab sh -c 'kill $(cat /tmp/pegasus.pid)'
-cab sh -c 'for i in $(seq 1 20); do xdotool search --name pegasus-fake >/dev/null 2>&1 || exit 0; sleep 0.25; done; echo "FAIL: pegasus-fake window still present after SIGTERM"; exit 1'
+cab sh -c 'for i in $(seq 1 20); do kill -0 $(cat /tmp/pegasus.pid) 2>/dev/null || exit 0; sleep 0.25; done; echo "FAIL: pegasus fake still alive after SIGTERM"; exit 1'
 
 echo "TEST-FAKES PASS"

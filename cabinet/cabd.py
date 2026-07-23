@@ -17,17 +17,96 @@ import os
 import random
 import subprocess
 import sys
+import time
 
 import aiohttp
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import launcher  # noqa: E402
 
 WS_URL = os.environ.get("SERVER_WS_URL", "ws://toxiproxy:8666/cab")
 HB = float(os.environ.get("HEARTBEAT_SECONDS", "5"))
 BACKOFF_CAP = float(os.environ.get("CABD_BACKOFF_CAP", "10"))
 BACKOFF_START = 0.5
+FRONTEND_BIN = os.environ.get("FRONTEND_BIN", "/fakes/pegasus")
 
 
 def log(*a):
     print("[cabd]", *a, file=sys.stderr, flush=True)
+
+
+# ---------------------------------------------------------------- games
+
+game = {"session": None, "rom": None}
+game_lock = asyncio.Lock()
+
+
+async def game_launch(system, path, args=()):
+    async with game_lock:
+        if game["session"] is not None:
+            await asyncio.to_thread(game["session"].kill)
+            game["session"] = None
+            game["rom"] = None
+        sess = await asyncio.to_thread(launcher.GameSession, path, tuple(args))
+        game["session"] = sess
+        game["rom"] = f"{system}/{os.path.basename(path)}"
+        log("game launched:", game["rom"])
+        return {"running": game["rom"]}
+
+
+async def game_kill():
+    async with game_lock:
+        if game["session"] is None:
+            return {"running": None, "note": "nothing running"}
+        await asyncio.to_thread(game["session"].kill)
+        game["session"] = None
+        game["rom"] = None
+        log("game killed, frontend refocused")
+        return {"running": None}
+
+
+async def watchdog_loop():
+    """EMU-3: dead or hung game -> frontend back within 2s, state cleared."""
+    silent_since = None
+    while True:
+        s = game["session"]
+        if s is None:
+            silent_since = None
+        elif not s.alive():
+            launcher.focus_frontend()
+            log("watchdog: game died, frontend refocused")
+            game["session"] = None
+            game["rom"] = None
+            silent_since = None
+        elif launcher.probe_responsive():
+            silent_since = None
+        else:
+            now = time.monotonic()
+            if silent_since is None:
+                silent_since = now
+            elif now - silent_since >= launcher.HANG_UNRESPONSIVE_S:
+                log("watchdog: game hung, killing")
+                await asyncio.to_thread(s.kill)
+                game["session"] = None
+                game["rom"] = None
+                silent_since = None
+        await asyncio.sleep(launcher.WATCHDOG_POLL_S)
+
+
+async def frontend_loop():
+    """Spec §5.2 #5: if the frontend dies, restart it."""
+    if not os.access(FRONTEND_BIN, os.X_OK):
+        log(f"frontend binary {FRONTEND_BIN} missing; supervision disabled")
+        return
+    while True:
+        proc = subprocess.Popen([FRONTEND_BIN],
+                                stdout=subprocess.DEVNULL,
+                                stderr=subprocess.DEVNULL)
+        log("frontend started, pid", proc.pid)
+        while proc.poll() is None:
+            await asyncio.sleep(0.5)
+        log(f"frontend exited rc={proc.returncode}; respawning")
+        await asyncio.sleep(0.2)
 
 
 async def handle_req(ws, data):
@@ -38,6 +117,13 @@ async def handle_req(ws, data):
             p = subprocess.run(["/bin/sh", "-c", params["cmd"]],
                                capture_output=True, text=True, timeout=30)
             result = {"rc": p.returncode, "stdout": p.stdout, "stderr": p.stderr}
+        elif method == "game.launch":
+            result = await game_launch(params["system"], params["path"],
+                                       params.get("args", []))
+        elif method == "game.kill":
+            result = await game_kill()
+        elif method == "game.running":
+            result = {"running": game["rom"]}
         else:
             await ws.send_json({"id": data.get("id"), "kind": "res", "ok": False,
                                 "error": f"unknown method {method}"})
@@ -56,7 +142,7 @@ async def heartbeat_loop(ws):
     next_t = loop.time()
     while True:
         await ws.send_json({"kind": "event", "event": "heartbeat", "interval": HB,
-                            "state": {"running": None, "screensaver": False}})
+                            "state": {"running": game["rom"], "screensaver": False}})
         next_t += HB
         delay = next_t - loop.time()
         if delay < 0:
@@ -87,6 +173,9 @@ async def main():
     def reset_backoff():
         nonlocal backoff
         backoff = BACKOFF_START
+
+    asyncio.create_task(frontend_loop())
+    asyncio.create_task(watchdog_loop())
 
     async with aiohttp.ClientSession() as sess:
         while True:  # NET-2: reconnect forever

@@ -6,6 +6,9 @@ set -eu
 mkdir -p "$XDG_RUNTIME_DIR"
 chmod 700 "$XDG_RUNTIME_DIR"
 
+# container *restart* keeps the fs: clear stale X locks or Xvfb won't start
+rm -f /tmp/.X0-lock /tmp/.X11-unix/X0
+
 Xvfb :0 -screen 0 1024x768x24 &
 
 dbus-daemon --session --address="unix:path=$XDG_RUNTIME_DIR/bus" --fork
