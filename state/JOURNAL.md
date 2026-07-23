@@ -424,3 +424,17 @@ The 3-run series will be RESTARTED on the strengthened harness so all passes cer
 final code.
 
 **Outcome:** fixes committed; M1 certification restarts after current chain ends.
+
+---
+
+## Iteration 17 — 2026-07-23 — accept-m1 rehearsal 3/3 + strengthened harness cert launch
+
+**Soak check:** SOAK CLEAN.
+
+**Evidence:**
+- Rehearsal chain (pre-F4 harness): 3/3 ACCEPT-M1 PASS — 600 cycles/run x 3 = 1800
+  clean cycles across 6 systems, 15/15 kill-9 recoveries <2s (bgw3rskws exit 0).
+- F4 applied (retroarch.cfg cleanliness asserted per cycle); smoke 12 cycles PASS.
+- Certification chain on FINAL harness launched (bagisy5yr); M1 counts only these runs.
+
+**Outcome:** GREEN; M1 certification 0/3 on final harness (rehearsal evidence recorded).
