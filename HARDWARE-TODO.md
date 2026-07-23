@@ -24,3 +24,5 @@ Things that can only be verified on real hardware. Not faked green in the sim.
   per A-10) on real RetroArch cores.
 - [ ] Master volume persistence across sink suspend/resume on the real ALSA device
   (sim null sink needed an anchor stream — A-12).
+- [ ] input.monitor + global hotkey combos on real evdev devices (sim uses a FIFO
+  event source per A-13); includes HOME/SCREENSAVER/LIFELINE combo grabs.

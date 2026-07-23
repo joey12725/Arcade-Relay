@@ -44,3 +44,7 @@
   SUSPENDED, so the sim cabinet keeps a silent anchor stream playing to hold the sink
   RUNNING. Real ALSA sinks persist volume in the device; still, verify master-volume
   behavior across sink suspension on real hardware (HARDWARE-TODO).
+- **A-13 (sim input source):** `controls monitor` (input.monitor RPC) reads button
+  events from a FIFO (/tmp/input-events) in sim — there are no evdev devices in a
+  container. On real hardware cabd reads evdev (grabbing combos too); that path is in
+  HARDWARE-TODO.md. The RPC surface and CLI are identical either way.

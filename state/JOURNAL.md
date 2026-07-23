@@ -501,3 +501,23 @@ flagged, both fixed:
 **Evidence:** TEST-AUDIO PASS incl. 3b (exit 0); burst fixture detects; live soak CLEAN.
 
 **Outcome:** GREEN.
+
+---
+
+## Iteration 21 — 2026-07-23 — M2: controls map/presets, rollback, monitor
+
+**Soak check:** SOAK CLEAN.
+
+**Unit:** arcaded: /controls/{map,presets,save-preset,load-preset,monitor} +
+/state/rollback (git checkout <sha> -- . + commit + push); arcadectl controls
+map/--set, save/load/list presets, monitor --for N, state rollback. cabd:
+input.monitor RPC reading a FIFO event source (A-13 recorded; evdev = hardware,
+ledgered). Preset = snapshot of global + all per-system mapping layers.
+
+**Evidence:**
+- TEST-M2 PASS (exit 0): baseline a=b; map a=x live (rendered on next launch);
+  scramble + load-preset -> clean a=b; volume 40 -> rollback -> 70 with rollback
+  commit; monitor caught injected "BTN_A down".
+- Regressions: TEST-AUDIO, TEST-M1, TEST-LOCAL all PASS.
+
+**Outcome:** GREEN pending verifier. M2 features complete; accept-m2 next.

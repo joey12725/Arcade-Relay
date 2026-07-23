@@ -33,6 +33,47 @@ BACKOFF_START = 0.5
 FRONTEND_BIN = os.environ.get("FRONTEND_BIN", "/fakes/pegasus")
 STATE_CACHE = os.environ.get("STATE_CACHE", "/var/cache/arcade-state.json")
 CABD_SOCK = os.environ.get("CABD_SOCK", "/tmp/cabd.sock")
+INPUT_FIFO = os.environ.get("CABD_INPUT_FIFO", "/tmp/input-events")
+_fifo_fd = None   # persistent nonblocking reader so writers never block
+
+
+def init_input_fifo():
+    """Sim input source (A-13): button events arrive as lines on a FIFO.
+    Real hardware reads evdev instead (HARDWARE-TODO)."""
+    global _fifo_fd
+    try:
+        if not os.path.exists(INPUT_FIFO):
+            os.mkfifo(INPUT_FIFO)
+        _fifo_fd = os.open(INPUT_FIFO, os.O_RDONLY | os.O_NONBLOCK)
+    except OSError as e:
+        log(f"input fifo unavailable: {e}")
+
+
+def read_input_events(seconds):
+    """Drain stale bytes, then collect events for `seconds`."""
+    if _fifo_fd is None:
+        return []
+    while True:   # drain backlog
+        try:
+            if not os.read(_fifo_fd, 65536):
+                break
+        except BlockingIOError:
+            break
+    out, buf = [], ""
+    deadline = time.monotonic() + seconds
+    while time.monotonic() < deadline:
+        try:
+            chunk = os.read(_fifo_fd, 4096)
+        except BlockingIOError:
+            chunk = b""
+        if chunk:
+            buf += chunk.decode(errors="replace")
+            *lines, buf = buf.split("\n")
+            out.extend(l for l in lines if l)
+        time.sleep(0.05)
+    if buf.strip():
+        out.append(buf.strip())
+    return out
 
 # Local state cache (spec §5.2 #7): boots and renders fully offline.
 state = {"bundle": {}}
@@ -230,6 +271,10 @@ async def handle_req(ws, data):
             result = await game_kill()
         elif method == "game.running":
             result = {"running": game["rom"]}
+        elif method == "input.monitor":
+            secs = min(float(params.get("seconds", 2)), 30)
+            events = await asyncio.to_thread(read_input_events, secs)
+            result = {"events": events}
         elif method == "state.sync":
             bundle = params["bundle"]
             if not isinstance(bundle, dict):
@@ -300,6 +345,7 @@ async def main():
     else:
         log("no state cache yet; waiting for first state.sync")
 
+    init_input_fifo()
     await local_server()
     asyncio.create_task(frontend_loop())
     asyncio.create_task(watchdog_loop())

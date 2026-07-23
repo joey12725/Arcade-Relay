@@ -221,6 +221,97 @@ async def state_push(request):
     return web.json_response(res["result"])
 
 
+def _read_yaml(rel):
+    p = pathlib.Path(STATE_DIR) / rel
+    return (yaml.safe_load(p.read_text()) or {}) if p.exists() else {}
+
+
+def _write_yaml(rel, data):
+    p = pathlib.Path(STATE_DIR) / rel
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text(yaml.safe_dump(data, default_flow_style=False))
+
+
+def controls_snapshot():
+    """Preset = named snapshot of all mapping layers (CTL-2)."""
+    root = pathlib.Path(STATE_DIR) / "controllers"
+    snap = {"global": _read_yaml("controllers/global.yaml"), "systems": {}}
+    sysdir = root / "systems"
+    if sysdir.is_dir():
+        for p in sorted(sysdir.glob("*.yaml")):
+            snap["systems"][p.stem] = yaml.safe_load(p.read_text()) or {}
+    return snap
+
+
+async def controls_presets(request):
+    d = pathlib.Path(STATE_DIR) / "controllers" / "presets"
+    names = sorted(p.stem for p in d.glob("*.yaml")) if d.is_dir() else []
+    return web.json_response({"presets": names})
+
+
+async def controls_save_preset(request):
+    name = (await request.json())["name"]
+    _write_yaml(f"controllers/presets/{name}.yaml", controls_snapshot())
+    git_commit(f"arcadectl: controls save-preset {name}")
+    hub.log_event(f"preset saved: {name}")
+    return web.json_response({"saved": name})
+
+
+async def controls_load_preset(request):
+    name = (await request.json())["name"]
+    snap = _read_yaml(f"controllers/presets/{name}.yaml")
+    if not snap:
+        return web.json_response({"error": f"no preset {name}"}, status=404)
+    _write_yaml("controllers/global.yaml", snap.get("global") or {})
+    for sysname, data in (snap.get("systems") or {}).items():
+        _write_yaml(f"controllers/systems/{sysname}.yaml", data)
+    git_commit(f"arcadectl: controls load-preset {name}")
+    push_state_soon()
+    hub.log_event(f"preset loaded: {name}")
+    return web.json_response({"loaded": name})
+
+
+async def controls_map(request):
+    body = await request.json()
+    scope, sets = body["scope"], body["set"]
+    if scope == "global":
+        rel = "controllers/global.yaml"
+        data = _read_yaml(rel)
+        data.setdefault("buttons", {}).update(sets)
+    elif scope.startswith("system:"):
+        rel = f"controllers/systems/{scope.split(':', 1)[1]}.yaml"
+        data = _read_yaml(rel)
+        data.setdefault("remap", {}).update(sets)
+    else:
+        return web.json_response({"error": f"bad scope {scope}"}, status=400)
+    _write_yaml(rel, data)
+    git_commit(f"arcadectl: controls map {scope} "
+               + " ".join(f"{k}={v}" for k, v in sets.items()))
+    push_state_soon()
+    hub.log_event(f"controls map {scope}: {sets}")
+    return web.json_response(data)
+
+
+async def controls_monitor(request):
+    body = await request.json()
+    res = await hub.rpc("input.monitor", {"seconds": body.get("seconds", 2)})
+    if not res.get("ok"):
+        return web.json_response(res, status=500)
+    return web.json_response(res["result"])
+
+
+async def state_rollback(request):
+    commit = (await request.json())["commit"]
+    r = subprocess.run(["git", "-C", STATE_DIR, "checkout", commit, "--", "."],
+                       capture_output=True, text=True)
+    if r.returncode != 0:
+        return web.json_response({"error": r.stderr.strip()}, status=400)
+    git_commit(f"arcadectl: rollback to {commit}")
+    push_state_soon()
+    hub.log_event(f"state rolled back to {commit}")
+    return web.json_response({"rolled_back_to": commit})
+
+
 AUDIO_REL = "audio.yaml"
 
 
@@ -314,6 +405,12 @@ app.add_routes([
     web.get("/state/bundle", state_bundle),
     web.post("/state/push", state_push),
     web.get("/state/log", state_log),
+    web.post("/state/rollback", state_rollback),
+    web.get("/controls/presets", controls_presets),
+    web.post("/controls/save-preset", controls_save_preset),
+    web.post("/controls/load-preset", controls_load_preset),
+    web.post("/controls/map", controls_map),
+    web.post("/controls/monitor", controls_monitor),
     web.get("/volume", volume_get),
     web.post("/volume/set", volume_set),
     web.get("/favorites", favorites_list),

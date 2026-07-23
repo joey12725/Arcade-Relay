@@ -65,6 +65,21 @@ def main():
     stsub.add_parser("push")
     stsub.add_parser("bundle")
     stsub.add_parser("log")
+    rb = stsub.add_parser("rollback")
+    rb.add_argument("commit")
+
+    ct = sub.add_parser("controls")
+    csub = ct.add_subparsers(dest="ctlcmd", required=True)
+    csub.add_parser("list-presets")
+    for c in ("save-preset", "load-preset"):
+        cp = csub.add_parser(c)
+        cp.add_argument("name")
+    cm = csub.add_parser("map")
+    cm.add_argument("--scope", required=True, help="global | system:<sys>")
+    cm.add_argument("--set", dest="sets", action="append", required=True,
+                    metavar="BTN=TARGET")
+    mon = csub.add_parser("monitor")
+    mon.add_argument("--for", dest="seconds", type=float, default=2)
 
     fav = sub.add_parser("favorites")
     fsub = fav.add_subparsers(dest="favcmd", required=True)
@@ -128,8 +143,25 @@ def main():
             res = call("POST", "/state/push")
         elif args.statecmd == "log":
             res = call("GET", "/state/log")
+        elif args.statecmd == "rollback":
+            res = call("POST", "/state/rollback", {"commit": args.commit})
         else:
             res = call("GET", "/state/bundle")
+        print(json.dumps(res))
+        sys.exit(0)
+
+    if args.cmd == "controls":
+        if args.ctlcmd == "list-presets":
+            res = call("GET", "/controls/presets")
+        elif args.ctlcmd == "save-preset":
+            res = call("POST", "/controls/save-preset", {"name": args.name})
+        elif args.ctlcmd == "load-preset":
+            res = call("POST", "/controls/load-preset", {"name": args.name})
+        elif args.ctlcmd == "map":
+            sets = dict(s.split("=", 1) for s in args.sets)
+            res = call("POST", "/controls/map", {"scope": args.scope, "set": sets})
+        else:  # monitor
+            res = call("POST", "/controls/monitor", {"seconds": args.seconds})
         print(json.dumps(res))
         sys.exit(0)
 
