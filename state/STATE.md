@@ -1,13 +1,15 @@
 # STATE
 
-**Updated:** 2026-07-23 iteration 18
+**Updated:** 2026-07-23 iteration 19
 
 ## Current position
 - Milestone: **M-SIM** (simulation rig — prerequisite before M0)
-- Current unit: M2 unit 1 — audio policy engine (real PipeWire in cabinet
-  container: null sink, pactl-based class enforcement, media.role tagging at spawn,
-  <=1s reaction to new nodes; state/audio.yaml; arcadectl volume get/set).
-  Then: presets save/load + controls monitor + state rollback; accept-m2.
+- Current unit: M2 audio engine DONE (df181f4, test-audio green, verifier running —
+  measuring trailer-mute latency vs spec 100ms). Soak V3 got an explicit SLO after a
+  host-contention transient (journal iter 19).
+- NEXT M2 units: controller presets save/load + diff (state/controllers/presets/),
+  controls monitor (input.monitor RPC), state rollback CLI; then accept-m2
+  (trailer-never-audible + preset round-trip) x3.
 - Iter 12 done: verifier FAIL (supervisor died on cabd crash) -> fixed supervisor,
   kill_strays convergence, frontend pdeathsig, watchdog identity check under lock,
   window-teardown wait; test-m1 step 7 added (kill -9 cabd -> converge). 7/7 green.
@@ -38,7 +40,7 @@
 | M-SIM | **DONE** (rig + soak verified; V1 auditor bug found & fixed) | – |
 | M0 | **DONE** (3/3 accept passes: 1.0004/1.0004/1.0006) | 3/3 |
 | M1 | **DONE** (3/3 on strengthened harness; 3600 clean cycles total) | 3/3 |
-| M2 | starting: audio policy engine | 0/3 |
+| M2 | audio engine done; presets/monitor/rollback remain | 0/3 |
 | M1–M6 | not started | 0/3 each |
 
 ## Done units

@@ -1,14 +1,14 @@
 # NIGHTLY REPORT
 
-**As of:** 2026-07-23, iteration 15
+**As of:** 2026-07-23, iteration 19
 
 ## TL;DR
-M0 CERTIFIED (3/3). M1 feature-complete and acceptance chain running: remote+LOCAL game lifecycle (launches work with the network cut — proven), config-as-code rendering stomps drift before every launch, favorites are git-committed server-side and sync to the cabinet, watchdog recovers deaths AND hangs, cabd survives kill -9 (a verifier caught the supervisor dying with it — fixed). Smoke: 18/18 cycles, recoveries <500ms.
+M0 CERTIFIED (3/3). M1 CERTIFIED (3/3 on strengthened harness; 3600 clean cycles today). M2 underway: audio policy engine live on real PipeWire (trailer muted on appearance, live CLI volume with git commits). Soak tripped once on a host-contention transient — analyzed, encoded as an explicit V3 SLO (consecutive always violate; isolated <=1/h), fixture-verified, clean again.
 
 ## Milestones
 - M-SIM: DONE (rig + soak, subagent-verified)
-- M0: DONE (3/3 certified)
-- M1: feature-complete; accept-m1 3-run chain executing
+- M0: DONE (3/3) | M1: DONE (3/3)
+- M2: audio engine done+tested; presets/monitor/rollback next
 - M0–M6: not started
 
 ## Soak
