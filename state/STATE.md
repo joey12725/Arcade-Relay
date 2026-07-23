@@ -1,10 +1,16 @@
 # STATE
 
-**Updated:** 2026-07-23 iteration 11b
+**Updated:** 2026-07-23 iteration 12
 
 ## Current position
 - Milestone: **M-SIM** (simulation rig — prerequisite before M0)
-- Current unit: M1 lifecycle integration committed (3b4ee6d), verifier running.
+- Current unit: NEXT = M1 config rendering from state repo (state/ mounted into
+  server, arcaded pushes bundle on connect+change, cabd caches locally + renders
+  retroarch.cfg/remaps before EVERY launch; test: scramble rendered configs ->
+  relaunch -> assert clean). Then favorites, then accept-m1 x3.
+- Iter 12 done: verifier FAIL (supervisor died on cabd crash) -> fixed supervisor,
+  kill_strays convergence, frontend pdeathsig, watchdog identity check under lock,
+  window-teardown wait; test-m1 step 7 added (kill -9 cabd -> converge). 7/7 green.
 - Next units (M1 remainder): config rendering from state repo before every launch
   (retroarch.cfg + remaps from state/, scramble->relaunch->clean test); favorites
   (state/library/favorites.yaml + arcadectl favorites); then accept-m1 (100
