@@ -1,14 +1,14 @@
 # NIGHTLY REPORT
 
-**As of:** 2026-07-23, iteration 19
+**As of:** 2026-07-23, iteration 22
 
 ## TL;DR
-M0 CERTIFIED (3/3). M1 CERTIFIED (3/3 on strengthened harness; 3600 clean cycles today). M2 underway: audio policy engine live on real PipeWire (trailer muted on appearance, live CLI volume with git commits). Soak tripped once on a host-contention transient — analyzed, encoded as an explicit V3 SLO (consecutive always violate; isolated <=1/h), fixture-verified, clean again.
+M0, M1, M2 all CERTIFIED (3/3 acceptance passes each). M2's acceptance itself caught a real reliability bug: wireplumber can lose the container-start race and die silently, making all volume/mute enforcement a no-op — audio daemons are now supervised (Restart=always) and the healthcheck asserts session-manager liveness. Full control plane shipped: audio classes on real PipeWire, mapping CLI, presets, state git log/rollback, controls monitor.
 
 ## Milestones
 - M-SIM: DONE (rig + soak, subagent-verified)
-- M0: DONE (3/3) | M1: DONE (3/3)
-- M2: audio engine done+tested; presets/monitor/rollback next
+- M0/M1/M2: DONE (3/3 each)
+- M3 (screensaver): next — Jellyfin, 480p, panscan, brightness IPC
 - M0–M6: not started
 
 ## Soak

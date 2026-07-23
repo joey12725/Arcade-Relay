@@ -521,3 +521,30 @@ ledgered). Preset = snapshot of global + all per-system mapping layers.
 - Regressions: TEST-AUDIO, TEST-M1, TEST-LOCAL all PASS.
 
 **Outcome:** GREEN pending verifier. M2 features complete; accept-m2 next.
+
+---
+
+## Iteration 22 — 2026-07-23 — M2 CERTIFIED after audio-stack reliability fix
+
+**Failure found by acceptance (the process worked):** accept-m2 run 1 passed, runs 2-3
+FAILED (trailer audible >500ms). Diagnosis chain: pactl set returned rc=0 but mute never
+applied → wireplumber was a ZOMBIE — it loses the container-start race (pipewire socket
+not up) and dies, leaving PipeWire with no session manager, where volume/mute sets
+silently no-op. Also found: pactl subscribe stdout block-buffers when piped (events
+stuck below 4KB — fixed with stdbuf -oL + 5s idempotent reconcile backstop); orphan
+anchor mpv died at boot for the same race.
+
+**Fixes:**
+1. entrypoint: pipewire, pipewire-pulse, wireplumber, and the anchor stream each under
+   Restart=always supervisor loops — the startup race is now harmless.
+2. Cabinet healthcheck asserts wireplumber + pipewire-pulse alive (a dead session
+   manager fails health instead of passing silently).
+3. audio_loop: stdbuf -oL on pactl subscribe + periodic reconcile.
+
+**Evidence:**
+- ACCEPT-M2 PASS x3 consecutive (runs am2b-1..3, exit 0 each): trailer muted on
+  arrival + self-unmute re-clamped + preset round-trip clean.
+- Regressions: TEST-AUDIO, TEST-M2, TEST-M1 PASS; SOAK CLEAN.
+
+**M2 status: DONE** (accept-m2 3/3; controller-remap web UI is M6 scope; real evdev
+input per A-13 ledgered).

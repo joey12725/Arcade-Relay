@@ -219,12 +219,21 @@ async def audio_loop():
                             audio.policy_from_bundle(state["bundle"]))
     while True:
         try:
+            # stdbuf -oL is load-bearing: pactl block-buffers stdout when
+            # piped, so without it events sit unseen until 4KB accumulates
             proc = await asyncio.create_subprocess_exec(
-                "pactl", "subscribe",
+                "stdbuf", "-oL", "pactl", "subscribe",
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.DEVNULL)
             while True:
-                line = await proc.stdout.readline()
+                try:
+                    line = await asyncio.wait_for(proc.stdout.readline(), timeout=5)
+                except asyncio.TimeoutError:
+                    # periodic reconcile backstop (idempotent, no-op when
+                    # compliant) in case an event was ever missed
+                    await asyncio.to_thread(
+                        audio.apply_all, audio.policy_from_bundle(state["bundle"]))
+                    continue
                 if not line:
                     break
                 text = line.decode(errors="replace")

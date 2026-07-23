@@ -60,11 +60,13 @@ services:
       FRONTEND_BIN: /fakes/pegasus
       RETROARCH_BIN: /fakes/retroarch
     healthcheck:
-      test: ["CMD", "sh", "-c", "xdpyinfo -display :0 >/dev/null"]
+      # X up AND the full audio stack alive — a dead wireplumber means sets
+      # silently no-op, which must fail health, not pass silently
+      test: ["CMD", "sh", "-c", "xdpyinfo -display :0 >/dev/null && pgrep -x wireplumber >/dev/null && pgrep -x pipewire-pulse >/dev/null"]
       interval: 5s
       timeout: 3s
       retries: 10
-      start_period: 10s
+      start_period: 15s
 
 networks:
   cabnet: {}

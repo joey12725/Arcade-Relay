@@ -39,6 +39,9 @@ test-audio:
 test-m2:
 	bash sim/scripts/test-m2.sh
 
+accept-m2:
+	bash sim/scripts/accept-m2.sh
+
 soak-up:
 	cd sim/soak && docker compose up -d --build --wait --wait-timeout 300
 

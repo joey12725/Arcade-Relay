@@ -1,15 +1,13 @@
 # STATE
 
-**Updated:** 2026-07-23 iteration 20
+**Updated:** 2026-07-23 iteration 22
 
 ## Current position
 - Milestone: **M-SIM** (simulation rig — prerequisite before M0)
-- Current unit: M2 audio engine DONE (df181f4, test-audio green, verifier running —
-  measuring trailer-mute latency vs spec 100ms). Soak V3 got an explicit SLO after a
-  host-contention transient (journal iter 19).
-- NEXT M2 units: controller presets save/load + diff (state/controllers/presets/),
-  controls monitor (input.monitor RPC), state rollback CLI; then accept-m2
-  (trailer-never-audible + preset round-trip) x3.
+- Current unit: M2 DONE. NEXT = M3 screensaver: Jellyfin integration (library
+  enumeration + 480p transcode URLs), mpv idle player w/ panscan crop + brightness
+  tint via IPC, per-source enable/disable, idle in/out + force CLI, offline fallback.
+  Media: seed sim/media with generated test videos for Jellyfin.
 - Iter 12 done: verifier FAIL (supervisor died on cabd crash) -> fixed supervisor,
   kill_strays convergence, frontend pdeathsig, watchdog identity check under lock,
   window-teardown wait; test-m1 step 7 added (kill -9 cabd -> converge). 7/7 green.
@@ -40,7 +38,8 @@
 | M-SIM | **DONE** (rig + soak verified; V1 auditor bug found & fixed) | – |
 | M0 | **DONE** (3/3 accept passes: 1.0004/1.0004/1.0006) | 3/3 |
 | M1 | **DONE** (3/3 on strengthened harness; 3600 clean cycles total) | 3/3 |
-| M2 | audio engine done; presets/monitor/rollback remain | 0/3 |
+| M2 | **DONE** (accept-m2 3/3; wireplumber-zombie reliability fix en route) | 3/3 |
+| M3 | starting: screensaver | 0/3 |
 | M1–M6 | not started | 0/3 each |
 
 ## Done units
