@@ -5,7 +5,7 @@ FROM debian:trixie-slim
 RUN apt-get update && apt-get install -y --no-install-recommends \
         xvfb x11-utils xdotool wmctrl \
         mpv \
-        pipewire pipewire-pulse wireplumber dbus \
+        pipewire pipewire-pulse wireplumber dbus pulseaudio-utils \
         python3 python3-evdev python3-aiohttp \
         curl ca-certificates procps \
     && rm -rf /var/lib/apt/lists/*

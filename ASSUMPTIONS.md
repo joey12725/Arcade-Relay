@@ -40,3 +40,7 @@
   added during a test) and git history. Acceptable in sim (each accept run is
   self-contained); on real hardware the state repo is a persistent git repo on the
   server's disk, and seed-vs-work divergence doesn't apply.
+- **A-12 (sim audio anchor):** PipeWire null sinks discard volume changes while
+  SUSPENDED, so the sim cabinet keeps a silent anchor stream playing to hold the sink
+  RUNNING. Real ALSA sinks persist volume in the device; still, verify master-volume
+  behavior across sink suspension on real hardware (HARDWARE-TODO).

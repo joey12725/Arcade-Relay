@@ -76,9 +76,11 @@ class GameSession:
 
     def __init__(self, rom, extra_args=()):
         self.rom = rom
+        env = dict(os.environ)
+        env["PULSE_PROP_media.role"] = "games"   # audio class tag (spec §5.6)
         self.proc = subprocess.Popen(
             [RETROARCH_BIN, rom, *extra_args],
-            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, env=env)
         self.window = None
         deadline = time.monotonic() + 5
         while time.monotonic() < deadline:

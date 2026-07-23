@@ -38,9 +38,12 @@ def main():
     args = ap.parse_args()
 
     title = f"retroarch-fake {os.path.basename(args.rom)}"
+    # sine source + forced window: a real X window AND a real PipeWire audio
+    # node, so the audio policy engine (M2) is exercised by every game launch
     mpv = subprocess.Popen(
-        ["mpv", "--no-config", "--vo=x11", "--loop=inf", "--really-quiet",
-         f"--title={title}", "av://lavfi:testsrc"],
+        ["mpv", "--no-config", "--vo=x11", "--force-window=yes",
+         "--ao=pulse,pipewire,null", "--loop=inf", "--really-quiet",
+         f"--title={title}", "av://lavfi:sine=frequency=440"],
         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
         preexec_fn=_die_with_parent)
 

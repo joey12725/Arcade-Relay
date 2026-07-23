@@ -22,6 +22,7 @@ import time
 import aiohttp
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import audio  # noqa: E402
 import launcher  # noqa: E402
 import renderer  # noqa: E402
 
@@ -170,6 +171,30 @@ async def local_server():
     log("local control socket at", CABD_SOCK)
 
 
+async def audio_loop():
+    """Spec §5.6: react to new PipeWire nodes — classify and clamp them
+    before anything audible escapes (pactl subscribe is evented)."""
+    await asyncio.to_thread(audio.apply_all,
+                            audio.policy_from_bundle(state["bundle"]))
+    while True:
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                "pactl", "subscribe",
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.DEVNULL)
+            while True:
+                line = await proc.stdout.readline()
+                if not line:
+                    break
+                text = line.decode(errors="replace")
+                if "sink-input" in text and ("'new'" in text or "'change'" not in text):
+                    await asyncio.to_thread(
+                        audio.apply_all, audio.policy_from_bundle(state["bundle"]))
+        except Exception as e:  # noqa: BLE001
+            log(f"audio_loop error: {e!r}")
+        await asyncio.sleep(1)   # pactl died (pipewire restart?) — reattach
+
+
 async def frontend_loop():
     """Spec §5.2 #5: if the frontend dies, restart it."""
     if not os.access(FRONTEND_BIN, os.X_OK):
@@ -208,8 +233,11 @@ async def handle_req(ws, data):
                 raise ValueError(f"bundle must be a dict, got {type(bundle).__name__}")
             save_state_cache(bundle)
             state["bundle"] = bundle
-            result = {"applied": True, "files": len(bundle)}
-            log(f"state synced: {len(bundle)} files cached")
+            applied = await asyncio.to_thread(
+                audio.apply_all, audio.policy_from_bundle(bundle))
+            result = {"applied": True, "files": len(bundle),
+                      "audio_nodes": applied}
+            log(f"state synced: {len(bundle)} files cached; audio -> {applied}")
         else:
             await ws.send_json({"id": data.get("id"), "kind": "res", "ok": False,
                                 "error": f"unknown method {method}"})
@@ -272,6 +300,7 @@ async def main():
     await local_server()
     asyncio.create_task(frontend_loop())
     asyncio.create_task(watchdog_loop())
+    asyncio.create_task(audio_loop())
 
     async with aiohttp.ClientSession() as sess:
         while True:  # NET-2: reconnect forever

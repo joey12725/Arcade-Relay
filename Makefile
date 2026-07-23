@@ -33,6 +33,9 @@ accept-m1:
 test-favorites:
 	bash sim/scripts/test-favorites.sh
 
+test-audio:
+	bash sim/scripts/test-audio.sh
+
 soak-up:
 	cd sim/soak && docker compose up -d --build --wait --wait-timeout 300
 

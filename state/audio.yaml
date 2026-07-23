@@ -1,0 +1,8 @@
+# Audio policy (AUD-1, AUD-2). Server-authoritative; cabd enforces on boot,
+# on state-sync, and reactively when new PipeWire nodes appear.
+master: 70            # 0-100, default sink volume
+classes:
+  games:       {volume: 100, muted: false}
+  trailers:    {volume: 100, muted: true}
+  screensaver: {volume: 100, muted: true}
+  system:      {volume: 50,  muted: false}

@@ -49,6 +49,17 @@ def main():
     gsub.add_parser("kill")
     gsub.add_parser("running")
 
+    vol = sub.add_parser("volume")
+    vsub = vol.add_subparsers(dest="volcmd", required=True)
+    vsub.add_parser("get")
+    vs = vsub.add_parser("set")
+    vs.add_argument("--master", type=int)
+    vs.add_argument("--class", dest="cls")
+    vs.add_argument("--volume", type=int)
+    mg = vs.add_mutually_exclusive_group()
+    mg.add_argument("--mute", action="store_true")
+    mg.add_argument("--unmute", action="store_true")
+
     st = sub.add_parser("state")
     stsub = st.add_subparsers(dest="statecmd", required=True)
     stsub.add_parser("push")
@@ -91,6 +102,25 @@ def main():
         else:  # running
             res = {"running": call("GET", "/status")["cabinet_state"].get("running")}
         print(json.dumps(res) if args.as_json else res.get("running") or "nothing")
+        sys.exit(0)
+
+    if args.cmd == "volume":
+        if args.volcmd == "get":
+            res = call("GET", "/volume")
+        else:
+            body = {}
+            if args.master is not None:
+                body["master"] = args.master
+            if args.cls:
+                body["class"] = args.cls
+                if args.volume is not None:
+                    body["volume"] = args.volume
+                if args.mute:
+                    body["muted"] = True
+                elif args.unmute:
+                    body["muted"] = False
+            res = call("POST", "/volume/set", body)
+        print(json.dumps(res))
         sys.exit(0)
 
     if args.cmd == "state":

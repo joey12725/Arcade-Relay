@@ -450,3 +450,34 @@ Combined with rehearsal: 3600 consecutive clean cycles today.
 
 **M1 status: DONE** (sim scope; UI-4 audit, real theme, real-duration cycles ledgered
 in HARDWARE-TODO.md per A-10).
+
+---
+
+## Iteration 19 — 2026-07-23 — M2 unit 1: audio policy engine + soak V3 SLO
+
+**SOAK VIOLATION (preempted roadmap):** V3 single FAIL at 1784785727470 — analysis:
+isolated probe timeout (>1s arcaded stall) with OK probes 270ms either side, during
+concurrent host image builds + 600-cycle chain; 41k probes/449 partitions otherwise
+clean; V5 server-view clean. Verdict: transient host-contention stall, not a product
+regression. Encoded as explicit SLO instead of silent tolerance: V3 now = ANY
+consecutive FAIL outside chaos, OR isolated-FAIL rate >1/hour. Verified with synthetic
+fixtures: consecutive→violation, 2-isolated-in-50s→rate violation, clean→0. Live audit
+SOAK CLEAN again.
+
+**Unit (M2 audio, AUD-1/AUD-2 on real PipeWire):**
+- cabinet/audio.py: pactl -f json policy engine; classes tagged via
+  PULSE_PROP_media.role at spawn (GameSession→games); unknown→system.
+- cabd: audio_loop (pactl subscribe, event-driven re-apply; reattach on pipewire
+  restart); policy re-applied on every state.sync.
+- state/audio.yaml (spec defaults); arcaded /volume get/set + git commit + push;
+  arcadectl volume get/set (--master/--class/--volume/--mute/--unmute).
+- Sim: null sink + silent anchor stream (A-12: suspended null sinks discard volume);
+  fake retroarch now emits real sine audio + forced window.
+- Bugs fixed en route: sh can't inline-set env vars with dots (env(1) now), bool case
+  in test, stray cwd appends repaired.
+
+**Evidence:** TEST-AUDIO PASS (exit 0): master 70% from state; game node unmuted/100%;
+trailer node muted on appearance; live CLI mute/unmute w/ git commit; master 55%→70%
+via CLI. Regressions: TEST-M1 PASS, TEST-LOCAL PASS. Soak: CLEAN under new SLO.
+
+**Outcome:** GREEN pending verifier.

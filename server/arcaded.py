@@ -221,6 +221,44 @@ async def state_push(request):
     return web.json_response(res["result"])
 
 
+AUDIO_REL = "audio.yaml"
+
+
+def load_audio():
+    p = pathlib.Path(STATE_DIR) / AUDIO_REL
+    return (yaml.safe_load(p.read_text()) or {}) if p.exists() else {}
+
+
+async def volume_get(request):
+    return web.json_response(load_audio())
+
+
+async def volume_set(request):
+    body = await request.json()
+    data = load_audio()
+    changes = []
+    if "master" in body:
+        data["master"] = int(body["master"])
+        changes.append(f"master={data['master']}")
+    if "class" in body:
+        cls = body["class"]
+        cur = data.setdefault("classes", {}).setdefault(cls, {})
+        if "volume" in body:
+            cur["volume"] = int(body["volume"])
+            changes.append(f"{cls}.volume={cur['volume']}")
+        if "muted" in body:
+            cur["muted"] = bool(body["muted"])
+            changes.append(f"{cls}.muted={cur['muted']}")
+    if not changes:
+        return web.json_response({"error": "nothing to change"}, status=400)
+    p = pathlib.Path(STATE_DIR) / AUDIO_REL
+    p.write_text(yaml.safe_dump(data, default_flow_style=False))
+    git_commit(f"arcadectl: volume set {' '.join(changes)}")
+    push_state_soon()
+    hub.log_event(f"volume set: {' '.join(changes)}")
+    return web.json_response(data)
+
+
 async def favorites_list(request):
     return web.json_response({"favorites": load_favorites()})
 
@@ -276,6 +314,8 @@ app.add_routes([
     web.get("/state/bundle", state_bundle),
     web.post("/state/push", state_push),
     web.get("/state/log", state_log),
+    web.get("/volume", volume_get),
+    web.post("/volume/set", volume_set),
     web.get("/favorites", favorites_list),
     web.post("/favorites/add", favorites_add),
     web.post("/favorites/remove", favorites_remove),

@@ -18,6 +18,16 @@ pipewire &
 pipewire-pulse &
 wireplumber &
 
+# containers have no audio hardware: load a null sink so real audio nodes
+# exist for the policy engine (retry until pipewire-pulse is up). A silent
+# anchor stream keeps the sink RUNNING — a suspended null sink silently
+# discards volume changes (sim-only quirk; real ALSA sinks store volume).
+(i=0; until pactl load-module module-null-sink sink_name=simsink >/dev/null 2>&1; do
+    i=$((i + 1)); [ "$i" -ge 40 ] && break; sleep 0.25
+done
+env 'PULSE_PROP_media.role=system' mpv --no-config --no-video --ao=pulse \
+    --loop=inf --really-quiet "av://lavfi:anullsrc=r=48000" >/dev/null 2>&1) &
+
 # cabd under a Restart=always-style supervisor (systemd analog, spec §5.1).
 # `|| true` is load-bearing: set -e is inherited by the subshell, and without
 # it a non-zero cabd exit (any crash/kill) kills the supervisor loop itself.
