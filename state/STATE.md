@@ -1,13 +1,17 @@
 # STATE
 
-**Updated:** 2026-07-23 iteration 22
+**Updated:** 2026-07-23 iteration 24
 
 ## Current position
 - Milestone: **M-SIM** (simulation rig — prerequisite before M0)
-- Current unit: M2 DONE. NEXT = M3 screensaver: Jellyfin integration (library
-  enumeration + 480p transcode URLs), mpv idle player w/ panscan crop + brightness
-  tint via IPC, per-source enable/disable, idle in/out + force CLI, offline fallback.
-  Media: seed sim/media with generated test videos for Jellyfin.
+- Current unit: M3 unit A DONE (dee7212: Jellyfin adapter, 480p transcode measured,
+  /media tunnel proxy; verifier running). NEXT = unit B: cabinet screensaver engine
+  (cabinet/screensaver.py: mpv --fs --panscan=1.0 + JSON IPC, brightness tint via
+  colorchannelmixer live <500ms, audio class screensaver; cabd screensaver.on/off/set
+  RPCs + idle in/out from FIFO activity + force CLI). Then unit C: offline fallback
+  clips + accept-m3 x3.
+- Verifier flags to watch: /media proxy aiohttp 5-min default timeout (fix in unit B);
+  per-fetch PlaybackInfo sessions may leak ffmpeg processes (reuse sessions or accept).
 - Iter 12 done: verifier FAIL (supervisor died on cabd crash) -> fixed supervisor,
   kill_strays convergence, frontend pdeathsig, watchdog identity check under lock,
   window-teardown wait; test-m1 step 7 added (kill -9 cabd -> converge). 7/7 green.
@@ -39,7 +43,7 @@
 | M0 | **DONE** (3/3 accept passes: 1.0004/1.0004/1.0006) | 3/3 |
 | M1 | **DONE** (3/3 on strengthened harness; 3600 clean cycles total) | 3/3 |
 | M2 | **DONE** (accept-m2 3/3; wireplumber-zombie reliability fix en route) | 3/3 |
-| M3 | starting: screensaver | 0/3 |
+| M3 | unit A done (Jellyfin+480p+proxy); engine + fallback + accept remain | 0/3 |
 | M1–M6 | not started | 0/3 each |
 
 ## Done units
