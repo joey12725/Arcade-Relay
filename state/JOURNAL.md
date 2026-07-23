@@ -781,3 +781,23 @@ reclaim risk. Segment 1 (07:09–08:07Z, clean, 138 partitions) journaled for th
 cumulative fallback ledger.
 
 **Outcome:** soak running again; watch continues.
+
+---
+
+## Iteration 34 — 2026-07-23 — Second host reclaim; soak watch redesigned
+
+**Violation:** V4 staleness again — segment 2 lasted only ~6min (14:08→14:14Z) before
+the VM was reclaimed; session stayed suspended until user resumed at 19:32Z. Scheduled
+wakeups do NOT revive a suspended VM.
+
+**Root-cause insight:** the VM stays alive while a BACKGROUND TASK runs (every 1h+
+acceptance chain today completed without suspension). The 20-min wakeup cadence was
+the wrong tool.
+
+**Action:** Soak epoch 3: READY 1784835326000 = 19:35:26Z, gate 03:35:26Z (Jul 24).
+An 8h background watcher task (btn8em1qx) polls make soak-status every 10min, exits 1
+immediately on violation, exits 0 at 48/48 clean checks — keeping the VM up for the
+whole window and notifying at the gate. Segments ledger (A-16): S1 07:09-08:07Z clean
+(138 partitions); S2 14:08-14:14Z clean-truncated (~6min).
+
+**Outcome:** watch running; DONE.md on clean completion.
