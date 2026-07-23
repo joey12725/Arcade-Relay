@@ -2,7 +2,8 @@
 """arcadectl — CLI for arcaded (M0: status, cab exec).
 
 Stdlib only. --json on everything (AGT-1); meaningful exit codes; no prompts.
-Exit: 0 ok, 1 remote/command error, 2 usage, 3 server unreachable.
+Exit: 0 ok, 1 remote command failed (rc!=0), 2 usage, 3 server unreachable,
+4 API/transport error (HTTP status from arcaded).
 """
 import argparse
 import json
@@ -26,7 +27,7 @@ def call(method, path, body=None):
     except urllib.error.HTTPError as e:
         print(f"arcadectl: {e.code} {e.read().decode(errors='replace')}",
               file=sys.stderr)
-        sys.exit(1)
+        sys.exit(4)
     except (urllib.error.URLError, OSError) as e:
         print(f"arcadectl: cannot reach arcaded at {BASE}: {e}", file=sys.stderr)
         sys.exit(3)

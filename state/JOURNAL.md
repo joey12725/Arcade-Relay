@@ -128,3 +128,20 @@ cab exec, --json, meaningful exit codes). Sim: cabd supervised in cabinet entryp
   appended when it completes.
 
 **Outcome:** GREEN pending verifier (both suites pass locally).
+
+---
+
+## Iteration 4b — 2026-07-23 — M0 verifier verdict + hardening
+
+**Verifier verdict on M0 skeleton:** PASS (test-m0 exit 0, sim-test exit 0 re-run by
+verifier; heartbeat-vs-socket-closed detection confirmed out-of-band with an upstream
+timeout toxic). 4 gaps flagged, all applied:
+1. test-m0 step 4b: hang case (timeout=0 upstream toxic — socket open, heartbeats
+   blocked) → offline by heartbeat age alone; recover on toxic removal.
+2. cabd: backoff resets on successful connect (was: only on clean session end).
+3. arcaded: pending RPC futures failed immediately on disconnect (503 now, not 15s 504).
+4. arcadectl: exit 4 for API/transport errors vs 1 for remote rc!=0.
+
+**Evidence:** `make test-m0` → TEST-M0 PASS (exit 0) including new step 4b.
+
+**Outcome:** GREEN.

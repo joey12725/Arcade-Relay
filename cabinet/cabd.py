@@ -56,9 +56,10 @@ async def heartbeat_loop(ws):
         await asyncio.sleep(HB)
 
 
-async def session(sess):
+async def session(sess, on_connect):
     async with sess.ws_connect(WS_URL, heartbeat=None) as ws:
         log("connected to", WS_URL)
+        on_connect()  # reset backoff on successful CONNECT, not clean exit
         hb_task = asyncio.create_task(heartbeat_loop(ws))
         try:
             async for msg in ws:
@@ -73,14 +74,18 @@ async def session(sess):
 
 async def main():
     backoff = BACKOFF_START
+
+    def reset_backoff():
+        nonlocal backoff
+        backoff = BACKOFF_START
+
     async with aiohttp.ClientSession() as sess:
         while True:  # NET-2: reconnect forever
             try:
-                await session(sess)
+                await session(sess, reset_backoff)
                 log("connection closed by server")
-                backoff = BACKOFF_START
             except Exception as e:  # noqa: BLE001
-                log(f"connect failed: {e!r}; retry in ~{backoff:.1f}s")
+                log(f"link error: {e!r}; retry in ~{backoff:.1f}s")
             await asyncio.sleep(backoff * random.uniform(0.8, 1.2))
             backoff = min(backoff * 2, BACKOFF_CAP)
 

@@ -50,6 +50,14 @@ echo "== 4. link restored -> unaided reconnect =="
 tp toggle cab_link
 wait_online true 15   # backoff cap 2s in sim; must recover well within this
 
+echo "== 4b. hang: socket open but heartbeats blocked -> offline (3 missed beats) =="
+# timeout=0 blocks all upstream (cabinet->server) data without closing TCP,
+# so only heartbeat-age detection can flip status — not socket-closed.
+tp toxic add --type timeout --attribute timeout=0 --upstream --toxicName hang cab_link
+wait_online false 10
+tp toxic remove --toxicName hang cab_link
+wait_online true 15
+
 echo "== 5. cabd survived: exec works again =="
 out=$(srv arcadectl cab exec -- echo back-again)
 [ "$out" = "back-again" ] || { echo "FAIL: post-reconnect exec got '$out'"; exit 1; }

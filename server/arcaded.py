@@ -54,6 +54,8 @@ class Hub:
             return await asyncio.wait_for(fut, RPC_TIMEOUT)
         except asyncio.TimeoutError:
             raise web.HTTPGatewayTimeout(text=f"cabinet did not answer {method}")
+        except ConnectionError:
+            raise web.HTTPServiceUnavailable(text="cabinet disconnected mid-request")
         finally:
             self.pending.pop(msg_id, None)
 
@@ -86,6 +88,11 @@ async def cab_ws(request):
     finally:
         if hub.ws is ws:
             hub.ws = None
+            # fail in-flight RPCs immediately instead of letting them ride
+            # out the 15s timeout — callers get 503 now
+            for fut in list(hub.pending.values()):
+                if not fut.done():
+                    fut.set_exception(ConnectionError("cabinet disconnected"))
         hub.log_event("cabinet disconnected")
     return ws
 
