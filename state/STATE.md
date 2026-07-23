@@ -1,17 +1,16 @@
 # STATE
 
-**Updated:** 2026-07-23 iteration 24
+**Updated:** 2026-07-23 iteration 26
 
 ## Current position
 - Milestone: **M-SIM** (simulation rig — prerequisite before M0)
-- Current unit: M3 unit A DONE (dee7212: Jellyfin adapter, 480p transcode measured,
-  /media tunnel proxy; verifier running). NEXT = unit B: cabinet screensaver engine
-  (cabinet/screensaver.py: mpv --fs --panscan=1.0 + JSON IPC, brightness tint via
-  colorchannelmixer live <500ms, audio class screensaver; cabd screensaver.on/off/set
-  RPCs + idle in/out from FIFO activity + force CLI). Then unit C: offline fallback
-  clips + accept-m3 x3.
-- Verifier flags to watch: /media proxy aiohttp 5-min default timeout (fix in unit B);
-  per-fetch PlaybackInfo sessions may leak ffmpeg processes (reuse sessions or accept).
+- Current unit: M3 unit B DONE (928c078: screensaver engine, test-screensaver 7/7;
+  verifier running incl. panscan-negative-control + mpv-kill robustness probe).
+  Verifier F1/F2 from unit A already fixed (timeout, session cache).
+- NEXT: unit C — offline fallback (local clips cache pre-pushed, dim-clock fallback,
+  screensaver survives link cut mid-play or falls back cleanly) + screensaver
+  disable --for + accept-m3 (SCR-1..7 demonstrated + measured 480p + brightness
+  <500ms) x3. Then M4 (ROM pipeline w/ faked ROMDL per A-5).
 - Iter 12 done: verifier FAIL (supervisor died on cabd crash) -> fixed supervisor,
   kill_strays convergence, frontend pdeathsig, watchdog identity check under lock,
   window-teardown wait; test-m1 step 7 added (kill -9 cabd -> converge). 7/7 green.
@@ -43,7 +42,7 @@
 | M0 | **DONE** (3/3 accept passes: 1.0004/1.0004/1.0006) | 3/3 |
 | M1 | **DONE** (3/3 on strengthened harness; 3600 clean cycles total) | 3/3 |
 | M2 | **DONE** (accept-m2 3/3; wireplumber-zombie reliability fix en route) | 3/3 |
-| M3 | unit A done (Jellyfin+480p+proxy); engine + fallback + accept remain | 0/3 |
+| M3 | units A+B done; fallback + accept remain | 0/3 |
 | M1–M6 | not started | 0/3 each |
 
 ## Done units
