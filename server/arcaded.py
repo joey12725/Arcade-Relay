@@ -203,6 +203,22 @@ async def cab_exec(request):
     return web.json_response(res["result"])
 
 
+async def cab_screenshot(request):
+    import base64
+    res = await hub.rpc("system.screenshot", {})
+    if not res.get("ok"):
+        return web.json_response(res, status=500)
+    return web.Response(body=base64.b64decode(res["result"]["png_b64"]),
+                        content_type="image/png")
+
+
+WEBUI_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "webui.html")
+
+
+async def webui(request):
+    return web.FileResponse(WEBUI_PATH)
+
+
 async def games_launch(request):
     body = await request.json()
     res = await hub.rpc("game.launch", {"system": body["system"], "path": body["path"],
@@ -607,6 +623,8 @@ app.add_routes([
     web.get("/events", events),
     web.get("/cab", cab_ws),
     web.post("/cab/exec", cab_exec),
+    web.get("/cab/screenshot", cab_screenshot),
+    web.get("/ui", webui),
     web.post("/games/launch", games_launch),
     web.post("/games/kill", games_kill),
     web.get("/state/bundle", state_bundle),

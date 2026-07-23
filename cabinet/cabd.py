@@ -480,6 +480,15 @@ async def handle_req(ws, data):
         elif method == "file.fetch":
             result = await file_fetch(params["path"], params["dest"],
                                       params.get("sha256"))
+        elif method == "system.screenshot":
+            import base64
+            p = subprocess.run(
+                ["import", "-window", "root", "png:/tmp/screenshot.png"],
+                capture_output=True, timeout=15)
+            if p.returncode != 0:
+                raise RuntimeError(f"screenshot failed: {p.stderr.decode()[:200]}")
+            with open("/tmp/screenshot.png", "rb") as f:
+                result = {"png_b64": base64.b64encode(f.read()).decode()}
         elif method == "library.rescan":
             # sim frontend has no library; the marker is what test/accept
             # assert, and real Pegasus gets a real rescan trigger here

@@ -118,6 +118,7 @@ def main():
     ex = cabsub.add_parser("exec")
     ex.add_argument("argv", nargs=argparse.REMAINDER,
                     help="command to run on the cabinet (after --)")
+    cabsub.add_parser("screenshot")
 
     args = ap.parse_args()
 
@@ -235,6 +236,16 @@ def main():
             res = call("POST", f"/favorites/{args.favcmd}", {"id": args.id})
         print(json.dumps(res) if args.as_json else "\n".join(res["favorites"]) or "(none)")
         sys.exit(0)
+
+    if args.cmd == "cab" and args.cabcmd == "screenshot":
+        req = urllib.request.Request(BASE + "/cab/screenshot")
+        try:
+            with urllib.request.urlopen(req, timeout=60) as r:
+                sys.stdout.buffer.write(r.read())
+            sys.exit(0)
+        except urllib.error.HTTPError as e:
+            print(f"arcadectl: {e.code}", file=sys.stderr)
+            sys.exit(4)
 
     if args.cmd == "cab" and args.cabcmd == "exec":
         argv = args.argv

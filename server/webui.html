@@ -1,0 +1,160 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Arcade Control</title>
+<style>
+  :root { --red: #e23b3b; --blue: #2b4fd8; --bg: #10121a; --card: #1a1e2c; --fg: #eef0f8; }
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: system-ui, sans-serif; background: var(--bg); color: var(--fg); }
+  header { background: linear-gradient(90deg, var(--red), var(--blue)); padding: 14px 22px;
+           font-size: 22px; font-weight: 800; letter-spacing: 1px; }
+  main { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+         gap: 16px; padding: 16px; max-width: 1300px; margin: auto; }
+  .card { background: var(--card); border-radius: 12px; padding: 16px;
+          border-top: 4px solid var(--blue); }
+  .card.red { border-top-color: var(--red); }
+  h2 { margin: 0 0 12px; font-size: 15px; text-transform: uppercase; letter-spacing: 1.5px; }
+  .pill { display: inline-block; padding: 3px 12px; border-radius: 999px; font-weight: 700; }
+  .on  { background: var(--blue); } .off { background: var(--red); }
+  button { background: var(--blue); color: #fff; border: 0; border-radius: 8px;
+           padding: 8px 14px; margin: 3px; font-weight: 700; cursor: pointer; }
+  button.red { background: var(--red); }
+  input[type=range] { width: 160px; vertical-align: middle; accent-color: var(--red); }
+  label { display: inline-block; min-width: 100px; }
+  ul { list-style: none; padding: 0; margin: 0; } li { padding: 4px 0; }
+  img#shot { width: 100%; border-radius: 8px; background: #000; min-height: 120px; }
+  select, input[type=text] { background: #0d0f16; color: var(--fg); border: 1px solid #333;
+           border-radius: 6px; padding: 7px; }
+  .row { margin: 6px 0; }
+  small { opacity: .65; }
+</style>
+</head>
+<body>
+<header>ARCADE CONTROL</header>
+<main>
+  <div class="card red">
+    <h2>Cabinet</h2>
+    <div class="row">Status: <span id="online" class="pill off">…</span></div>
+    <div class="row">Running: <b id="running">…</b></div>
+    <div class="row">Screensaver: <span id="ssState">…</span></div>
+    <div class="row">
+      <button onclick="api('POST','/games/kill').then(refresh)" class="red">Kill game</button>
+      <button onclick="api('POST','/screensaver/on').then(refresh)">Screensaver on</button>
+      <button onclick="api('POST','/screensaver/off').then(refresh)" class="red">Off</button>
+    </div>
+    <img id="shot" alt="cabinet screen">
+    <div class="row"><button onclick="shot()">Refresh screenshot</button></div>
+  </div>
+
+  <div class="card">
+    <h2>Audio</h2>
+    <div class="row"><label>Master</label>
+      <input type="range" id="master" min="0" max="100"
+             onchange="api('POST','/volume/set',{master:+this.value}).then(refresh)">
+      <span id="masterVal"></span></div>
+    <div id="classes"></div>
+  </div>
+
+  <div class="card">
+    <h2>Screensaver</h2>
+    <div class="row"><label>Brightness</label>
+      <input type="range" id="bright" min="0" max="100"
+             onchange="api('POST','/screensaver/set',{brightness:+this.value}).then(refresh)">
+      <span id="brightVal"></span></div>
+    <div class="row"><label>Idle (s)</label>
+      <input type="text" id="idle" size="6">
+      <button onclick="api('POST','/screensaver/set',{idle_seconds:+document.getElementById('idle').value}).then(refresh)">Set</button></div>
+    <h2 style="margin-top:14px">Sources</h2>
+    <ul id="sources"></ul>
+  </div>
+
+  <div class="card red">
+    <h2>Controller remapper</h2>
+    <div class="row">
+      <select id="scope"></select>
+      <input type="text" id="btn" placeholder="button" size="7">
+      <span>→</span>
+      <input type="text" id="tgt" placeholder="target" size="7">
+      <button onclick="remap()">Map</button>
+    </div>
+    <div class="row">
+      <input type="text" id="preset" placeholder="preset name" size="10">
+      <button onclick="api('POST','/controls/save-preset',{name:val('preset')}).then(refresh)">Save</button>
+      <button onclick="api('POST','/controls/load-preset',{name:val('preset')}).then(refresh)">Load</button>
+    </div>
+    <div class="row"><small>Presets: <span id="presets"></span></small></div>
+    <div class="row"><button onclick="monitor()">Monitor 3s</button> <span id="mon"></span></div>
+  </div>
+
+  <div class="card">
+    <h2>ROM queue</h2>
+    <div class="row">
+      <input type="text" id="romq" placeholder="e.g. metal slug 3" size="18">
+      <button onclick="api('POST','/roms/request',{query:val('romq')}).then(refresh)">Request</button>
+    </div>
+    <ul id="queue"></ul>
+  </div>
+</main>
+<script>
+const val = id => document.getElementById(id).value;
+async function api(method, path, body) {
+  const r = await fetch(path, {method, headers: {'Content-Type': 'application/json'},
+                               body: body ? JSON.stringify(body) : undefined});
+  return r.ok ? r.json().catch(() => ({})) : Promise.reject(r.status);
+}
+async function refresh() {
+  const st = await api('GET', '/status');
+  const on = document.getElementById('online');
+  on.textContent = st.online ? 'ONLINE' : 'OFFLINE';
+  on.className = 'pill ' + (st.online ? 'on' : 'off');
+  document.getElementById('running').textContent = st.cabinet_state.running || 'nothing';
+  document.getElementById('ssState').textContent = st.cabinet_state.screensaver ? 'on' : 'off';
+
+  const vol = await api('GET', '/volume');
+  document.getElementById('master').value = vol.master ?? 70;
+  document.getElementById('masterVal').textContent = (vol.master ?? 70) + '%';
+  document.getElementById('classes').innerHTML = Object.entries(vol.classes || {}).map(([c, v]) =>
+    `<div class="row"><label>${c}</label>
+     <button onclick="api('POST','/volume/set',{class:'${c}',muted:${!v.muted}}).then(refresh)"
+             class="${v.muted ? 'red' : ''}">${v.muted ? 'muted' : 'audible'}</button>
+     <small>${v.volume}%</small></div>`).join('');
+
+  const ss = await api('GET', '/screensaver');
+  document.getElementById('bright').value = ss.brightness;
+  document.getElementById('brightVal').textContent = ss.brightness + '%';
+  document.getElementById('idle').value = ss.idle_seconds;
+
+  api('GET', '/screensaver/sources').then(srcs => {
+    document.getElementById('sources').innerHTML = srcs.map(s =>
+      `<li><button class="${s.enabled ? '' : 'red'}"
+        onclick="api('POST','/screensaver/set-source',{id:'${s.id}',enabled:${!s.enabled}}).then(refresh)">
+        ${s.enabled ? '✓' : '✗'}</button> ${s.name} <small>${s.type}</small></li>`).join('');
+  }).catch(() => {});
+
+  api('GET', '/controls/presets').then(p => {
+    document.getElementById('presets').textContent = p.presets.join(', ') || '(none)';
+  });
+  const scope = document.getElementById('scope');
+  if (!scope.options.length) {
+    ['global','system:nes','system:snes','system:genesis','system:arcade','system:gba','system:psx']
+      .forEach(s => scope.add(new Option(s, s)));
+  }
+  const q = await api('GET', '/roms/status');
+  document.getElementById('queue').innerHTML = (q.queue || []).map(e =>
+    `<li><b>${e.title}</b> — ${e.status} <small>${e.detail || ''}</small></li>`).join('') || '<li><small>empty</small></li>';
+}
+function remap() {
+  api('POST', '/controls/map', {scope: val('scope'), set: {[val('btn')]: val('tgt')}}).then(refresh);
+}
+async function monitor() {
+  document.getElementById('mon').textContent = 'listening…';
+  const r = await api('POST', '/controls/monitor', {seconds: 3});
+  document.getElementById('mon').textContent = (r.events || []).join(', ') || '(no input)';
+}
+function shot() { document.getElementById('shot').src = '/cab/screenshot?' + Date.now(); }
+refresh(); shot(); setInterval(refresh, 5000);
+</script>
+</body>
+</html>
