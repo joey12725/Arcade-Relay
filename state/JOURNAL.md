@@ -355,3 +355,24 @@ retroarch.cfg + <system>.rmp atomically before EVERY launch. New `make test-rend
 - Regressions: TEST-M1 PASS (7/7), TEST-M0 PASS.
 
 **Outcome:** GREEN pending verifier.
+
+---
+
+## Iteration 14 — 2026-07-23 — Local launch surface (prime directive 1)
+
+**Verifier verdict on render unit:** PASS (heal-from-poisoned-cache probe passed;
+stomp ordering proven honest). Low-severity finding fixed: state.sync now rejects
+non-dict bundles and load_state_cache ignores poisoned caches.
+
+**Unit:** cabd Unix control socket (/tmp/cabd.sock; game.launch/kill/running, one JSON
+line each way) + `cabd-launch` shim (what Pegasus will exec; exit 0/1/3). Launches
+never touch the network. New `make test-local`.
+
+**Evidence:**
+- TEST-LOCAL PASS (exit 0): with the link CUT — local launch ok (window up, configs
+  rendered from cache), local kill refocuses frontend; game launched offline becomes
+  visible to the server after reconnect (heartbeat state converges); remote kill of a
+  locally-launched game works.
+- Regressions: TEST-M1 PASS, TEST-RENDER PASS, SOAK CLEAN.
+
+**Outcome:** GREEN.

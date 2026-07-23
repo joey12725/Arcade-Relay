@@ -31,6 +31,7 @@ BACKOFF_CAP = float(os.environ.get("CABD_BACKOFF_CAP", "10"))
 BACKOFF_START = 0.5
 FRONTEND_BIN = os.environ.get("FRONTEND_BIN", "/fakes/pegasus")
 STATE_CACHE = os.environ.get("STATE_CACHE", "/var/cache/arcade-state.json")
+CABD_SOCK = os.environ.get("CABD_SOCK", "/tmp/cabd.sock")
 
 # Local state cache (spec §5.2 #7): boots and renders fully offline.
 state = {"bundle": {}}
@@ -39,7 +40,10 @@ state = {"bundle": {}}
 def load_state_cache():
     try:
         with open(STATE_CACHE) as f:
-            state["bundle"] = json.load(f)
+            bundle = json.load(f)
+        if not isinstance(bundle, dict):
+            return False   # poisoned cache: ignore, wait for a good push
+        state["bundle"] = bundle
         return True
     except (OSError, ValueError):
         return False
@@ -129,6 +133,43 @@ async def watchdog_loop():
         await asyncio.sleep(launcher.WATCHDOG_POLL_S)
 
 
+async def handle_local(reader, writer):
+    """Local control socket (prime directive 1): Pegasus launches games via
+    cabd-launch -> this socket, never through the server. One JSON line in,
+    one JSON line out."""
+    try:
+        line = await asyncio.wait_for(reader.readline(), timeout=10)
+        data = json.loads(line)
+        method = data.get("method")
+        params = data.get("params") or {}
+        if method == "game.launch":
+            result = await game_launch(params["system"], params["path"],
+                                       params.get("args", []))
+        elif method == "game.kill":
+            result = await game_kill()
+        elif method == "game.running":
+            result = {"running": game["rom"]}
+        else:
+            raise ValueError(f"unknown method {method}")
+        writer.write((json.dumps({"ok": True, "result": result}) + "\n").encode())
+    except Exception as e:  # noqa: BLE001 — report to caller, never die
+        writer.write((json.dumps({"ok": False, "error": repr(e)}) + "\n").encode())
+    try:
+        await writer.drain()
+        writer.close()
+    except OSError:
+        pass
+
+
+async def local_server():
+    try:
+        os.unlink(CABD_SOCK)
+    except FileNotFoundError:
+        pass
+    await asyncio.start_unix_server(handle_local, path=CABD_SOCK)
+    log("local control socket at", CABD_SOCK)
+
+
 async def frontend_loop():
     """Spec §5.2 #5: if the frontend dies, restart it."""
     if not os.access(FRONTEND_BIN, os.X_OK):
@@ -163,6 +204,8 @@ async def handle_req(ws, data):
             result = {"running": game["rom"]}
         elif method == "state.sync":
             bundle = params["bundle"]
+            if not isinstance(bundle, dict):
+                raise ValueError(f"bundle must be a dict, got {type(bundle).__name__}")
             save_state_cache(bundle)
             state["bundle"] = bundle
             result = {"applied": True, "files": len(bundle)}
@@ -226,6 +269,7 @@ async def main():
     else:
         log("no state cache yet; waiting for first state.sync")
 
+    await local_server()
     asyncio.create_task(frontend_loop())
     asyncio.create_task(watchdog_loop())
 

@@ -24,6 +24,9 @@ test-m1:
 test-render:
 	bash sim/scripts/test-render.sh
 
+test-local:
+	bash sim/scripts/test-local.sh
+
 soak-up:
 	cd sim/soak && docker compose up -d --build --wait --wait-timeout 300
 
