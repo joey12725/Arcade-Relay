@@ -764,3 +764,20 @@ a clear 400 ("no enabled screensaver sources — enable one with ...") instead o
 silently no-opping. Verified: arcadectl exits 4 with the message.
 
 **Soak-watch:** epoch 07:08:57Z, gate 15:08:57Z. Clean so far.
+
+---
+
+## Iteration 33 — 2026-07-23 — Soak V4 staleness: host VM reclaim (not product)
+
+**Violation:** V4 both logs stale ~6h (last writes 08:07Z). Root cause: host VM
+reclaimed/restarted on session inactivity (uptime 2min at 14:07Z; docker daemon down;
+all containers gone). Product was CLEAN at last audit before the cut (08:05Z: 138
+partitions survived, zero violations in ~1h of chaos).
+
+**Action:** dockerd restarted; soak stack rebuilt fresh. NEW EPOCH: READY
+1784815708000 = 14:08:28Z → 8h gate 22:08:28Z. A-16 recorded (host-suspension policy +
+pre-declared cumulative fallback). Wakeup cadence tightened to ~20min to reduce
+reclaim risk. Segment 1 (07:09–08:07Z, clean, 138 partitions) journaled for the
+cumulative fallback ledger.
+
+**Outcome:** soak running again; watch continues.

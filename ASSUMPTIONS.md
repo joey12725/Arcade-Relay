@@ -59,3 +59,12 @@
   JELLYFIN_TOKEN (API key) — bootstrap is skipped entirely. Without a token and
   without an arcade/arcade user, screensaver endpoints fail loudly (500 w/ 401
   upstream) until one of the two is provided.
+- **A-16 (soak continuity vs host suspension):** The dev environment's VM is reclaimed
+  on inactivity and can pause/restart the soak containers mid-window (observed
+  2026-07-23: clean soak killed at 08:07Z by a host restart, resumed 14:05Z). A host
+  suspension is not a product violation, but per the loop rules the 8h window RESTARTS
+  after each one (new epoch from soak READY). If repeated suspensions make one
+  continuous 8h window unattainable in this environment, the fallback — declared here
+  in advance, not after the fact — is 8h of CUMULATIVE clean soak across
+  suspension-bounded segments, each segment individually violation-free, all segments
+  journaled. Real-hardware DONE criteria remain a continuous window.
