@@ -111,6 +111,20 @@ if len(isolated_fails) / soak_hours > 1.0:
         f"V3 isolated-FAIL rate {len(isolated_fails)} in {soak_hours:.2f}h "
         f"exceeds SLO of 1/hour (at {isolated_fails[:5]})")
 
+# Burst cap: a global hourly average can hide an incident cluster inside a
+# long soak (10 alternating fails in one minute of a 10h run averages fine).
+iso = sorted(isolated_fails)
+for i in range(len(iso) - 1):
+    if iso[i + 1] - iso[i] <= 600_000:
+        violations.append(
+            f"V3 burst: 2 isolated FAILs within 10min ({iso[i]}, {iso[i+1]})")
+        break
+for i in range(len(iso) - 2):
+    if iso[i + 2] - iso[i] <= 3_600_000:
+        violations.append(
+            f"V3 burst: 3 isolated FAILs within 60min (starting {iso[i]})")
+        break
+
 for s, e in partitions:
     tail = [(ts, m) for ts, m in hb if e < ts <= e + RECOVER_MS]
     if tail and not any(m == "OK" for _, m in tail):

@@ -55,11 +55,25 @@ def classify(sink_input):
 
 
 def apply_to_input(sink_input, policy):
+    """Idempotent: only issues pactl sets when the node is out of compliance.
+    That makes it safe to run on 'change' events (a client re-raising its own
+    volume gets re-clamped; our own clamp's change event finds the node
+    compliant and does nothing — no feedback loop)."""
     cls = classify(sink_input)
     cfg = policy["classes"][cls]
     idx = str(sink_input["index"])
-    _pactl("set-sink-input-volume", idx, f"{int(cfg['volume'])}%")
-    _pactl("set-sink-input-mute", idx, "1" if cfg["muted"] else "0")
+    want_vol = int(cfg["volume"])
+    want_mute = bool(cfg["muted"])
+    cur_mute = bool(sink_input.get("mute"))
+    try:
+        cur_vol = int(list(sink_input["volume"].values())[0]
+                      ["value_percent"].rstrip("%"))
+    except (KeyError, IndexError, ValueError, AttributeError):
+        cur_vol = None
+    if cur_vol != want_vol:
+        _pactl("set-sink-input-volume", idx, f"{want_vol}%")
+    if cur_mute != want_mute:
+        _pactl("set-sink-input-mute", idx, "1" if want_mute else "0")
     return cls
 
 

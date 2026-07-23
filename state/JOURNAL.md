@@ -481,3 +481,23 @@ trailer node muted on appearance; live CLI mute/unmute w/ git commit; master 55%
 via CLI. Regressions: TEST-M1 PASS, TEST-LOCAL PASS. Soak: CLEAN under new SLO.
 
 **Outcome:** GREEN pending verifier.
+
+---
+
+## Iteration 20 — 2026-07-23 — Audio verifier verdict + policy hardening
+
+**Verifier verdict:** PASS — trailer-mute latency measured 17-27ms (spec budget 100ms,
+~4x margin); state-repo provenance proven by live non-default CLI changes. Two gaps
+flagged, both fixed:
+1. 'change' skip meant a client un-muting ITSELF was never re-clamped (empirically:
+   tampered trailer stayed audible at 150%). Fix: apply_to_input is now idempotent
+   (only sets when out of compliance) and audio_loop reacts to 'change' too — own
+   clamps converge with no feedback loop. Permanent test-audio step 3b: self-unmuted
+   trailer re-clamped <3s (observed: "re-clamped").
+2. V3 burst hole (alternating fails average out over long soaks). Added burst caps:
+   2 isolated FAILs within 10min, or 3 within 60min = violation. Fixture-verified
+   (10h synthetic soak, fails 5min apart: global rate passes, burst catches).
+
+**Evidence:** TEST-AUDIO PASS incl. 3b (exit 0); burst fixture detects; live soak CLEAN.
+
+**Outcome:** GREEN.

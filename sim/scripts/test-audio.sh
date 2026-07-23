@@ -60,6 +60,25 @@ echo "== 3. trailer node appears -> muted by policy (AUD-2: never audible) =="
 cab sh -c "env 'PULSE_PROP_media.role=trailers' mpv --no-config --vo=null --ao=pulse --loop=inf --really-quiet av://lavfi:sine=frequency=880 >/dev/null 2>&1 &"
 wait_node trailers "true" 3
 
+echo "== 3b. misbehaving client: self-unmute gets re-clamped =="
+sleep 2   # let the node's arrival events fully drain first
+cab python3 -c "
+import json, subprocess, time
+r = subprocess.run(['pactl','-f','json','list','sink-inputs'], capture_output=True, text=True)
+idx = next(str(si['index']) for si in json.loads(r.stdout)
+           if (si.get('properties') or {}).get('media.role') == 'trailers')
+subprocess.run(['pactl','set-sink-input-mute', idx, '0'])
+subprocess.run(['pactl','set-sink-input-volume', idx, '150%'])
+deadline = time.monotonic() + 3
+while time.monotonic() < deadline:
+    r = subprocess.run(['pactl','-f','json','list','sink-inputs'], capture_output=True, text=True)
+    si = next(s for s in json.loads(r.stdout) if str(s['index']) == idx)
+    if si['mute']:
+        print('re-clamped'); raise SystemExit(0)
+    time.sleep(0.05)
+print('FAIL: self-unmuted trailer stayed audible'); raise SystemExit(1)
+"
+
 echo "== 4. live CLI change: mute games -> node muted; unmute -> restored =="
 srv arcadectl volume set --class games --mute >/dev/null
 wait_node games "true" 3

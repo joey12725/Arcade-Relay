@@ -187,7 +187,10 @@ async def audio_loop():
                 if not line:
                     break
                 text = line.decode(errors="replace")
-                if "sink-input" in text and ("'new'" in text or "'change'" not in text):
+                # react to 'new' AND 'change' (a client un-muting itself gets
+                # re-clamped; apply is idempotent so no feedback loop), skip
+                # only 'remove'
+                if "sink-input" in text and "'remove'" not in text:
                     await asyncio.to_thread(
                         audio.apply_all, audio.policy_from_bundle(state["bundle"]))
         except Exception as e:  # noqa: BLE001
