@@ -20,3 +20,12 @@
   greenlight, steam, pegasus): scripts that open a real X window on Xvfb, hold it, exit
   on SIGTERM/UDP quit — so watchdog/focus logic is tested against real X behavior.
   mpv, PipeWire, Jellyfin, Xvfb are real.
+- **A-9 (accept-m0 scaling):** Spec M0 accept = "24h with >=99% heartbeat delivery;
+  reconnects unaided from router reboot". Read as two criteria: (1) sustained delivery
+  >=99% measured over a 1200s wall-clock window at 0.25s beats (4800 beats, server-side
+  delivered count) — chaos-free window since the real 24h bar's 1% budget maps to
+  natural flakiness, and injected chaos is exercised separately (test-m0 + soak);
+  (2) router reboot simulated as toxiproxy container restart (in-memory proxy config
+  wiped = dead link) + proxy recreation, cabinet back unaided <=60s with a NEW WS
+  connection and a working exec round-trip. 24h wall-clock validation on real
+  hardware -> HARDWARE-TODO.md.

@@ -12,3 +12,5 @@ Things that can only be verified on real hardware. Not faked green in the sim.
 - [ ] Steam one-time interactive login via remote view.
 - [ ] Audio out on real cabinet speakers; master volume mapping sanity.
 - [ ] 24h wall-clock heartbeat ≥99% on real network (accept-m0 ran accelerated in sim).
+- [ ] accept-m0 at real scale: 24h wall-clock, 5s beats, real Cloudflare tunnel, real
+  router reboot (A-9 runs it accelerated in sim).

@@ -145,3 +145,23 @@ timeout toxic). 4 gaps flagged, all applied:
 **Evidence:** `make test-m0` → TEST-M0 PASS (exit 0) including new step 4b.
 
 **Outcome:** GREEN.
+
+---
+
+## Iteration 5 — 2026-07-23 — M0 acceptance harness
+
+**Soak check:** exit 0 — 4856 heartbeats (84.41% OK), 56 partitions, 32 kills, SOAK CLEAN.
+
+**Unit:** `make accept-m0` (sim/scripts/accept-m0.sh) per A-9 (recorded): criterion 1 =
+>=99% server-side delivered beats over ACCEPT_WINDOW_S (default 1200s) at 0.25s;
+criterion 2 = router reboot (toxiproxy restart wipes in-memory proxy = dead link,
+recreate = router back) -> offline detected, unaided reconnect <=60s with NEW WS
+connection (connects counter must increase) + exec round-trip. arcaded: added
+delivered-beats counter to /status.
+
+**Evidence:**
+- `ACCEPT_WINDOW_S=20 make accept-m0` smoke → ACCEPT-M0 PASS, delivered=81/80
+  ratio=1.0125, reboot recovery + exec OK (exit 0).
+- Full run 1/3 (1200s window) launched in background; result in next entry.
+
+**Outcome:** GREEN (harness); acceptance passes 0/3 so far.

@@ -31,6 +31,7 @@ class Hub:
         self.pending = {}             # id -> Future for in-flight RPCs
         self.events = []              # (wall_ts, text) presence/event log
         self.connects = 0
+        self.beats = 0                # total heartbeats delivered (accept-m0 metric)
 
     def log_event(self, text):
         self.events.append((time.time(), text))
@@ -78,6 +79,7 @@ async def cab_ws(request):
                 continue
             data = json.loads(msg.data)
             if data.get("kind") == "event" and data.get("event") == "heartbeat":
+                hub.beats += 1
                 hub.last_hb = time.monotonic()
                 hub.hb_interval = float(data.get("interval", hub.hb_interval))
                 hub.cab_state = data.get("state", {})
@@ -109,6 +111,7 @@ async def status(request):
     return web.json_response({
         "online": hub.online,
         "connects": hub.connects,
+        "beats": hub.beats,
         "heartbeat_age_s": round(time.monotonic() - hub.last_hb, 3) if hub.connects else None,
         "heartbeat_interval_s": hub.hb_interval,
         "cabinet_state": hub.cab_state,
