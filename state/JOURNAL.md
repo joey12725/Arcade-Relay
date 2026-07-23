@@ -187,3 +187,8 @@ windows and beyond 8s cabd-kill grace) + status.log staleness under V4.
 - 120s chaos audit running in background (bc55j798b); result in next entry.
 
 **Outcome:** stack green at bring-up; audit pending.
+
+**Iter 6 audit result:** `make soak-status` exit 0 after 120s chaos on real daemons —
+467 HTTP probes (88.44% OK), 4 partitions, 3 cabd kill -9s (chaos randomly picked cabd
+every time), cabd logged 8 connects (respawn+reconnect after every kill/partition),
+status.log all ONLINE outside chaos windows: V5 active and clean. SOAK CLEAN.
