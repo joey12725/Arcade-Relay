@@ -893,3 +893,26 @@ python3-evdev reports); d-pad + KEY_ arrows added to map; lifeline first frame n
 uses real ws_connected instead of hardcoded False.
 
 **Evidence:** combo unit tests 6/6 PASS (new alias case); TEST-COMBOS PASS.
+
+---
+
+## Iteration 41 — 2026-07-24 — P2: REAL RetroArch in the sim
+
+**Unit:** Debian retroarch 1.20 + libretro-gambatte + mesa llvmpipe in the cabinet
+image; state/cabinet.yaml gains `emulators` (system→core) and `retroarch` (rendered
+verbatim into retroarch.cfg: video_driver gl — correct for the real cabinet too,
+audio pulse, network_cmd on); renderer merges it; cabd launches real RA
+(-L core rom --appendconfig rendered.cfg) for systems with a core, fake otherwise;
+probe unified on VERSION (real RA + fake both answer).
+
+**Debug trail:** RA segfaulted at SDL window creation on GLX-less Xvfb (sdl2 driver,
+even with SDL_RENDER_DRIVER=software); fix = mesa software GL (llvmpipe) + video_driver
+gl — verified glxinfo llvmpipe, then clean 12s run.
+
+**Evidence:** TEST-REAL-RETROARCH PASS (exit 0): window up; UDP VERSION "1.20.0"
+(rendered-config consumption proof); network QUIT clean; kill-9 → frontend 292ms;
+20/20 real launch/exit cycles; no leftover processes. Regression TEST-M1 PASS.
+Soak: CLEAN.
+
+**Outcome:** GREEN. The emulation path the cabinet will actually run is now tested
+end-to-end with the real emulator.

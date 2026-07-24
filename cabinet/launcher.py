@@ -135,11 +135,12 @@ class GameSession:
 
 
 def probe_responsive(timeout=0.2):
-    """RetroArch-style UDP GET_STATUS liveness probe."""
+    """RetroArch network-command liveness probe. VERSION is answered by
+    both real RetroArch (1.9+) and the sim fake."""
     try:
         s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         s.settimeout(timeout)
-        s.sendto(b"GET_STATUS", ("127.0.0.1", UDP_PORT))
+        s.sendto(b"VERSION", ("127.0.0.1", UDP_PORT))
         s.recvfrom(1024)
         s.close()
         return True

@@ -77,6 +77,8 @@ def main():
         cmd = data.decode(errors="replace").strip()
         if cmd == "QUIT":
             bail()
+        elif cmd == "VERSION":
+            sock.sendto(b"fake-1.0\n", addr)
         elif cmd == "PAUSE_TOGGLE":
             paused = not paused
             sock.sendto(b"PAUSE_TOGGLE ack\n", addr)

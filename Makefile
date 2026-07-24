@@ -83,3 +83,6 @@ accept-m6-check:
 
 test-combos:
 	bash sim/scripts/test-combos.sh
+
+test-real-retroarch:
+	bash sim/scripts/test-real-retroarch.sh

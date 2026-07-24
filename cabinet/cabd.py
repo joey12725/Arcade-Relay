@@ -332,7 +332,19 @@ async def game_launch(system, path, args=()):
         # CTL-4: re-render configs from the state cache before EVERY launch
         rendered = await asyncio.to_thread(renderer.render, state["bundle"], system)
         log("rendered configs:", rendered)
-        sess = await asyncio.to_thread(launcher.GameSession, path, tuple(args))
+        emulators = (state["bundle"].get("cabinet.yaml") or {}).get("emulators") or {}
+        if system in emulators:
+            # REAL RetroArch with the rendered config (spec §5.4): if it
+            # answers UDP, it consumed network_cmd_enable from that file.
+            core = emulators[system]["core"]
+            argv = [os.environ.get("REAL_RETROARCH", "/usr/bin/retroarch"),
+                    "-L", core, path,
+                    "--appendconfig", os.path.join(renderer.RENDER_DIR,
+                                                   "retroarch.cfg")]
+            sess = await asyncio.to_thread(
+                launcher.GameSession, path, (), argv, "RetroArch", True, 20)
+        else:
+            sess = await asyncio.to_thread(launcher.GameSession, path, tuple(args))
         game["session"] = sess
         game["rom"] = f"{system}/{os.path.basename(path)}"
         log("game launched:", game["rom"])

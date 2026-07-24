@@ -7,3 +7,18 @@ hotkeys:
   home_combo: "hold:start:2s"
   screensaver_combo: "hold:select:2s"
   lifeline_combo: "hold:start+select:5s"
+# Systems with a real libretro core installed launch through REAL RetroArch;
+# everything else uses the sim fake. On the cabinet, fill this in per OQ-3.
+emulators:
+  gb:
+    core: /usr/lib/x86_64-linux-gnu/libretro/gambatte_libretro.so
+# Rendered verbatim into retroarch.cfg (video/audio drivers differ between
+# sim (sdl2/Xvfb) and the real cabinet (gl); network cmds are how cabd
+# controls RetroArch, so they are part of the authoritative config).
+retroarch:
+  video_driver: gl
+  audio_driver: pulse
+  network_cmd_enable: "true"
+  network_cmd_port: 55355
+  video_fullscreen: "false"
+  pause_nonactive: "false"

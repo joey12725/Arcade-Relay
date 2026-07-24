@@ -25,9 +25,10 @@ def render(bundle, system):
     files = []
 
     g = (bundle.get("controllers/global.yaml") or {}).get("buttons", {})
-    files.append(_write(
-        os.path.join(RENDER_DIR, "retroarch.cfg"),
-        [f'input_player1_{k} = "{v}"' for k, v in sorted(g.items())]))
+    ra = (bundle.get("cabinet.yaml") or {}).get("retroarch") or {}
+    lines = [f'input_player1_{k} = "{v}"' for k, v in sorted(g.items())]
+    lines += [f'{k} = "{v}"' for k, v in sorted(ra.items())]
+    files.append(_write(os.path.join(RENDER_DIR, "retroarch.cfg"), lines))
 
     sysmap = (bundle.get(f"controllers/systems/{system}.yaml") or {}).get("remap", {})
     files.append(_write(
