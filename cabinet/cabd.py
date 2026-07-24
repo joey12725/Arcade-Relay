@@ -546,6 +546,87 @@ async def frontend_loop():
         await asyncio.sleep(0.2)
 
 
+# ---- remote view (spec §5.10): on-demand x11vnc for one-time interactive
+# chores (Steam/Xbox logins). x11vnc binds localhost only; every VNC client
+# is bridged over a cabinet-dialed WebSocket to the server, so the cabinet
+# never needs an inbound port.
+rv = {"proc": None}
+VNC_LOCAL_PORT = int(os.environ.get("CABD_VNC_PORT", "5900"))
+
+
+async def remote_view_on():
+    if rv["proc"] is None or rv["proc"].poll() is not None:
+        rv["proc"] = subprocess.Popen(
+            ["x11vnc", "-display", os.environ.get("DISPLAY", ":0"),
+             "-rfbport", str(VNC_LOCAL_PORT), "-localhost",
+             "-forever", "-shared", "-nopw", "-quiet"],
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            preexec_fn=launcher.die_with_parent())
+        for _ in range(40):                      # ack only once RFB accepts
+            try:
+                _, w = await asyncio.open_connection("127.0.0.1", VNC_LOCAL_PORT)
+                w.close()
+                break
+            except OSError:
+                await asyncio.sleep(0.25)
+        else:
+            rv["proc"].kill()
+            rv["proc"] = None
+            raise RuntimeError("x11vnc never opened its RFB port")
+    log("remote view ON, x11vnc pid", rv["proc"].pid)
+    return {"remote_view": True}
+
+
+async def remote_view_off():
+    if rv["proc"] is not None and rv["proc"].poll() is None:
+        rv["proc"].terminate()
+        try:
+            await asyncio.to_thread(rv["proc"].wait, 3)
+        except subprocess.TimeoutExpired:
+            rv["proc"].kill()
+    rv["proc"] = None
+    log("remote view OFF")
+    return {"remote_view": False}
+
+
+async def vnc_tunnel(token):
+    """Bridge one VNC client: dial the server's tunnel endpoint, pipe bytes
+    both ways between that WS and the local x11vnc RFB socket."""
+    try:
+        reader, writer = await asyncio.open_connection("127.0.0.1", VNC_LOCAL_PORT)
+    except OSError as e:
+        log(f"vnc tunnel {token[:8]}: x11vnc unreachable: {e!r}")
+        return
+    try:
+        async with aiohttp.ClientSession() as s:
+            async with s.ws_connect(WS_URL + f"/vnc-tunnel?token={token}",
+                                    heartbeat=None) as tws:
+                async def ws_to_tcp():
+                    async for msg in tws:
+                        if msg.type != aiohttp.WSMsgType.BINARY:
+                            break
+                        writer.write(msg.data)
+                        await writer.drain()
+
+                async def tcp_to_ws():
+                    while True:
+                        data = await reader.read(65536)
+                        if not data:
+                            break
+                        await tws.send_bytes(data)
+
+                done, pending = await asyncio.wait(
+                    [asyncio.create_task(ws_to_tcp()),
+                     asyncio.create_task(tcp_to_ws())],
+                    return_when=asyncio.FIRST_COMPLETED)
+                for t in pending:
+                    t.cancel()
+    except Exception as e:  # noqa: BLE001 — a dead tunnel must not kill cabd
+        log(f"vnc tunnel {token[:8]} ended: {e!r}")
+    finally:
+        writer.close()
+
+
 async def handle_req(ws, data):
     method = data.get("method")
     params = data.get("params") or {}
@@ -579,6 +660,13 @@ async def handle_req(ws, data):
             result = await lifeline_on()
         elif method == "lifeline.off":
             result = await lifeline_off()
+        elif method == "remote_view.on":
+            result = await remote_view_on()
+        elif method == "remote_view.off":
+            result = await remote_view_off()
+        elif method == "vnc.connect":
+            asyncio.create_task(vnc_tunnel(params["token"]))
+            result = {"connecting": True}
         elif method == "screensaver.disable":
             secs = float(params.get("seconds", 0))
             ss["suppress_until"] = time.monotonic() + secs

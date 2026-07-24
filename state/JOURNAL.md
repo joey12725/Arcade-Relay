@@ -971,3 +971,33 @@ TEST-REAL-RETROARCH PASS (20/20). ACCEPT-M5 PASS (anchored stream titles).
 Steam smoke: launch → running steam/504230 → kill → null.
 
 **Outcome:** GREEN. P3 closed. Next: P4 (x11vnc remote view, save-backup, CLI gaps).
+
+---
+
+## Iteration 44 — 2026-07-24 — P4.1: remote view (x11vnc tunneled through the server connection)
+
+**Soak check:** V4 stale — dockerd dead after host worker restart (A-16 pattern).
+Soak stack restarted; new segment SOAK CLEAN (100% beats). Cumulative accounting.
+
+**Unit (spec §5.10):**
+- cabinet image: + x11vnc.
+- cabd: `remote_view.on/off` RPCs (x11vnc -localhost -forever -shared -nopw on
+  :5900, die_with_parent, ack only once RFB port accepts); `vnc.connect {token}`
+  spawns a tunnel task that dials ws://…/cab/vnc-tunnel?token= (through toxiproxy,
+  same path as everything) and pipes WS<->local RFB both ways.
+- arcaded: POST /cab/remote-view starts a TCP listener on :5901; each VNC client
+  gets a token, an RPC asks the cabinet to dial back, and /cab/vnc-tunnel pairs
+  the WS with the waiting TCP client and pipes. Cabinet needs no inbound port.
+- arcadectl: `cab remote-view [--off]` (prints port + vnc:// URL).
+- sim/scripts/test-remote-view.sh + make test-remote-view.
+
+**Debug trail:** step-4 localhost-bind assert first used ss/netstat — neither in
+the cabinet image; switched to parsing /proc/net/tcp (0100007F:170C, state 0A).
+
+**Evidence:** TEST-REMOTE-VIEW PASS (exit 0): full RFB 003.008 handshake
+bidirectionally through client->server:5901->tunnel-WS->x11vnc (security types
+[1] = None/-nopw); second concurrent client OK (fresh token); x11vnc bound
+127.0.0.1 only; --off kills x11vnc and closes the server port. Regression:
+TEST-M1 PASS.
+
+**Outcome:** GREEN pending verifier. Next: P4.2 save-backup loop, then CLI batch.

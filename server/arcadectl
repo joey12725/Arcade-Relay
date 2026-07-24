@@ -121,6 +121,9 @@ def main():
     cabsub.add_parser("screenshot")
     lf = cabsub.add_parser("lifeline")
     lf.add_argument("action", choices=["on", "off"])
+    rvp = cabsub.add_parser("remote-view")
+    rvp.add_argument("--off", action="store_true",
+                     help="stop the VNC session instead of starting one")
 
     args = ap.parse_args()
 
@@ -242,6 +245,17 @@ def main():
     if args.cmd == "cab" and args.cabcmd == "lifeline":
         res = call("POST", f"/cab/lifeline/{args.action}")
         print(json.dumps(res))
+        sys.exit(0)
+
+    if args.cmd == "cab" and args.cabcmd == "remote-view":
+        res = call("POST", "/cab/remote-view", {"on": not args.off})
+        if args.as_json:
+            print(json.dumps(res))
+        elif res.get("remote_view"):
+            print(f"remote view ON — connect a VNC client to port {res['port']} "
+                  f"on the server ({res['url']})")
+        else:
+            print("remote view OFF")
         sys.exit(0)
 
     if args.cmd == "cab" and args.cabcmd == "screenshot":

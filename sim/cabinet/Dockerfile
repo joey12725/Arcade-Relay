@@ -3,7 +3,7 @@ FROM debian:trixie-slim
 # Real Xvfb, real mpv, real PipeWire stack (ASSUMPTIONS A-8: only game/streaming
 # binaries get faked, the AV/window plumbing is real).
 RUN apt-get update && apt-get install -y --no-install-recommends \
-        xvfb x11-utils xdotool wmctrl imagemagick \
+        xvfb x11-utils xdotool wmctrl imagemagick x11vnc \
         retroarch libretro-gambatte libretro-core-info \
         libgl1 libglx-mesa0 libgl1-mesa-dri \
         mpv \

@@ -214,6 +214,83 @@ async def cab_lifeline(request):
     return web.json_response(res["result"])
 
 
+# ---- remote view (spec §5.10): on-demand VNC tunneled through the server
+# connection. The server listens on VNC_PORT; each connecting VNC client is
+# paired (by token) with a WS the cabinet dials back to /cab/vnc-tunnel, and
+# bytes are piped both ways to the cabinet's localhost-only x11vnc.
+VNC_PORT = int(os.environ.get("VNC_PORT", "5901"))
+vnc = {"server": None, "waiting": {}}
+
+
+async def _vnc_client(reader, writer):
+    token = str(uuid.uuid4())
+    fut = asyncio.get_event_loop().create_future()
+    vnc["waiting"][token] = (fut, reader, writer)
+    try:
+        await hub.rpc("vnc.connect", {"token": token})
+        await asyncio.wait_for(fut, 15)   # tunnel WS arrived; it owns the pipe
+    except Exception:  # noqa: BLE001 — cabinet offline / tunnel never dialed
+        vnc["waiting"].pop(token, None)
+        writer.close()
+        hub.log_event("remote view: client dropped (no tunnel)")
+
+
+async def cab_remote_view(request):
+    body = await request.json() if request.can_read_body else {}
+    if body.get("on", True):
+        res = await hub.rpc("remote_view.on", {})
+        if not res.get("ok"):
+            return web.json_response(res, status=500)
+        if vnc["server"] is None:
+            vnc["server"] = await asyncio.start_server(
+                _vnc_client, "0.0.0.0", VNC_PORT)
+        hub.log_event(f"remote view ON (vnc port {VNC_PORT})")
+        return web.json_response({"remote_view": True, "port": VNC_PORT,
+                                  "url": f"vnc://<server-host>:{VNC_PORT}"})
+    res = await hub.rpc("remote_view.off", {})
+    if vnc["server"] is not None:
+        vnc["server"].close()
+        vnc["server"] = None
+    hub.log_event("remote view OFF")
+    if not res.get("ok"):
+        return web.json_response(res, status=500)
+    return web.json_response({"remote_view": False})
+
+
+async def vnc_tunnel_ws(request):
+    entry = vnc["waiting"].pop(request.query.get("token", ""), None)
+    if entry is None:
+        raise web.HTTPForbidden(text="unknown tunnel token")
+    fut, reader, writer = entry
+    ws = web.WebSocketResponse(heartbeat=None)
+    await ws.prepare(request)
+    if not fut.done():
+        fut.set_result(True)
+
+    async def tcp_to_ws():
+        while True:
+            data = await reader.read(65536)
+            if not data:
+                break
+            await ws.send_bytes(data)
+
+    async def ws_to_tcp():
+        async for msg in ws:
+            if msg.type != WSMsgType.BINARY:
+                break
+            writer.write(msg.data)
+            await writer.drain()
+
+    done, pending = await asyncio.wait(
+        [asyncio.create_task(tcp_to_ws()), asyncio.create_task(ws_to_tcp())],
+        return_when=asyncio.FIRST_COMPLETED)
+    for t in pending:
+        t.cancel()
+    writer.close()
+    await ws.close()
+    return ws
+
+
 async def cab_screenshot(request):
     import base64
     res = await hub.rpc("system.screenshot", {})
@@ -640,6 +717,8 @@ app.add_routes([
     web.get("/cab", cab_ws),
     web.post("/cab/exec", cab_exec),
     web.get("/cab/screenshot", cab_screenshot),
+    web.post("/cab/remote-view", cab_remote_view),
+    web.get("/cab/vnc-tunnel", vnc_tunnel_ws),
     web.post("/cab/lifeline/{action}", cab_lifeline),
     web.get("/ui", webui),
     web.post("/games/launch", games_launch),

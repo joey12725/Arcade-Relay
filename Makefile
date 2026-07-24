@@ -89,3 +89,6 @@ test-real-retroarch:
 
 test-pegasus-meta:
 	bash sim/scripts/test-pegasus-meta.sh
+
+test-remote-view:
+	bash sim/scripts/test-remote-view.sh
