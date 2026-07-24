@@ -2,7 +2,7 @@
 // Favorites is the boot collection, every screen navigable with
 // joystick + accept/back only. Trailers always muted (AUD-2, defensive).
 import QtQuick 2.15
-import QtMultimedia
+import QtMultimedia 5.15   // Pegasus ships Qt 5.15; unversioned import is Qt6-only
 
 FocusScope {
     id: root
@@ -109,12 +109,19 @@ FocusScope {
             } else if (api.keys.isNextPage(event) ||
                        event.key === Qt.Key_Right && grid.currentIndex % 3 === 2) {
                 event.accepted = true;
-                collectionIndex = (collectionIndex + 1) % collections.length;
+                if (collections.length > 0)
+                    collectionIndex = (collectionIndex + 1) % collections.length;
             } else if (api.keys.isPrevPage(event)) {
                 event.accepted = true;
-                collectionIndex = (collectionIndex + collections.length - 1)
-                                  % collections.length;
+                if (collections.length > 0)
+                    collectionIndex = (collectionIndex + collections.length - 1)
+                                      % collections.length;
             } else if (api.keys.isDetails(event)) {   // dedicated favorite button
+                // NOTE: toggles Pegasus's internal favorite flag (star badge
+                // only). The authoritative favorites list lives in
+                // state/library/favorites.yaml (arcadectl favorites ...);
+                // the generated Favorites collection follows state, not this
+                // flag. Known divergence — see HARDWARE-TODO.
                 event.accepted = true;
                 var g = currentCollection.games.get(grid.currentIndex);
                 g.favorite = !g.favorite;

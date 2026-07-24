@@ -29,3 +29,16 @@ Things that can only be verified on real hardware. Not faked green in the sim.
 - [ ] M5 real-scale: Sunshine/Apollo on the desktop, real Moonlight pairing, SF6
   playable at 60fps over Wi-Fi 6E; Greenlight real sign-in + xCloud title
   (best-effort — document failure mode if Microsoft breaks it).
+- [ ] Real Steam window tracking: the `steam-fake <appid>` window title only exists
+  in the sim fake. Real Steam titles its game windows arbitrarily, so the current
+  window-tracking path would time out (20s) and kill Steam. On hardware, either
+  discover the window via the newly-mapped-window heuristic or run Steam sessions
+  without window tracking (probe=False already exempts them from hang detection).
+- [ ] Theme favorite-toggle divergence: the redblue theme's favorite button flips
+  Pegasus's internal flag (star badge) only; state/library/favorites.yaml (via
+  `arcadectl favorites ...`) is the source of truth for the generated Favorites
+  collection. Decide on-cabinet whether to hide the toggle or bridge it (e.g. a
+  Pegasus-side script watching its favorites DB and calling the server API).
+- [ ] Fresh-cabinet boot view: with zero favorites Pegasus drops the empty Favorites
+  collection, so the theme boots into the first system collection instead. Expected
+  degradation — confirm it reads acceptably on the real screen.

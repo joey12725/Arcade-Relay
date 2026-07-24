@@ -305,10 +305,10 @@ def _stream_session(path):
     kind, _, target = path.partition(":")
     if kind == "moonlight":
         argv = [MOONLIGHT_BIN, "stream", DESKTOP_HOST, target]
-        title = f"moonlight-fake {target}"
+        title = f"^moonlight-fake {target}$"   # anchored: xdotool --name is regex
     elif kind == "greenlight":
         argv = [GREENLIGHT_BIN, target]
-        title = f"greenlight-fake {target}"
+        title = f"^greenlight-fake {target}$"
     else:
         raise ValueError(f"unknown stream kind {kind}")
     return launcher.GameSession(path, argv=argv, title=title, probe=False,
@@ -335,8 +335,11 @@ async def game_launch(system, path, args=()):
             # watchdog/HOME handling like any other session
             argv = [os.environ.get("STEAM_BIN", "/fakes/steam"),
                     f"steam://rungameid/{path}"]
+            # Anchored title: xdotool --name is substring regex, so an
+            # unanchored "steam-fake 50" would match a stale "steam-fake
+            # 504230" window from a previous session.
             sess = await asyncio.to_thread(
-                launcher.GameSession, path, (), argv, f"steam-fake {path}",
+                launcher.GameSession, path, (), argv, f"^steam-fake {path}$",
                 False, 20)
             game["session"] = sess
             game["rom"] = f"steam/{path}"

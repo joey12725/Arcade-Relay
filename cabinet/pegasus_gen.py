@@ -48,8 +48,10 @@ def gen_favorites(bundle):
     """Favorites as an explicit collection (UI-2: default boot view — the
     theme sorts it first). Entries are '<system>/<rom-basename>'."""
     favs = (bundle.get("library/favorites.yaml") or {}).get("favorites") or []
-    lines = ["collection: Favorites", "shortname: favorites",
-             f"launch: {CABD_LAUNCH} {{file.path}}"]
+    # No collection-level launch fallback: cabd-launch needs <system> <rom>,
+    # which only the per-game launch lines below can provide. A collection
+    # fallback without the system arg would exit 2 if it ever fired.
+    lines = ["collection: Favorites", "shortname: favorites"]
     for fav in sorted(favs):
         sys_name, _, rom = fav.partition("/")
         if sys_name and rom:

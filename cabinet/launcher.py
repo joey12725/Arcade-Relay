@@ -39,9 +39,16 @@ def die_with_parent(sig=signal.SIGTERM):
 
 
 def kill_strays():
-    """Kill emulator processes from a previous cabd life (post-crash cleanup)."""
-    subprocess.run(["pkill", "-9", "-f", RETROARCH_BIN],
-                   capture_output=True)
+    """Kill session processes from a previous cabd life (post-crash cleanup).
+    Covers every binary a GameSession can spawn — emulators, streams, steam —
+    so a cabd crash can't leave an orphan window that collides with the next
+    launch's title search."""
+    for pat in {RETROARCH_BIN,
+                os.environ.get("REAL_RETROARCH", "/usr/bin/retroarch"),
+                os.environ.get("STEAM_BIN", "/fakes/steam"),
+                os.environ.get("MOONLIGHT_BIN", "/fakes/moonlight"),
+                os.environ.get("GREENLIGHT_BIN", "/fakes/greenlight")}:
+        subprocess.run(["pkill", "-9", "-f", pat], capture_output=True)
 
 
 def _xdotool(*args):
@@ -88,7 +95,8 @@ class GameSession:
         env["PULSE_PROP_media.role"] = "games"   # audio class tag (spec §5.6)
         cmd = argv if argv else [RETROARCH_BIN, rom, *extra_args]
         self.proc = subprocess.Popen(
-            cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, env=env)
+            cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, env=env,
+            preexec_fn=die_with_parent())   # no orphans if cabd dies mid-session
         self.window = None
         deadline = time.monotonic() + window_timeout
         while time.monotonic() < deadline:

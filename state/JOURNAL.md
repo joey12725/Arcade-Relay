@@ -942,3 +942,32 @@ end-to-end with the real emulator.
 and vandalism-stomp on push); qmllint 0 errors; steam smoke OK.
 
 **Outcome:** GREEN pending verifier.
+
+---
+
+## Iteration 43 — 2026-07-24 — P3 verifier findings applied
+
+**Soak check:** SOAK CLEAN (8858 beats, 91 partitions this segment).
+
+**Verifier verdict on P3:** PASS (test-pegasus-meta exit 0; adversarial steam probe
+via exact metadata launch line: launch 0 / kill 0). Findings applied this iteration:
+- pegasus_gen.py: dropped the Favorites collection-level launch fallback — it
+  omitted the <system> arg cabd-launch requires (would exit 2 if it ever fired).
+  Per-game launch lines remain the only launchers.
+- theme.qml: `import QtMultimedia 5.15` (unversioned import is Qt6-only; Pegasus
+  ships Qt 5.15). Guarded collection paging against zero collections (NaN index).
+  Documented favorite-toggle divergence in-theme.
+- launcher.py: GameSession spawns now use preexec_fn=die_with_parent() (no orphans
+  on cabd death); kill_strays() broadened from RETROARCH_BIN to all session
+  binaries (real retroarch, steam, moonlight, greenlight).
+- cabd.py: anchored stream/steam window-title regexes (^...$) — xdotool --name is
+  substring regex, so "steam-fake 50" matched a stale "steam-fake 504230" window.
+- HARDWARE-TODO: real-Steam arbitrary window titles (tracking is sim-only today),
+  favorite-toggle bridge decision, empty-Favorites boot degradation.
+
+**Evidence:** py_compile OK; qmllint (qt6, --bare) parses clean — only import-path
+warnings (no Qt runtime here, A-18). TEST-PEGASUS-META PASS. TEST-M1 PASS.
+TEST-REAL-RETROARCH PASS (20/20). ACCEPT-M5 PASS (anchored stream titles).
+Steam smoke: launch → running steam/504230 → kill → null.
+
+**Outcome:** GREEN. P3 closed. Next: P4 (x11vnc remote view, save-backup, CLI gaps).
