@@ -1,6 +1,6 @@
 # STATE
 
-**Updated:** 2026-07-23 iteration 31
+**Updated:** 2026-07-24 iteration 38 — DONE (see DONE.md)
 
 ## Current position
 - Milestone: **M-SIM** (simulation rig — prerequisite before M0)

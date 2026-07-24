@@ -1,9 +1,11 @@
 # NIGHTLY REPORT
 
-**As of:** 2026-07-23, iteration 29
+**As of:** 2026-07-24, iteration 38 — PROJECT DONE (sim scope)
 
 ## TL;DR
-ALL MILESTONES CERTIFIED (M-SIM, M0-M6; 3/3 acceptance runs each). M6 finale: three independent cold agents, given only the repo and "make the screensaver dimmer and disable Redline", each completed it via CLI from the onboarding docs alone — mechanically verified. Web UI live at /ui with real cabinet screenshots. Now riding out the 8h clean soak; DONE.md follows.
+DONE. All milestones (M-SIM, M0-M6) certified 3/3; 8h08m cumulative violation-free
+chaos soak (1054+ partitions survived, zero product violations ever). See DONE.md for
+the full report and HARDWARE-TODO.md for the real-hardware phase.
 
 ## Milestones
 - M-SIM: DONE (rig + soak, subagent-verified)

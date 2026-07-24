@@ -837,3 +837,15 @@ Epoch 5 launching; ~2h44m more clean soak completes the 8h cumulative fallback.
 **A-16 ledger:** S1 58m · S2 6m · S3 118m · S4 134m · S5 22m = **~5h38m cumulative
 clean**, zero product violations. Epoch 6 watcher exits at 15 clean checks (~2h30m),
 crossing the 8h cumulative gate.
+
+---
+
+## Iteration 38 — 2026-07-24 — 8H CUMULATIVE CLEAN SOAK REACHED — DONE
+
+**Evidence:** epoch 6 watcher (b3enqhzxl) exit 0 — 15/15 clean checks; final audit
+34421 heartbeats (87.43% OK), 339 partitions, SOAK CLEAN (02:45Z). A-16 ledger totals
+8h08m violation-free across 6 segments, 1054+ partitions survived, zero product
+violations for the entire project.
+
+**DONE.md written** (final report: milestones, acceptance evidence, soak ledger,
+hardware handoff). Loop stops after this commit.
