@@ -1,6 +1,6 @@
 # STATE
 
-**Updated:** 2026-07-24 iteration 43 — deploy-readiness phase (P1–P7)
+**Updated:** 2026-07-24 iteration 46 — deploy-readiness phase (P1–P7)
 
 ## Current position
 - All original milestones (M-SIM, M0–M6) CERTIFIED 3/3; 8h clean soak done;
@@ -11,9 +11,9 @@
   |-------|-------|--------|
   | P1 | evdev input layer + lifeline mode | **DONE** (verified) |
   | P2 | real RetroArch in sim, rendered-config proof | **DONE** (verified) |
-  | P3 | Pegasus theme + state-generated collections + steam | **DONE** (verifier PASS; findings applied iter 43, commit 90baff2) |
-  | P4 | x11vnc remote view; save-backup loop; CLI completeness (games list/fuzzy launch, favorites by query, controls diff, roms sync, stream apps/launch, cab logs, state diff/bundle, screensaver toggle) + test-cli-complete | next |
-  | P5 | provisioning (install.sh, systemd units, openbox autostart, udev) | pending |
+  | P3 | Pegasus theme + state-generated collections + steam | **DONE** (findings applied 90baff2) |
+  | P4 | remote view (b8d91c8, verifier PASS) + save-backup (1ca08b5+2e0f550, verifier PASS) + CLI completeness (dac6859, verifier running) | **DONE** pending P4.3 verifier |
+  | P5 | provisioning (install.sh, systemd units, openbox autostart, udev) | next |
   | P6 | DEPLOY.md runbook | pending |
   | P7 | full regression (all test-* green, accept chains 3x, soak clean, verifier sweep) → DONE.md v2 → stop loop | pending |
 - Consecutive failures on current unit: 0
@@ -39,7 +39,8 @@ M-SIM, M0, M1, M2, M3, M4, M5, M6: all **DONE**, 3/3 accept passes each.
 (supervisor death on cabd crash, wireplumber startup race).
 
 ## Next unit
-P4 first slice: x11vnc remote view — add x11vnc to cabinet image, cabd RPC
-`cab.remote_view` (start/stop x11vnc on :0), `arcadectl cab remote-view`,
-test asserting an RFB handshake ("RFB 003.x") on the advertised port.
-Then save-backup loop, then the CLI-completeness batch + test-cli-complete.sh.
+P5 provisioning: cabinet/provision/ + server/provision/ — install.sh per
+machine, systemd units (cabd, pegasus, steam, arcaded; Restart=always),
+openbox autostart (xset s off -dpms), udev controller rules. Validate with
+shellcheck + systemd-analyze verify in a container if feasible (document
+which validation ran). Then P6 DEPLOY.md, then P7 full regression + DONE v2.
