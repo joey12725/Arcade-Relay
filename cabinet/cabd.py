@@ -569,9 +569,14 @@ def _saves_tarball():
         dirs.sort()
         for name in sorted(names):
             p = os.path.join(root, name)
-            h.update(os.path.relpath(p, SAVES_DIR).encode())
+            # NUL separator + length prefix: without them "x.srm"+"y" and
+            # "x.srmy"+"" hash identically (boundary shift), silently
+            # deduping away a real change. Filenames cannot contain NUL.
+            h.update(os.path.relpath(p, SAVES_DIR).encode() + b"\0")
             with open(p, "rb") as f:
-                h.update(f.read())
+                data = f.read()
+            h.update(str(len(data)).encode() + b"\0")
+            h.update(data)
             n_files += 1
     if not n_files:
         return None, None
