@@ -1172,3 +1172,36 @@ git repo.
 **Evidence:** TEST-PEGASUS-META PASS, TEST-PROVISION PASS (exit 0 each).
 
 **Outcome:** GREEN. P6 closed. Next: P7 full regression + DONE v2.
+
+---
+
+## Iteration 50 — 2026-07-24 — P7 full regression
+
+**Regression sweep (background driver, results in scratchpad/p7-results.txt):**
+- Phase 1: 19/20 test targets PASS first try (sim-test, fakes, render, local,
+  m0, m1, m2, m6, audio, favorites, screensaver, combos, real-retroarch,
+  pegasus-meta, jellyfin, remote-view, saves-backup, cli-complete, provision).
+- Phase 2: accept-m0/m1/m2/m3/m4/m5 PASS 3/3 each (m0 ~20min/run, m1 ~9min).
+- accept-m6 "failed" 3x in the driver — driver error: it ran setup+check
+  back-to-back with NO cold agent between (the script's documented contract).
+  Re-ran properly: 3 rounds, each with a genuinely cold subagent given only
+  the repo path + task sentence; all three found CLAUDE.md -> arcadectl,
+  dimmed brightness (40/60/40) and disabled Redline with git commits.
+  ACCEPT-M6 PASS 3/3.
+- test-fallback step 2 FAILed reproducibly: the assertion polled /status for
+  a transient "screensaver": false after a crash — but the self-heal now
+  relaunches inside one heartbeat, so the transient is unobservable (product
+  behavior verified CORRECT in cabd.log: died -> flag cleared -> relaunch).
+  Replaced the racy poll with strictly stronger witnesses: watchdog log-line
+  count increase (detection) + NEW mpv pid owning the window (heal). Not a
+  weakening: same semantics, more direct evidence. TEST-FALLBACK PASS 3x.
+
+**Soak chaos RNG bug found & fixed:** kills: 0 despite 245 KILL9 log lines —
+busybox awk first-draw correlation between same-second seeds locked the
+inner coin: ALL 245 kills were cabd, ZERO heartbeat kills, so V1/V3 kill
+exemption paths went unexercised this segment. chaos.sh now burns the first
+draw + picks the action with a single rand(0,3). Verified post-restart: all
+three modes firing within 90s, SOAK CLEAN.
+
+**Outcome:** regression GREEN. Remaining for DONE v2: fresh clean soak window
+with fixed chaos, final whole-repo verifier sweep, DONE.md v2 + reports.

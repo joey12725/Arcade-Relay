@@ -53,14 +53,26 @@ done
 echo "== 2. screensaver crash: watchdog clears flag, idle relaunches =="
 srv arcadectl screensaver on >/dev/null
 cab sh -c 'for i in $(seq 1 40); do xdotool search --name arcade-screensaver >/dev/null 2>&1 && exit 0; sleep 0.25; done; exit 1'
+oldpid=$(cab pgrep -f "[a]rcade-screensaver")
+died_before=$(cab sh -c 'grep -c "watchdog: screensaver died" /tmp/cabd.log || true')
 cab pkill -9 -f "[a]rcade-screensaver" || true
-t=0; until srv arcadectl --json status | grep -q '"screensaver": false'; do
-    t=$((t+1)); [ $t -ge 10 ] && { echo "FAIL: stale screensaver flag after crash"; exit 1; }; sleep 0.5
+# Detection proof: the watchdog must log the death+flag-clear. (The old
+# assertion polled /status for a transient "screensaver": false — but the
+# self-heal relaunch can complete inside one heartbeat, so the transient is
+# not reliably observable; the log line is the non-racy witness.)
+t=0; until [ "$(cab sh -c 'grep -c "watchdog: screensaver died" /tmp/cabd.log || true')" -gt "$died_before" ]; do
+    t=$((t+1)); [ $t -ge 10 ] && { echo "FAIL: watchdog never detected the crash"; exit 1; }; sleep 0.5
 done
 echo "   crash detected, flag cleared"
-# idle=3 and no input since -> it must come back on its own
-cab sh -c 'for i in $(seq 1 60); do xdotool search --name arcade-screensaver >/dev/null 2>&1 && exit 0; sleep 0.5; done; echo self-heal-relaunch-failed; exit 1'
-echo "   self-healed: screensaver relaunched"
+# Heal proof: a NEW mpv (different pid) owns the screensaver window —
+# idle=3 and no input since, so it must come back on its own.
+t=0; until newpid=$(cab pgrep -f "[a]rcade-screensaver" 2>/dev/null) \
+        && [ -n "$newpid" ] && [ "$newpid" != "$oldpid" ]; do
+    t=$((t+1)); [ $t -ge 60 ] && { echo "FAIL: self-heal relaunch failed"; exit 1; }; sleep 0.5
+done
+cab sh -c 'xdotool search --name arcade-screensaver >/dev/null' \
+    || { echo "FAIL: relaunched screensaver has no window"; exit 1; }
+echo "   self-healed: screensaver relaunched (pid $oldpid -> $newpid)"
 
 echo "== 3. disable --for suppresses idle relaunch; expiry restores =="
 srv arcadectl screensaver disable --for 8s >/dev/null
