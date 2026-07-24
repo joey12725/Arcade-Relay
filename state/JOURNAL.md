@@ -826,3 +826,14 @@ until ~23:49Z; worker restart at ~23:49Z (uptime 1min at 23:50Z).
 **A-16 ledger:** S1 ~58m · S2 ~6m · S3 ~118m · S4 ~134m (21:35–23:49Z) =
 **~5h16m cumulative clean**, zero product violations across all segments.
 Epoch 5 launching; ~2h44m more clean soak completes the 8h cumulative fallback.
+
+---
+
+## Iteration 37 — 2026-07-24 — Epoch 5 segment: ~22m clean; epoch 6
+
+**Evidence:** watcher logged 2/48 clean checks; last audit CLEAN (4559 heartbeats
+85.33% OK, 49 partitions); worker restart ~00:13Z.
+
+**A-16 ledger:** S1 58m · S2 6m · S3 118m · S4 134m · S5 22m = **~5h38m cumulative
+clean**, zero product violations. Epoch 6 watcher exits at 15 clean checks (~2h30m),
+crossing the 8h cumulative gate.
