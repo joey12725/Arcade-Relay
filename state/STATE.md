@@ -1,64 +1,45 @@
 # STATE
 
-**Updated:** 2026-07-24 iteration 38 — DONE (see DONE.md)
+**Updated:** 2026-07-24 iteration 43 — deploy-readiness phase (P1–P7)
 
 ## Current position
-- Milestone: **M-SIM** (simulation rig — prerequisite before M0)
-- Current unit: ALL MILESTONES CERTIFIED. Remaining gate: 8h clean soak
-  (epoch start = iteration-27 soak refresh ~07:00Z; check every wake; any
-  violation → investigate, fix, restart the 8h window). Then DONE.md + final
-  report + stop the loop. M6 verifier pending as final review.
-- Iter 12 done: verifier FAIL (supervisor died on cabd crash) -> fixed supervisor,
-  kill_strays convergence, frontend pdeathsig, watchdog identity check under lock,
-  window-teardown wait; test-m1 step 7 added (kill -9 cabd -> converge). 7/7 green.
-- Next units (M1 remainder): config rendering from state repo before every launch
-  (retroarch.cfg + remaps from state/, scramble->relaunch->clean test); favorites
-  (state/library/favorites.yaml + arcadectl favorites); then accept-m1 (100
-  launch/exit cycles x 6 systems, kill -9 recovery <2s, zero drift) x3.
-- Real-Pegasus QML theme + UI-4 navigation audit -> HARDWARE-TODO (fake frontend in sim).
+- All original milestones (M-SIM, M0–M6) CERTIFIED 3/3; 8h clean soak done;
+  DONE.md v1 written. User mandate: continue until spec fully done, fully
+  tested, fully deploy-ready — no questions.
+- Deploy-readiness phases:
+  | Phase | Scope | Status |
+  |-------|-------|--------|
+  | P1 | evdev input layer + lifeline mode | **DONE** (verified) |
+  | P2 | real RetroArch in sim, rendered-config proof | **DONE** (verified) |
+  | P3 | Pegasus theme + state-generated collections + steam | **DONE** (verifier PASS; findings applied iter 43, commit 90baff2) |
+  | P4 | x11vnc remote view; save-backup loop; CLI completeness (games list/fuzzy launch, favorites by query, controls diff, roms sync, stream apps/launch, cab logs, state diff/bundle, screensaver toggle) + test-cli-complete | next |
+  | P5 | provisioning (install.sh, systemd units, openbox autostart, udev) | pending |
+  | P6 | DEPLOY.md runbook | pending |
+  | P7 | full regression (all test-* green, accept chains 3x, soak clean, verifier sweep) → DONE.md v2 → stop loop | pending |
 - Consecutive failures on current unit: 0
-- NOTE: loop is now self-paced (user request: continuous, iterations chained
-  back-to-back; 60s wakeup between turns — scheduler minimum).
-- NOTE: Docker daemon must be started manually in this container (`dockerd &`);
-  check `docker info` at iteration start.
+- NOTE: loop self-paced; re-arm ScheduleWakeup with the P-phase /loop prompt
+  verbatim each turn (60–300s active, 1800s blocked).
+- NOTE: dockerd must be started manually after every host VM reclaim
+  (`nohup dockerd &`); check `docker info` first. Soak restarts count
+  cumulatively per A-16.
 
 ## Environment facts
-- Dev box: Linux container (not Windows/WSL2 as loop prompt assumed) with native
-  Docker 29.3.1 + Compose v5.1.1. See ASSUMPTIONS.md A-1.
+- Dev box: Linux container with native Docker 29.x + Compose v5. See A-1.
 - Repo: joey12725/Arcade-Relay, branch `claude/arcade-cabinet-impl-nn0cka` (push target).
-- Spec: `arcade-cabinet-spec.md` at repo root (copied from upload, v0.1 2026-07-22).
+- Spec: `arcade-cabinet-spec.md` at repo root (v0.1 2026-07-22).
+- pip TLS blocked → apt python3-* packages; GitHub blocked by session proxy (A-18).
 
 ## Soak stack
-- RUNNING (project arcade-soak, since iter 3). Check first each iteration:
-  `make soak-status` must exit 0; any violation preempts the roadmap.
+- RUNNING (project arcade-soak). Check first each iteration: `make soak-status`
+  must exit 0; any violation preempts the roadmap. Cumulative segments per A-16.
 
-## Milestone status
-| Milestone | Status | accept passes |
-|-----------|--------|---------------|
-| M-SIM | **DONE** (rig + soak verified; V1 auditor bug found & fixed) | – |
-| M0 | **DONE** (3/3 accept passes: 1.0004/1.0004/1.0006) | 3/3 |
-| M1 | **DONE** (3/3 on strengthened harness; 3600 clean cycles total) | 3/3 |
-| M2 | **DONE** (accept-m2 3/3; wireplumber-zombie reliability fix en route) | 3/3 |
-| M3 | **DONE** (3/3 + verifier CONFIRMED) | 3/3 |
-| M4 | **DONE** (3/3) | 3/3 |
-| M5 | **DONE** (3/3) | 3/3 |
-| M6 | **DONE** (3/3 cold-agent rounds) | 3/3 |
-| M1–M6 | not started | 0/3 each |
-
-## Done units
-1. (iter 1) Repo bootstrap: spec copied in, ROADMAP/STATE/JOURNAL/ASSUMPTIONS/
-   HARDWARE-TODO/NIGHTLY-REPORT created, committed, pushed.
-2. (iter 2) Sim rig skeleton: compose (toxiproxy/server/jellyfin/cabinet), cabinet
-   image (real Xvfb/mpv/PipeWire), sim-test smoke (isolation + chaos + AV asserts),
-   Makefile. Subagent-verified, findings applied, green twice.
-3. (iter 3) Soak stack: arcade-soak compose (chaos driver: partitions + kill -9s),
-   supervised 4Hz heartbeat, soak-status violation audit. 120s run SOAK CLEAN.
-
-4. (iter 4) M0 skeleton: arcaded (WS hub/REST/RPC) + cabd (heartbeats, jittered
-   backoff, system.exec) + arcadectl (status, cab exec). TEST-M0 + SIM-TEST pass.
+## Milestone status (original)
+M-SIM, M0, M1, M2, M3, M4, M5, M6: all **DONE**, 3/3 accept passes each.
+15+ adversarial verifier reviews; 2 historic FAILs caught real bugs
+(supervisor death on cabd crash, wireplumber startup race).
 
 ## Next unit
-`make accept-m0`: scripted acceptance — accelerated 24h-equivalent run asserting
->=99% heartbeat delivery under chaos + reconnect after full proxy restart ("router
-reboot"); needs a heartbeat-delivery counter on arcaded (/status connects/beats).
-Also: migrate soak stack cabinet to run real cabd instead of heartbeat.sh.
+P4 first slice: x11vnc remote view — add x11vnc to cabinet image, cabd RPC
+`cab.remote_view` (start/stop x11vnc on :0), `arcadectl cab remote-view`,
+test asserting an RFB handshake ("RFB 003.x") on the advertised port.
+Then save-backup loop, then the CLI-completeness batch + test-cli-complete.sh.
