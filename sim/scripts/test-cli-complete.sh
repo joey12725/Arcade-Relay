@@ -80,6 +80,29 @@ srv arcadectl --json roms sync | grep -q '"rescan": true'
 after=$(cab sh -c 'wc -l < /tmp/pegasus-rescan 2>/dev/null || echo 0')
 [ "$after" -gt "$before" ] || { echo "FAIL: rescan marker did not grow"; exit 1; }
 
+echo "== 8b. roms sync retries an errored delivery =="
+tp toggle cab_link >/dev/null   # partition: delivery must fail server-side
+srv arcadectl --json roms request "metal slug" >/dev/null
+t=0; until srv arcadectl --json roms status | grep -q '"status": "error"'; do
+    t=$((t+1)); [ $t -ge 60 ] && { echo "FAIL: delivery never errored under partition"; exit 1; }; sleep 0.5
+done
+tp toggle cab_link >/dev/null   # heal
+t=0; until srv arcadectl --json status | grep -q '"online": true'; do
+    t=$((t+1)); [ $t -ge 60 ] && { echo "FAIL: never back online"; exit 1; }; sleep 0.5
+done
+srv arcadectl --json roms sync | grep -q '"retried": \["' \
+    || { echo "FAIL: sync did not requeue the errored entry"; exit 1; }
+t=0; until srv arcadectl --json roms status | grep -q '"status": "ready"'; do
+    t=$((t+1)); [ $t -ge 60 ] && { echo "FAIL: retried delivery never became ready"; exit 1; }; sleep 0.5
+done
+
+echo "== 8c. state diff rejects flag-injection revs =="
+rc=0; srv arcadectl state diff -- --output=/statework/PWNED.diff 2>/dev/null || rc=$?
+[ "$rc" -eq 4 ] || { echo "FAIL: flag rev exited $rc, want 4"; exit 1; }
+if srv test -e /statework/PWNED.diff; then
+    echo "FAIL: flag injection wrote into the state repo"; exit 1
+fi
+
 echo "== 9. state diff + bundle =="
 srv arcadectl volume set --master 41 >/dev/null
 srv arcadectl state diff | grep -q "audio.yaml" || { echo "FAIL: diff missing audio.yaml"; exit 1; }

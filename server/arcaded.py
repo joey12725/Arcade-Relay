@@ -878,7 +878,11 @@ async def roms_sync(request):
 
 async def state_diff(request):
     rev = request.query.get("rev", "HEAD~1")
-    r = subprocess.run(["git", "-C", STATE_DIR, "diff", rev, "HEAD"],
+    # a "-"-prefixed rev would be parsed by git as a FLAG (e.g.
+    # --output=<file> writes into the live state repo) — reject outright
+    if not rev or rev.startswith("-"):
+        return web.json_response({"error": f"bad rev {rev!r}"}, status=400)
+    r = subprocess.run(["git", "-C", STATE_DIR, "diff", rev, "HEAD", "--"],
                        capture_output=True, text=True)
     if r.returncode != 0:
         return web.json_response({"error": r.stderr.strip()}, status=400)

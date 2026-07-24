@@ -308,6 +308,12 @@ def main():
                 games = call("GET", "/games/list")["games"]
                 q = fav_id.lower()
                 hits = [g for g in games if q in g["id"].lower()]
+                if len(hits) > 1:   # same exact-ish narrowing as games launch
+                    narrowed = [g for g in hits if q in (
+                        g["id"].lower(), g["file"].lower(),
+                        os.path.splitext(g["file"])[0].lower())]
+                    if len(narrowed) == 1:
+                        hits = narrowed
                 if not hits:
                     print(f"arcadectl: no game matches {fav_id!r}", file=sys.stderr)
                     sys.exit(4)
@@ -340,7 +346,13 @@ def main():
         import time as _time
         since = 0
         while True:
-            res = call("GET", f"/cab/logs?since={since}&lines={args.lines}")
+            try:
+                res = call("GET", f"/cab/logs?since={since}&lines={args.lines}")
+            except SystemExit:
+                if not args.follow:   # one-shot keeps normal exit-code contract
+                    raise
+                _time.sleep(1)        # cabinet offline/restarting: keep following
+                continue
             for seq, ts, line in res["lines"]:
                 print(json.dumps({"seq": seq, "ts": ts, "line": line})
                       if args.as_json else f"{ts} {line}")

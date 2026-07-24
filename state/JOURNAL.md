@@ -1067,3 +1067,27 @@ audio.yaml master: 41; toggle drives real screensaver on/off via Jellyfin
 source). Regression: TEST-M1 PASS. SOAK CLEAN.
 
 **Outcome:** GREEN pending verifier. P4 complete. Next: P5 provisioning.
+
+---
+
+## Iteration 47 — 2026-07-24 — P4.3 verifier findings applied
+
+**P4.3 verifier verdict:** PASS with findings, all applied:
+- REAL BUG fixed: /state/diff passed the rev query param to git unfiltered —
+  a "-"-prefixed rev is parsed as a git FLAG (verifier demonstrated
+  --output=/statework/PWNED.diff writing INTO the live state repo). Now
+  rejects empty/"-"-prefixed revs (400) + "--" separator in the git argv.
+  New test step 8c proves exit 4 and no file creation.
+- favorites fuzzy resolve now applies the same exact-stem narrowing as games
+  launch (was: refuse-as-ambiguous where launch would narrow — inconsistent).
+- cab logs -f survives cabd restarts: transient 503s retry after 1s instead
+  of killing the follower (one-shot mode keeps the exit-code contract).
+- Coverage gap closed: step 8b partitions cab_link, errors a rom delivery,
+  heals, then proves roms sync requeues (retried non-empty) through to ready.
+Verifier also confirmed: narrowing never wrong-picks (tuple equality, not
+substring), --exact honest, ambiguous favorites don't mutate, no duplicate
+rom delivery on sync, dac6859 purely additive.
+
+**Evidence:** TEST-CLI-COMPLETE PASS with new steps 8b/8c (exit 0).
+
+**Outcome:** GREEN. P4 fully closed. Next: P5 provisioning.
