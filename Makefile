@@ -98,3 +98,6 @@ test-saves-backup:
 
 test-cli-complete:
 	bash sim/scripts/test-cli-complete.sh
+
+test-provision:
+	bash sim/scripts/test-provision.sh

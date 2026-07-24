@@ -81,3 +81,16 @@
   qmllint (0 errors; caught a missing QtMultimedia import) and all generated
   collection metadata is asserted by test-pegasus-meta; the live render + UI-4
   navigation audit remain HARDWARE-TODO items against real Pegasus.
+
+## A-19 — Provisioning validated statically, not by booting a kiosk
+This environment cannot reboot a machine into an X11/Openbox kiosk with
+systemd user sessions. cabinet/provision + server/provision are therefore
+validated by: shellcheck + bash -n (install scripts), systemd-analyze verify
+with stubbed ExecStart binaries in a debian:trixie container (unit
+syntax/lint), udevadm verify (rules), and placeholder-substitution checks
+(make test-provision). Real first-boot on the cabinet is HARDWARE-TODO.
+Design decision recorded: Pegasus has ONE supervisor — pegasus.service
+(Restart=always); cabd's spawn loop is disabled via empty FRONTEND_BIN
+(watchdog still refocuses by window title). The spec lists both a
+pegasus.service and "cabd restarts Pegasus"; dueling supervisors would race
+to double-spawn, so systemd owns the process and cabd owns focus/health.

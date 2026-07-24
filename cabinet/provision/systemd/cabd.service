@@ -1,0 +1,24 @@
+# cabd — the cabinet daemon (spec §5.2). systemd user unit.
+# @SERVER_HOST@ is substituted by provision/install.sh.
+[Unit]
+Description=arcade cabinet daemon (cabd)
+
+[Service]
+Environment=DISPLAY=:0
+Environment=SERVER_WS_URL=wss://@SERVER_HOST@/cab
+Environment=CABD_MEDIA_BASE=https://@SERVER_HOST@
+Environment=RETROARCH_BIN=/usr/bin/retroarch
+Environment=REAL_RETROARCH=/usr/bin/retroarch
+# Pegasus is owned by pegasus.service (single supervisor) — empty
+# FRONTEND_BIN disables cabd's own spawn loop; the watchdog still refocuses
+# the frontend window by title.
+Environment=FRONTEND_BIN=
+Environment=FRONTEND_TITLE=pegasus
+Environment=STATE_CACHE=/var/cache/arcade/state.json
+Environment=CABD_SAVES_DIR=/saves
+ExecStart=/usr/bin/python3 /opt/arcade/cabinet/cabd.py
+Restart=always
+RestartSec=1
+
+[Install]
+WantedBy=default.target

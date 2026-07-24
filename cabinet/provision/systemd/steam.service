@@ -1,0 +1,13 @@
+# Steam, silent in the background so rungameid launches are instant
+# (spec §5.1/§5.9). Optional — disable if the cabinet skips local Steam.
+[Unit]
+Description=Steam (silent)
+
+[Service]
+Environment=DISPLAY=:0
+ExecStart=/usr/bin/steam -silent
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=default.target

@@ -42,3 +42,9 @@ Things that can only be verified on real hardware. Not faked green in the sim.
 - [ ] Fresh-cabinet boot view: with zero favorites Pegasus drops the empty Favorites
   collection, so the theme boots into the first system collection instead. Expected
   degradation — confirm it reads acceptably on the real screen.
+- [ ] First boot of provisioned kiosk: auto-login -> startx -> openbox ->
+  user units up (cabd/pegasus/steam), xset s off -dpms in effect, cabd
+  connects through the real tunnel (cabinet/provision/install.sh ran only
+  under static validation per A-19).
+- [ ] udev rules: replace the placeholder DragonRise encoder ids in
+  99-arcade-controllers.rules with lsusb values from the actual panel.

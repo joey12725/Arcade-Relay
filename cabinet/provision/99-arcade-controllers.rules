@@ -1,0 +1,8 @@
+# Stable identities for the panel's USB encoders across reboots (spec §5.5:
+# udev naming rules so devices keep identity). The vendor/product ids below
+# are the common "DragonRise" zero-delay encoder — ADJUST during hardware
+# bring-up (lsusb) and re-run: udevadm control --reload
+SUBSYSTEM=="input", ATTRS{idVendor}=="0079", ATTRS{idProduct}=="0006", ENV{ID_INPUT_JOYSTICK}=="1", SYMLINK+="input/arcade-p1", TAG+="uaccess"
+SUBSYSTEM=="input", ATTRS{idVendor}=="0079", ATTRS{idProduct}=="0011", ENV{ID_INPUT_JOYSTICK}=="1", SYMLINK+="input/arcade-p2", TAG+="uaccess"
+# Any joystick-class device: readable by the arcade session (evdev input layer)
+KERNEL=="event*", ENV{ID_INPUT_JOYSTICK}=="1", MODE="0664", GROUP="input"

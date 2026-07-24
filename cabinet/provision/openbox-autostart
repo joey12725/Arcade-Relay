@@ -1,0 +1,11 @@
+#!/bin/sh
+# Openbox kiosk autostart (spec §5.1): the screensaver SYSTEM owns idle
+# behavior, so every layer of X blanking/power management is disabled.
+xset s off -dpms
+xset s noblank
+
+# The user services exist from boot (lingering) but need the session's
+# DISPLAY; hand it over and (re)start them now that X is up.
+systemctl --user import-environment DISPLAY XAUTHORITY 2>/dev/null || true
+systemctl --user restart cabd.service pegasus.service 2>/dev/null || true
+systemctl --user start steam.service 2>/dev/null || true

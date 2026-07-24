@@ -1091,3 +1091,30 @@ rom delivery on sync, dac6859 purely additive.
 **Evidence:** TEST-CLI-COMPLETE PASS with new steps 8b/8c (exit 0).
 
 **Outcome:** GREEN. P4 fully closed. Next: P5 provisioning.
+
+---
+
+## Iteration 47b — 2026-07-24 — P5 provisioning
+
+**Unit (spec §5.1/§6):**
+- cabinet/provision/: install.sh (Debian packages, auto-login getty override,
+  startx/openbox kiosk, code -> /opt/arcade, systemd user units + linger,
+  udev rules), openbox-autostart (xset s off -dpms + noblank, user-service
+  handoff with DISPLAY), systemd/{cabd,pegasus,steam}.service (all
+  Restart=always; @SERVER_HOST@ templated), 99-arcade-controllers.rules.
+- server/provision/: install.sh (arcaded system unit enable --now, arcadectl
+  -> /usr/local/bin, state repo seeded once from checkout — never overwrites
+  an existing repo), arcaded.service, cloudflared-config.yml.example.
+- Supervision decision (A-19): pegasus.service is the ONE supervisor; cabd's
+  FRONTEND_BIN is empty on hardware (spawn loop self-disables, watchdog
+  keeps refocusing by title) — avoids dueling-restart double-spawn.
+- Validation (A-19, can't boot a kiosk here): make test-provision =
+  shellcheck + bash -n; systemd-analyze verify (all 4 units, stubbed
+  binaries, debian:trixie container); udevadm verify (1/1 success);
+  substitution check; py_compile of the daemons the units exec.
+
+**Evidence:** TEST-PROVISION PASS (exit 0). Debug trail: first run failed —
+verify flagged missing /usr/bin/python3 in the container (real catch of the
+stub set, fixed by stubbing python3 too).
+
+**Outcome:** GREEN pending verifier. Next: P6 DEPLOY.md runbook.

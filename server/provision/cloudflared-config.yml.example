@@ -1,0 +1,15 @@
+# Cloudflare Tunnel config for the arcade server (spec NET-1).
+# One-time interactive setup (see DEPLOY.md):
+#   cloudflared tunnel login
+#   cloudflared tunnel create arcade
+#   cloudflared tunnel route dns arcade arcade.<your-domain>
+# then copy this to /etc/cloudflared/config.yml with the real tunnel id,
+# and: systemctl enable --now cloudflared
+tunnel: <TUNNEL_ID>
+credentials-file: /root/.cloudflared/<TUNNEL_ID>.json
+ingress:
+  # Everything — WS hub (/cab), REST, media, VNC tunnel WS — rides one
+  # hostname into arcaded. wss:// upgrade is handled by cloudflared.
+  - hostname: arcade.<your-domain>
+    service: http://localhost:8000
+  - service: http_status:404

@@ -1,0 +1,13 @@
+# Pegasus frontend (spec §5.1). systemd user unit, Restart=always.
+# Install pegasus-fe to /usr/local/bin (no Debian package; see DEPLOY.md).
+[Unit]
+Description=Pegasus frontend
+
+[Service]
+Environment=DISPLAY=:0
+ExecStart=/usr/local/bin/pegasus-fe
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=default.target
