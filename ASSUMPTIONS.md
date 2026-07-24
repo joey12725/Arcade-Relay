@@ -68,3 +68,10 @@
   in advance, not after the fact — is 8h of CUMULATIVE clean soak across
   suspension-bounded segments, each segment individually violation-free, all segments
   journaled. Real-hardware DONE criteria remain a continuous window.
+- **A-17 (no uinput in dev kernel):** The dev host kernel has CONFIG_INPUT_UINPUT
+  unset, so virtual evdev devices cannot be created in sim. The production input
+  path is still real: cabinet/inputs.py ships the evdev reader (device enumeration,
+  BTN_* mapping) and the ComboEngine used by BOTH evdev and the sim FIFO source; the
+  engine's hold/latch/multi-button semantics are unit-tested (tests/) and exercised
+  end-to-end in sim via timed FIFO down/up lines. Only physical device enumeration
+  remains hardware-scope.

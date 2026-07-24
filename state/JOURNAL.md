@@ -849,3 +849,31 @@ violations for the entire project.
 
 **DONE.md written** (final report: milestones, acceptance evidence, soak ledger,
 hardware handoff). Loop stops after this commit.
+
+---
+
+## Iteration 39 — 2026-07-24 — Deploy-readiness phase begins: real input path + Lifeline
+
+**New mandate (user):** keep working until everything in the spec is fully done,
+tested, and deploy-ready. Gap list: evdev input, real RetroArch in sim, Lifeline,
+Pegasus theme/collections, x11vnc remote view, save backup, missing CLI commands,
+provisioning (systemd/install), DEPLOY runbook.
+
+**Unit 1 (input + lifeline):**
+- cabinet/inputs.py: production ComboEngine (parse "hold:start+select:5s", fire-once
+  latch, per-button hold clocks) + EvdevSource (real /dev/input reader, BTN_* map).
+  Host kernel lacks uinput (probed: CONFIG_INPUT_UINPUT not set) → A-17: engine
+  unit-tested + FIFO-driven end-to-end; device layer hardware-scope.
+- cabinet/lifeline.py: §5.11 fullscreen status screen (PIL render: network/internet/
+  DNS/server-WS ladder w/ red/blue blocks, ip/uptime/version/last-sync), mpv display
+  w/ in-place refresh every 2s; reconnect cap forced to 1s while active.
+- cabd: combos wired (home→kill, screensaver→force-toggle via shared
+  start_screensaver_now, lifeline→toggle), lifeline RPCs, heartbeat carries lifeline,
+  evdev source auto-attaches when devices exist.
+- arcadectl cab lifeline on|off + /cab/lifeline/{action}.
+
+**Evidence:** tests/test_combo_engine.py 5/5 PASS; TEST-COMBOS PASS (sub-threshold
+hold ignored; 2s HOME kill w/ frontend focus; 5s lifeline w/ 28k indicator pixels
+rendered; CLI off; 1s-cap log); regressions TEST-M1, TEST-FALLBACK PASS.
+
+**Outcome:** GREEN pending verifier.

@@ -23,7 +23,9 @@ import aiohttp
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import audio  # noqa: E402
+import inputs  # noqa: E402
 import launcher  # noqa: E402
+import lifeline  # noqa: E402
 import renderer  # noqa: E402
 import screensaver  # noqa: E402
 
@@ -77,14 +79,19 @@ async def fifo_reader():
                 activity["last"] = now
                 for l in got:
                     events_buf.append((now, l))
+                    # "<button> down|up" lines feed the PRODUCTION combo
+                    # engine (same one the evdev source drives on hardware)
+                    parts = l.split()
+                    if len(parts) == 2 and parts[1] in ("down", "up") \
+                            and combo_engine is not None:
+                        combo_engine.key_event(parts[0], parts[1] == "down")
                 if ss["on"]:
                     asyncio.create_task(screensaver_off())
-                # HOME_COMBO (EMU-2/spec §5.2 #4): kill the foreground
-                # game/stream, back to the frontend. Sim delivers the combo
-                # as a COMBO_HOME event line; real evdev combo grabbing is
-                # hardware scope (A-13).
+                # legacy direct combo line (kept for older tests)
                 if any(l.startswith("COMBO_HOME") for l in got):
                     asyncio.create_task(game_kill())
+        if combo_engine is not None:
+            combo_engine.poll()
         await asyncio.sleep(0.05)
 
 
@@ -126,6 +133,70 @@ def log(*a):
 game = {"session": None, "rom": None}
 game_lock = asyncio.Lock()
 ss = {"on": False, "suppress_until": 0.0}
+ll = {"on": False, "last_sync": None}
+
+
+async def lifeline_on():
+    if ll["on"]:
+        return {"lifeline": True}
+    ll["on"] = True
+    if ss["on"]:
+        await screensaver_off()
+    ok = await asyncio.to_thread(
+        lifeline.show, lifeline.checks(False, ll["last_sync"]))
+    log(f"lifeline ON (display={ok}); reconnect cap -> 1s")
+    return {"lifeline": True}
+
+
+async def lifeline_off():
+    ll["on"] = False
+    await asyncio.to_thread(lifeline.hide)
+    log("lifeline OFF")
+    return {"lifeline": False}
+
+
+async def lifeline_loop(ws_state):
+    """Refresh the status screen every 2s while lifeline is active."""
+    while True:
+        await asyncio.sleep(2)
+        if not ll["on"]:
+            continue
+        try:
+            st = await asyncio.to_thread(
+                lifeline.checks, ws_state["connected"], ll["last_sync"])
+            await asyncio.to_thread(lifeline.show, st)
+        except Exception as e:  # noqa: BLE001
+            log(f"lifeline refresh: {e!r}")
+
+
+async def on_combo(name):
+    log(f"combo fired: {name}")
+    if name == "home":
+        await game_kill()
+    elif name == "screensaver":
+        if ss["on"]:
+            await screensaver_off()
+        else:
+            await start_screensaver_now()
+    elif name == "lifeline":
+        if ll["on"]:
+            await lifeline_off()
+        else:
+            await lifeline_on()
+
+
+combo_engine = None   # built in main() once state (hotkeys) is loaded
+
+
+def build_combo_engine():
+    global combo_engine
+    hotkeys = (state["bundle"].get("cabinet.yaml") or {}).get("hotkeys") or {
+        "home_combo": "hold:start:2s",
+        "screensaver_combo": "hold:select:2s",
+        "lifeline_combo": "hold:start+select:5s",
+    }
+    combo_engine = inputs.ComboEngine(
+        hotkeys, lambda name: asyncio.create_task(on_combo(name)))
 CLIPS_DIR = os.environ.get("CABD_CLIPS_DIR", "/var/cache/arcade-clips")
 
 
@@ -197,25 +268,30 @@ async def idle_loop():
             continue
         if time.monotonic() - activity["last"] < idle_s:
             continue
-        try:
-            tmo = aiohttp.ClientTimeout(total=10)
-            async with aiohttp.ClientSession(timeout=tmo) as s:
-                async with s.get(screensaver.MEDIA_BASE
-                                 + "/screensaver/playlist") as r:
-                    pl = await r.json()
-            if pl.get("playlist"):
-                await screensaver_on(pl["playlist"], pl.get("brightness", 80))
-        except Exception as e:  # noqa: BLE001
-            # graceful degradation (prime directive 6): server unreachable ->
-            # local clip cache; dim clock comes with real hardware polish
-            clips = local_clips()
-            fallback = cfg.get("fallback", "local_clips")
-            if clips and fallback == "local_clips":
-                log(f"idle: server unreachable ({e!r}); local clips fallback")
-                await screensaver_on(clips, cfg.get("brightness", 80))
-            else:
-                log(f"idle: playlist fetch failed: {e!r}; no fallback available")
-                await asyncio.sleep(5)
+        await start_screensaver_now()
+
+
+async def start_screensaver_now():
+    """Shared by idle timeout and the force combo/CLI: playlist over the
+    tunnel, local clip fallback when unreachable (prime directive 6)."""
+    cfg = state["bundle"].get("screensaver.yaml") or {}
+    try:
+        tmo = aiohttp.ClientTimeout(total=10)
+        async with aiohttp.ClientSession(timeout=tmo) as s:
+            async with s.get(screensaver.MEDIA_BASE
+                             + "/screensaver/playlist") as r:
+                pl = await r.json()
+        if pl.get("playlist"):
+            await screensaver_on(pl["playlist"], pl.get("brightness", 80))
+    except Exception as e:  # noqa: BLE001
+        clips = local_clips()
+        fallback = cfg.get("fallback", "local_clips")
+        if clips and fallback == "local_clips":
+            log(f"idle: server unreachable ({e!r}); local clips fallback")
+            await screensaver_on(clips, cfg.get("brightness", 80))
+        else:
+            log(f"idle: playlist fetch failed: {e!r}; no fallback available")
+            await asyncio.sleep(5)
 
 
 MOONLIGHT_BIN = os.environ.get("MOONLIGHT_BIN", "/fakes/moonlight")
@@ -471,6 +547,10 @@ async def handle_req(ws, data):
                                         params["brightness"])
             result = {"screensaver": ss["on"],
                       "brightness": params["brightness"]}
+        elif method == "lifeline.on":
+            result = await lifeline_on()
+        elif method == "lifeline.off":
+            result = await lifeline_off()
         elif method == "screensaver.disable":
             secs = float(params.get("seconds", 0))
             ss["suppress_until"] = time.monotonic() + secs
@@ -502,6 +582,8 @@ async def handle_req(ws, data):
                 raise ValueError(f"bundle must be a dict, got {type(bundle).__name__}")
             save_state_cache(bundle)
             state["bundle"] = bundle
+            ll["last_sync"] = time.strftime("%H:%M:%SZ", time.gmtime())
+            build_combo_engine()   # hotkeys may have changed
             applied = await asyncio.to_thread(
                 audio.apply_all, audio.policy_from_bundle(bundle))
             result = {"applied": True, "files": len(bundle),
@@ -526,7 +608,8 @@ async def heartbeat_loop(ws):
     while True:
         await ws.send_json({"kind": "event", "event": "heartbeat", "interval": HB,
                             "state": {"running": game["rom"],
-                                      "screensaver": ss["on"]}})
+                                      "screensaver": ss["on"],
+                                      "lifeline": ll["on"]}})
         next_t += HB
         delay = next_t - loop.time()
         if delay < 0:
@@ -535,9 +618,13 @@ async def heartbeat_loop(ws):
         await asyncio.sleep(delay)
 
 
+ws_state = {"connected": False}
+
+
 async def session(sess, on_connect):
     async with sess.ws_connect(WS_URL, heartbeat=None) as ws:
         log("connected to", WS_URL)
+        ws_state["connected"] = True
         on_connect()  # reset backoff on successful CONNECT, not clean exit
         hb_task = asyncio.create_task(heartbeat_loop(ws))
         try:
@@ -566,6 +653,7 @@ async def main():
         log(f"state cache loaded: {len(state['bundle'])} files (offline-capable)")
     else:
         log("no state cache yet; waiting for first state.sync")
+    build_combo_engine()
 
     init_input_fifo()
     await local_server()
@@ -575,6 +663,17 @@ async def main():
     asyncio.create_task(fifo_reader())
     asyncio.create_task(idle_loop())
     asyncio.create_task(clips_sync_loop())
+    asyncio.create_task(lifeline_loop(ws_state))
+
+    # real hardware: evdev devices feed the same combo engine (A-17)
+    evsrc = inputs.EvdevSource(
+        on_key=lambda b, down: combo_engine and combo_engine.key_event(b, down),
+        on_activity=lambda: activity.__setitem__("last", time.monotonic()))
+    if evsrc.open_devices():
+        asyncio.create_task(evsrc.run())
+        log(f"evdev sources: {len(evsrc.devices)} device(s)")
+    else:
+        log("no evdev devices (sim: FIFO source only)")
 
     async with aiohttp.ClientSession() as sess:
         while True:  # NET-2: reconnect forever
@@ -583,7 +682,11 @@ async def main():
                 log("connection closed by server")
             except Exception as e:  # noqa: BLE001
                 log(f"link error: {e!r}; retry in ~{backoff:.1f}s")
-            await asyncio.sleep(backoff * random.uniform(0.8, 1.2))
+            finally:
+                ws_state["connected"] = False
+            # lifeline = maximum reconnect aggression (spec §5.11): 1s cap
+            cap = 1.0 if ll["on"] else BACKOFF_CAP
+            await asyncio.sleep(min(backoff, cap) * random.uniform(0.8, 1.2))
             backoff = min(backoff * 2, BACKOFF_CAP)
 
 

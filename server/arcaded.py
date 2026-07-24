@@ -203,6 +203,17 @@ async def cab_exec(request):
     return web.json_response(res["result"])
 
 
+async def cab_lifeline(request):
+    action = request.match_info["action"]
+    if action not in ("on", "off"):
+        return web.json_response({"error": "on|off"}, status=400)
+    res = await hub.rpc(f"lifeline.{action}", {})
+    if not res.get("ok"):
+        return web.json_response(res, status=500)
+    hub.log_event(f"lifeline {action}")
+    return web.json_response(res["result"])
+
+
 async def cab_screenshot(request):
     import base64
     res = await hub.rpc("system.screenshot", {})
@@ -629,6 +640,7 @@ app.add_routes([
     web.get("/cab", cab_ws),
     web.post("/cab/exec", cab_exec),
     web.get("/cab/screenshot", cab_screenshot),
+    web.post("/cab/lifeline/{action}", cab_lifeline),
     web.get("/ui", webui),
     web.post("/games/launch", games_launch),
     web.post("/games/kill", games_kill),

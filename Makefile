@@ -80,3 +80,6 @@ accept-m6-setup:
 
 accept-m6-check:
 	bash sim/scripts/accept-m6.sh check
+
+test-combos:
+	bash sim/scripts/test-combos.sh
