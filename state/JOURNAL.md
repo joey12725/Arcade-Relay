@@ -1032,3 +1032,38 @@ to python urllib (endpoint itself was already working on first try).
 **Evidence:** TEST-SAVES-BACKUP PASS (exit 0). Regression TEST-M1 PASS. SOAK CLEAN.
 
 **Outcome:** GREEN pending verifier. Next: P4.3 CLI completeness batch.
+
+---
+
+## Iteration 46 — 2026-07-24 — P4.2 hardening + P4.3 CLI completeness
+
+**Soak check:** SOAK CLEAN (54 partitions this segment).
+
+**P4.2 verifier verdict:** PASS. One real minor finding applied immediately
+(2e0f550): saves content-hash now uses NUL separator + length prefix — the
+separator-free concatenation allowed boundary-shift collisions ("x.srm"+"y" ==
+"x.srmy"+"") that could silently dedupe a real change. All probes green:
+nested/multi-file round-trip exact, rename-only re-uploads (paths hashed),
+delete-all keeps last good tar (judged correct-by-design for a backup),
+kill -9 respawn causes exactly one harmless re-upload then dedupe resumes.
+
+**Unit P4.3 (CLI completeness):**
+- cabd: LOG_RING (seq'd, 1000 lines) + system.logs RPC; library.list RPC
+  (/roms scan, emulated systems only).
+- arcaded: /games/list (favorite flags merged), /games/launch-query (fuzzy w/
+  exact-ish narrowing, 404/409 ambiguity contract), /stream/apps +
+  /stream/launch (state-driven, defaults mirror pegasus_gen), /cab/logs,
+  /controls/diff (flattened preset compare), /roms/sync (retry errored queue
+  + cabinet rescan), /state/diff (git diff <rev> HEAD).
+- arcadectl: games list [--system --favorites] (star-prefixed), games launch
+  <query> [--exact] (usage-guard vs --system/--path), favorites add/remove by
+  fuzzy query (client-side resolve, ambiguity exit 4), controls diff <a> <b>,
+  roms sync, stream apps / stream launch <app>, cab logs [-f] [--lines]
+  (seq-cursor follow), state diff [rev], screensaver toggle.
+
+**Evidence:** TEST-CLI-COMPLETE PASS x2 (exit 0; ambiguity exits verified 4
+with candidates on stderr; rescan marker growth asserted; state diff shows
+audio.yaml master: 41; toggle drives real screensaver on/off via Jellyfin
+source). Regression: TEST-M1 PASS. SOAK CLEAN.
+
+**Outcome:** GREEN pending verifier. P4 complete. Next: P5 provisioning.

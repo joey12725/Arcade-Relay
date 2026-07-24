@@ -95,3 +95,6 @@ test-remote-view:
 
 test-saves-backup:
 	bash sim/scripts/test-saves-backup.sh
+
+test-cli-complete:
+	bash sim/scripts/test-cli-complete.sh

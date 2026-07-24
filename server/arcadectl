@@ -44,11 +44,18 @@ def main():
     games = sub.add_parser("games")
     gsub = games.add_subparsers(dest="gamescmd", required=True)
     gl = gsub.add_parser("launch")
-    gl.add_argument("--system", required=True)
-    gl.add_argument("--path", required=True)
+    gl.add_argument("query", nargs="?",
+                    help="fuzzy game query (alternative to --system/--path)")
+    gl.add_argument("--exact", action="store_true",
+                    help="query must equal the game id or filename")
+    gl.add_argument("--system")
+    gl.add_argument("--path")
     gl.add_argument("--args", default="", help="extra emulator args (space-separated)")
     gsub.add_parser("kill")
     gsub.add_parser("running")
+    gls = gsub.add_parser("list")
+    gls.add_argument("--system")
+    gls.add_argument("--favorites", action="store_true")
 
     roms = sub.add_parser("roms")
     rsub = roms.add_subparsers(dest="romscmd", required=True)
@@ -58,10 +65,11 @@ def main():
     rr.add_argument("query")
     rsub.add_parser("queue")
     rsub.add_parser("status")
+    rsub.add_parser("sync")
 
     ss = sub.add_parser("screensaver")
     sssub = ss.add_subparsers(dest="sscmd", required=True)
-    for c in ("status", "sources", "playlist", "on", "off"):
+    for c in ("status", "sources", "playlist", "on", "off", "toggle"):
         sssub.add_parser(c)
     sset = sssub.add_parser("set")
     sset.add_argument("--brightness", type=int)
@@ -90,12 +98,18 @@ def main():
     stsub.add_parser("push")
     stsub.add_parser("bundle")
     stsub.add_parser("log")
+    sdf = stsub.add_parser("diff")
+    sdf.add_argument("rev", nargs="?", default="HEAD~1",
+                     help="git rev to diff against HEAD (default HEAD~1)")
     rb = stsub.add_parser("rollback")
     rb.add_argument("commit")
 
     ct = sub.add_parser("controls")
     csub = ct.add_subparsers(dest="ctlcmd", required=True)
     csub.add_parser("list-presets")
+    cd = csub.add_parser("diff")
+    cd.add_argument("a")
+    cd.add_argument("b")
     for c in ("save-preset", "load-preset"):
         cp = csub.add_parser(c)
         cp.add_argument("name")
@@ -110,8 +124,14 @@ def main():
     fsub = fav.add_subparsers(dest="favcmd", required=True)
     for c in ("add", "remove"):
         fp = fsub.add_parser(c)
-        fp.add_argument("id", help="<system>/<rom-basename>")
+        fp.add_argument("id", help="<system>/<rom-basename>, or a fuzzy query")
     fsub.add_parser("list")
+
+    stream = sub.add_parser("stream")
+    stsub2 = stream.add_subparsers(dest="streamcmd", required=True)
+    stsub2.add_parser("apps")
+    sl = stsub2.add_parser("launch")
+    sl.add_argument("app", help="app name (case-insensitive substring)")
 
     cab = sub.add_parser("cab")
     cabsub = cab.add_subparsers(dest="cabcmd", required=True)
@@ -124,6 +144,9 @@ def main():
     rvp = cabsub.add_parser("remote-view")
     rvp.add_argument("--off", action="store_true",
                      help="stop the VNC session instead of starting one")
+    lg = cabsub.add_parser("logs")
+    lg.add_argument("-f", "--follow", action="store_true")
+    lg.add_argument("--lines", type=int, default=200)
 
     args = ap.parse_args()
 
@@ -139,15 +162,44 @@ def main():
         sys.exit(0)
 
     if args.cmd == "games":
+        if args.gamescmd == "list":
+            qs = []
+            if args.system:
+                qs.append("system=" + urllib.parse.quote(args.system))
+            if args.favorites:
+                qs.append("favorites=1")
+            res = call("GET", "/games/list" + ("?" + "&".join(qs) if qs else ""))
+            if args.as_json:
+                print(json.dumps(res))
+            else:
+                for g in res["games"]:
+                    print(("* " if g["favorite"] else "  ") + g["id"])
+            sys.exit(0)
         if args.gamescmd == "launch":
-            res = call("POST", "/games/launch",
-                       {"system": args.system, "path": args.path,
-                        "args": args.args.split() if args.args else []})
+            if args.query and not (args.system or args.path):
+                res = call("POST", "/games/launch-query",
+                           {"query": args.query, "exact": args.exact})
+            elif args.system and args.path and not args.query:
+                res = call("POST", "/games/launch",
+                           {"system": args.system, "path": args.path,
+                            "args": args.args.split() if args.args else []})
+            else:
+                print("usage: games launch <query> [--exact] "
+                      "| games launch --system S --path P", file=sys.stderr)
+                sys.exit(2)
         elif args.gamescmd == "kill":
             res = call("POST", "/games/kill")
         else:  # running
             res = {"running": call("GET", "/status")["cabinet_state"].get("running")}
         print(json.dumps(res) if args.as_json else res.get("running") or "nothing")
+        sys.exit(0)
+
+    if args.cmd == "stream":
+        if args.streamcmd == "apps":
+            res = call("GET", "/stream/apps")
+        else:
+            res = call("POST", "/stream/launch", {"app": args.app})
+        print(json.dumps(res))
         sys.exit(0)
 
     if args.cmd == "roms":
@@ -156,6 +208,8 @@ def main():
                        urllib.parse.quote(args.query))
         elif args.romscmd == "request":
             res = call("POST", "/roms/request", {"query": args.query})
+        elif args.romscmd == "sync":
+            res = call("POST", "/roms/sync")
         else:
             res = call("GET", "/roms/status")
         print(json.dumps(res))
@@ -169,6 +223,9 @@ def main():
             res = call("GET", "/screensaver/sources")
         elif c == "playlist":
             res = call("GET", "/screensaver/playlist")
+        elif c == "toggle":
+            on_now = call("GET", "/status")["cabinet_state"].get("screensaver")
+            res = call("POST", f"/screensaver/{'off' if on_now else 'on'}")
         elif c in ("on", "off"):
             res = call("POST", f"/screensaver/{c}")
         elif c == "disable":
@@ -214,6 +271,11 @@ def main():
             res = call("GET", "/state/log")
         elif args.statecmd == "rollback":
             res = call("POST", "/state/rollback", {"commit": args.commit})
+        elif args.statecmd == "diff":
+            res = call("GET", "/state/diff?rev=" + urllib.parse.quote(args.rev))
+            if not args.as_json:
+                print(res["diff"], end="")
+                sys.exit(0)
         else:
             res = call("GET", "/state/bundle")
         print(json.dumps(res))
@@ -222,6 +284,9 @@ def main():
     if args.cmd == "controls":
         if args.ctlcmd == "list-presets":
             res = call("GET", "/controls/presets")
+        elif args.ctlcmd == "diff":
+            res = call("GET", "/controls/diff?a=" + urllib.parse.quote(args.a)
+                       + "&b=" + urllib.parse.quote(args.b))
         elif args.ctlcmd == "save-preset":
             res = call("POST", "/controls/save-preset", {"name": args.name})
         elif args.ctlcmd == "load-preset":
@@ -238,7 +303,20 @@ def main():
         if args.favcmd == "list":
             res = call("GET", "/favorites")
         else:
-            res = call("POST", f"/favorites/{args.favcmd}", {"id": args.id})
+            fav_id = args.id
+            if "/" not in fav_id:   # fuzzy query -> resolve against the library
+                games = call("GET", "/games/list")["games"]
+                q = fav_id.lower()
+                hits = [g for g in games if q in g["id"].lower()]
+                if not hits:
+                    print(f"arcadectl: no game matches {fav_id!r}", file=sys.stderr)
+                    sys.exit(4)
+                if len(hits) > 1:
+                    print(f"arcadectl: ambiguous {fav_id!r}: "
+                          + ", ".join(g["id"] for g in hits), file=sys.stderr)
+                    sys.exit(4)
+                fav_id = hits[0]["id"]
+            res = call("POST", f"/favorites/{args.favcmd}", {"id": fav_id})
         print(json.dumps(res) if args.as_json else "\n".join(res["favorites"]) or "(none)")
         sys.exit(0)
 
@@ -257,6 +335,23 @@ def main():
         else:
             print("remote view OFF")
         sys.exit(0)
+
+    if args.cmd == "cab" and args.cabcmd == "logs":
+        import time as _time
+        since = 0
+        while True:
+            res = call("GET", f"/cab/logs?since={since}&lines={args.lines}")
+            for seq, ts, line in res["lines"]:
+                print(json.dumps({"seq": seq, "ts": ts, "line": line})
+                      if args.as_json else f"{ts} {line}")
+            since = res["next"]
+            if not args.follow:
+                sys.exit(0)
+            sys.stdout.flush()
+            try:
+                _time.sleep(1)
+            except KeyboardInterrupt:
+                sys.exit(0)
 
     if args.cmd == "cab" and args.cabcmd == "screenshot":
         req = urllib.request.Request(BASE + "/cab/screenshot")

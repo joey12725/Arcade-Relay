@@ -728,6 +728,163 @@ async def favorites_remove(request):
     return web.json_response({"favorites": sorted(favs)})
 
 
+async def _game_index():
+    """Flat launchable-game index from the cabinet's /roms tree, with
+    favorite flags merged from state."""
+    res = await hub.rpc("library.list", {})
+    if not res.get("ok"):
+        raise web.HTTPBadGateway(text=res.get("error", "library.list failed"))
+    favs = set(load_favorites())
+    items = []
+    for sys_name, files in sorted(res["result"]["systems"].items()):
+        for f in files:
+            gid = f"{sys_name}/{f}"
+            items.append({"id": gid, "system": sys_name, "file": f,
+                          "path": f"/roms/{sys_name}/{f}",
+                          "favorite": gid in favs})
+    return items
+
+
+def _match_games(items, query, exact):
+    if exact:
+        return [g for g in items if query in (g["id"], g["file"])]
+    q = query.lower()
+    hits = [g for g in items if q in g["id"].lower()]
+    if len(hits) > 1:   # prefer exact-ish hits before declaring ambiguity
+        narrowed = [g for g in hits
+                    if q in (g["id"].lower(), g["file"].lower(),
+                             os.path.splitext(g["file"])[0].lower())]
+        if len(narrowed) == 1:
+            return narrowed
+    return hits
+
+
+async def games_list(request):
+    items = await _game_index()
+    if request.query.get("system"):
+        items = [g for g in items if g["system"] == request.query["system"]]
+    if request.query.get("favorites") in ("1", "true"):
+        items = [g for g in items if g["favorite"]]
+    return web.json_response({"games": items})
+
+
+async def games_launch_query(request):
+    body = await request.json()
+    query, exact = body["query"], bool(body.get("exact"))
+    hits = _match_games(await _game_index(), query, exact)
+    if not hits:
+        return web.json_response({"error": f"no game matches {query!r}"},
+                                 status=404)
+    if len(hits) > 1:
+        return web.json_response(
+            {"error": f"ambiguous query {query!r}",
+             "candidates": [g["id"] for g in hits]}, status=409)
+    g = hits[0]
+    res = await hub.rpc("game.launch",
+                        {"system": g["system"], "path": g["path"], "args": []})
+    if not res.get("ok"):
+        return web.json_response(res, status=500)
+    hub.log_event(f"game launched by query {query!r}: {g['id']}")
+    return web.json_response({"matched": g["id"], **res["result"]})
+
+
+def load_stream_apps():
+    p = pathlib.Path(STATE_DIR) / "library" / "streaming.yaml"
+    entries = ((yaml.safe_load(p.read_text()) or {}).get("entries")
+               if p.exists() else None)
+    return entries or [   # keep in sync with pegasus_gen.gen_streaming defaults
+        {"name": "Steam Big Picture", "kind": "moonlight", "target": "Desktop"},
+        {"name": "Game Pass Cloud", "kind": "greenlight",
+         "target": "Game Pass Cloud"},
+    ]
+
+
+async def stream_apps(request):
+    return web.json_response({"apps": load_stream_apps()})
+
+
+async def stream_launch(request):
+    q = (await request.json())["app"].lower()
+    hits = [e for e in load_stream_apps() if q in e["name"].lower()]
+    if not hits:
+        return web.json_response({"error": f"no stream app matches {q!r}"},
+                                 status=404)
+    if len(hits) > 1:
+        return web.json_response(
+            {"error": f"ambiguous app {q!r}",
+             "candidates": [e["name"] for e in hits]}, status=409)
+    e = hits[0]
+    res = await hub.rpc("game.launch", {
+        "system": "stream", "path": f"{e['kind']}:{e['target']}", "args": []})
+    if not res.get("ok"):
+        return web.json_response(res, status=500)
+    hub.log_event(f"stream launched: {e['name']}")
+    return web.json_response({"matched": e["name"], **res["result"]})
+
+
+async def cab_logs(request):
+    res = await hub.rpc("system.logs", {
+        "since": int(request.query.get("since", 0)),
+        "lines": int(request.query.get("lines", 200))})
+    if not res.get("ok"):
+        return web.json_response(res, status=500)
+    return web.json_response(res["result"])
+
+
+async def controls_diff(request):
+    a, b = request.query.get("a"), request.query.get("b")
+    if not a or not b:
+        return web.json_response({"error": "need ?a=<preset>&b=<preset>"},
+                                 status=400)
+    snaps = {}
+    for name in (a, b):
+        snap = _read_yaml(f"controllers/presets/{name}.yaml")
+        if not snap:
+            return web.json_response({"error": f"no preset {name}"}, status=404)
+        snaps[name] = snap
+
+    def flatten(d, prefix=""):
+        out = {}
+        for k, v in (d or {}).items():
+            key = f"{prefix}{k}"
+            if isinstance(v, dict):
+                out.update(flatten(v, key + "."))
+            else:
+                out[key] = v
+        return out
+
+    fa, fb = flatten(snaps[a]), flatten(snaps[b])
+    diff = {k: {"a": fa.get(k), "b": fb.get(k)}
+            for k in sorted(set(fa) | set(fb)) if fa.get(k) != fb.get(k)}
+    return web.json_response({"a": a, "b": b, "diff": diff})
+
+
+async def roms_sync(request):
+    """Re-drive the delivery pipeline: retry failed queue entries and ask the
+    cabinet to rescan its library."""
+    retried = []
+    async with rom_lock:
+        for entry in rom_queue:
+            if entry["status"] == "error":
+                entry["status"] = "queued"
+                entry["detail"] = ""
+                asyncio.get_event_loop().create_task(rom_worker(entry))
+                retried.append(entry["id"])
+    res = await hub.rpc("library.rescan", {})
+    hub.log_event(f"roms sync: retried {len(retried)}, rescan ok={res.get('ok')}")
+    return web.json_response({"retried": retried,
+                              "rescan": bool(res.get("ok"))})
+
+
+async def state_diff(request):
+    rev = request.query.get("rev", "HEAD~1")
+    r = subprocess.run(["git", "-C", STATE_DIR, "diff", rev, "HEAD"],
+                       capture_output=True, text=True)
+    if r.returncode != 0:
+        return web.json_response({"error": r.stderr.strip()}, status=400)
+    return web.json_response({"rev": rev, "diff": r.stdout})
+
+
 async def state_log(request):
     r = subprocess.run(["git", "-C", STATE_DIR, "log", "--oneline", "-20"],
                        capture_output=True, text=True)
@@ -758,7 +915,15 @@ app.add_routes([
     web.post("/cab/lifeline/{action}", cab_lifeline),
     web.get("/ui", webui),
     web.post("/games/launch", games_launch),
+    web.post("/games/launch-query", games_launch_query),
+    web.get("/games/list", games_list),
     web.post("/games/kill", games_kill),
+    web.get("/stream/apps", stream_apps),
+    web.post("/stream/launch", stream_launch),
+    web.get("/cab/logs", cab_logs),
+    web.get("/controls/diff", controls_diff),
+    web.post("/roms/sync", roms_sync),
+    web.get("/state/diff", state_diff),
     web.get("/state/bundle", state_bundle),
     web.post("/state/push", state_push),
     web.get("/state/log", state_log),

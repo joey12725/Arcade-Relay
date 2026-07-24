@@ -125,8 +125,16 @@ def save_state_cache(bundle):
     os.replace(tmp, STATE_CACHE)
 
 
+LOG_RING = collections.deque(maxlen=1000)   # (seq, ts, line) for `cab logs`
+_log_seq = {"n": 0}
+
+
 def log(*a):
-    print("[cabd]", *a, file=sys.stderr, flush=True)
+    line = " ".join(str(x) for x in a)
+    _log_seq["n"] += 1
+    LOG_RING.append((_log_seq["n"],
+                     time.strftime("%H:%M:%SZ", time.gmtime()), line))
+    print("[cabd]", line, file=sys.stderr, flush=True)
 
 
 # ---------------------------------------------------------------- games
@@ -546,6 +554,27 @@ async def frontend_loop():
         await asyncio.sleep(0.2)
 
 
+NON_GAME_DIRS = {"art", "clips", "favorites", "streaming", "steam"}
+
+
+def library_list():
+    """{system: [rom filenames]} from the /roms tree — emulated systems only
+    (streaming/steam/favorites are collections, not launchable rom files)."""
+    out = {}
+    if os.path.isdir(pegasus_gen.ROMS_DIR):
+        for sys_name in sorted(os.listdir(pegasus_gen.ROMS_DIR)):
+            d = os.path.join(pegasus_gen.ROMS_DIR, sys_name)
+            if not os.path.isdir(d) or sys_name in NON_GAME_DIRS:
+                continue
+            files = sorted(
+                f for f in os.listdir(d)
+                if os.path.isfile(os.path.join(d, f))
+                and f != "metadata.pegasus.txt" and not f.endswith(".tmp"))
+            if files:
+                out[sys_name] = files
+    return out
+
+
 # ---- save backup (spec §5: saves live on cabinet disk and are synced up to
 # the server opportunistically — a backup, never a dependency; any failure
 # is logged and retried next tick).
@@ -729,6 +758,13 @@ async def handle_req(ws, data):
         elif method == "vnc.connect":
             asyncio.create_task(vnc_tunnel(params["token"]))
             result = {"connecting": True}
+        elif method == "library.list":
+            result = {"systems": await asyncio.to_thread(library_list)}
+        elif method == "system.logs":
+            since = int(params.get("since", 0))
+            n = min(int(params.get("lines", 200)), 1000)
+            lines = [list(e) for e in LOG_RING if e[0] > since][-n:]
+            result = {"lines": lines, "next": _log_seq["n"]}
         elif method == "screensaver.disable":
             secs = float(params.get("seconds", 0))
             ss["suppress_until"] = time.monotonic() + secs
