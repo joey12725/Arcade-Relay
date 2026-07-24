@@ -1259,3 +1259,21 @@ double restart-frontend race; reboot ack under >1s WS backpressure).
 At ~19:20Z: 33 partitions, 14 heartbeat-kills + 27 cabd-kills, SOAK CLEAN.
 
 **Outcome:** software verdict READY; holding for the soak window, then DONE v2.
+
+---
+
+## Iteration 53 — 2026-07-24 — FINAL: soak gate met, DONE v2
+
+**Soak gate:** fixed-chaos cumulative window reached 4h00m CLEAN:
+F1 17:55–19:29Z (1h34m), F2 20:59–21:05Z (6m, host reclaim), F3
+21:20–23:39Z (2h20m uninterrupted; 262 partitions, 90 heartbeat-kills,
+142 cabd-kills — all three chaos modes verified). Watcher log:
+scratchpad/soak-watch.log. Zero violations.
+
+**Closeout:** DONE.md v2 (deploy-readiness record: P1–P7 evidence table,
+7 process-caught bugs, verifier ledger, segmented soak record, remaining
+hardware-only scope), NIGHTLY-REPORT.md final, STATE.md → PROJECT DONE.
+
+**Loop stopped.** Mandate satisfied to the limit of this environment:
+spec implemented, tested (20 test targets, 7×3 acceptance chains, ~20
+adversarial reviews), and deploy-ready (provisioning + runbook + ledgers).
