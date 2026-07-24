@@ -80,6 +80,16 @@ def test_partial_release_kills_multibutton():
     assert "lifeline" not in fired, fired
 
 
+def test_resolve_button_aliases():
+    from inputs import resolve_button
+    # evdev returns alias tuples for face buttons; any known alias must win
+    assert resolve_button(("BTN_A", "BTN_GAMEPAD", "BTN_SOUTH")) == "a"
+    assert resolve_button(("BTN_B", "BTN_EAST")) == "b"
+    assert resolve_button("BTN_START") == "start"
+    assert resolve_button("BTN_DPAD_UP") == "up"
+    assert resolve_button(("BTN_TRIGGER_HAPPY1",)) is None
+
+
 if __name__ == "__main__":
     for name, fn in sorted(globals().items()):
         if name.startswith("test_"):

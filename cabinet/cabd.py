@@ -143,7 +143,7 @@ async def lifeline_on():
     if ss["on"]:
         await screensaver_off()
     ok = await asyncio.to_thread(
-        lifeline.show, lifeline.checks(False, ll["last_sync"]))
+        lifeline.show, lifeline.checks(ws_state["connected"], ll["last_sync"]))
     log(f"lifeline ON (display={ok}); reconnect cap -> 1s")
     return {"lifeline": True}
 

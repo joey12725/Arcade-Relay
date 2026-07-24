@@ -877,3 +877,19 @@ hold ignored; 2s HOME kill w/ frontend focus; 5s lifeline w/ 28k indicator pixel
 rendered; CLI off; 1s-cap log); regressions TEST-M1, TEST-FALLBACK PASS.
 
 **Outcome:** GREEN pending verifier.
+
+---
+
+## Iteration 40 — 2026-07-24 — Verifier PASS; evdev alias bug fixed
+
+**Verifier verdict (input+lifeline):** PASS — 9 scratch latch-semantics probes all
+clean; lifeline ladder honest (internet shows RED/BAD in cabnet, pixel-verified);
+1s reconnect cap measured behaviorally (ON max 0.86s vs OFF max 1.82s over 5 trials
+each). One REAL hardware bug found: evdev alias tuples meant a/b buttons resolved to
+BTN_A/BTN_B (absent from map) and were silently dropped.
+
+**Fixes:** resolve_button() checks every alias (unit-tested incl. the exact tuples
+python3-evdev reports); d-pad + KEY_ arrows added to map; lifeline first frame now
+uses real ws_connected instead of hardcoded False.
+
+**Evidence:** combo unit tests 6/6 PASS (new alias case); TEST-COMBOS PASS.

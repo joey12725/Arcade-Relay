@@ -19,12 +19,31 @@ import time
 DEFAULT_HOLD_S = 2.0
 
 # evdev code -> logical button (extend on hardware once the panel's encoder
-# is known — OQ-9)
+# is known — OQ-9). Includes the alias names python3-evdev reports for the
+# same codes (0x130 is BTN_A *and* BTN_SOUTH *and* BTN_GAMEPAD).
 EVDEV_BUTTON_MAP = {
-    "BTN_SOUTH": "a", "BTN_EAST": "b", "BTN_NORTH": "x", "BTN_WEST": "y",
+    "BTN_SOUTH": "a", "BTN_A": "a", "BTN_GAMEPAD": "a",
+    "BTN_EAST": "b", "BTN_B": "b",
+    "BTN_NORTH": "x", "BTN_X": "x",
+    "BTN_WEST": "y", "BTN_Y": "y",
     "BTN_START": "start", "BTN_SELECT": "select",
     "BTN_TL": "l", "BTN_TR": "r",
+    "BTN_DPAD_UP": "up", "BTN_DPAD_DOWN": "down",
+    "BTN_DPAD_LEFT": "left", "BTN_DPAD_RIGHT": "right",
+    "KEY_UP": "up", "KEY_DOWN": "down", "KEY_LEFT": "left", "KEY_RIGHT": "right",
 }
+
+
+def resolve_button(code_name):
+    """evdev gives a single name OR an alias tuple for one code; the logical
+    button is whichever alias the map knows (verified: relying on [0] drops
+    a/b entirely because BTN_A sorts before BTN_SOUTH)."""
+    names = code_name if isinstance(code_name, (list, tuple)) else [code_name]
+    for n in names:
+        btn = EVDEV_BUTTON_MAP.get(str(n))
+        if btn:
+            return btn
+    return None
 
 
 def parse_combo(spec):
@@ -117,9 +136,7 @@ class EvdevSource:
                 if ev.type != ecodes.EV_KEY or ev.value == 2:   # ignore repeat
                     continue
                 code = ecodes.keys.get(ev.code) or ecodes.BTN.get(ev.code)
-                if isinstance(code, (list, tuple)):
-                    code = code[0]
-                btn = EVDEV_BUTTON_MAP.get(str(code))
+                btn = resolve_button(code)
                 self.on_activity()
                 if btn:
                     self.on_key(btn, ev.value == 1)
