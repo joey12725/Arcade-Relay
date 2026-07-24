@@ -185,12 +185,15 @@ Work through **HARDWARE-TODO.md** in order. The high-value early items:
 - **Config mistake:** every change is a git commit in the state repo.
   `arcadectl state log` → `arcadectl state rollback <sha>` → re-renders and
   pushes to the cabinet. `arcadectl state diff` shows what the last change did.
-- **Bad code deploy (server):** `cd /opt/arcade && git -C <checkout> log` —
-  redeploy by re-running the provision script from an older checkout;
+- **Bad code deploy (server):** /opt/arcade holds a copy, not a git repo —
+  your clone does the versioning. `git log` in the clone, check out the
+  known-good commit, re-run `server/provision/install.sh`, then
   `systemctl restart arcaded`. State repo is untouched by code deploys.
-- **Bad code deploy (cabinet):** same idea; re-run cabinet install.sh (it
-  refreshes /opt/arcade/cabinet and reloads user units), or
-  `arcadectl cab exec -- systemctl --user restart cabd`.
+- **Bad code deploy (cabinet):** same idea — check out the good commit and
+  re-run `cabinet/provision/install.sh` (refreshes /opt/arcade/cabinet and
+  reloads unit files). Running daemons keep executing the OLD code until
+  restarted: follow up with
+  `arcadectl cab exec -- systemctl --user restart cabd pegasus` (or reboot).
 - **Cabinet unreachable:** lifeline combo on the panel (Start+Select 5s)
   shows exactly which layer is broken (link/DNS/internet/WS) with red/blue
   indicators, drops reconnect backoff to 1s, and keeps SSH up.

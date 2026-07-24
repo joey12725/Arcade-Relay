@@ -11,7 +11,12 @@ frontend starts — local edits are stomped like every other rendered config.
 import os
 
 ROMS_DIR = os.environ.get("CABD_ROMS_DIR", "/roms")
-CABD_LAUNCH = "python3 /cabinet/cabd-launch"
+# Launch shim path follows wherever the cabinet code actually lives
+# (/cabinet in the sim, /opt/arcade/cabinet on provisioned hardware).
+CABD_LAUNCH = os.environ.get(
+    "CABD_LAUNCH",
+    "python3 " + os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                              "cabd-launch"))
 
 SYSTEM_EXTENSIONS = {
     "nes": "nes", "snes": "sfc,smc", "genesis": "md,bin,gen",

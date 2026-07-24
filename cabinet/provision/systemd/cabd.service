@@ -16,6 +16,11 @@ Environment=FRONTEND_BIN=
 Environment=FRONTEND_TITLE=pegasus
 Environment=STATE_CACHE=/var/cache/arcade/state.json
 Environment=CABD_SAVES_DIR=/saves
+# Real session binaries (sim defaults point at /fakes/*). Paths match the
+# DEPLOY.md §3 install steps.
+Environment=STEAM_BIN=/usr/bin/steam
+Environment=MOONLIGHT_BIN=/usr/bin/moonlight-qt
+Environment=GREENLIGHT_BIN=/usr/local/bin/greenlight
 ExecStart=/usr/bin/python3 /opt/arcade/cabinet/cabd.py
 Restart=always
 RestartSec=1

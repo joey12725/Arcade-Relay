@@ -1150,3 +1150,25 @@ cabinet loss).
 **Evidence:** TEST-PROVISION PASS after nit fixes (exit 0). SOAK CLEAN.
 
 **Outcome:** GREEN pending verifier. Next: P7 full regression + DONE v2.
+
+---
+
+## Iteration 49 — 2026-07-24 — P6 verifier findings fixed (2 blocking)
+
+**P6 verifier verdict:** FAIL (marginal) — server/CLI sections fully accurate
+(every arcadectl command exercised live; all paths/envs/claims verified), but
+two cabinet-side blockers a verbatim follower would hit:
+1. pegasus_gen hardcoded CABD_LAUNCH="python3 /cabinet/cabd-launch" (sim
+   mount) — every Pegasus launch line dead on real hardware where code lives
+   at /opt/arcade/cabinet. FIXED: path now derives from the module's own
+   location (env-overridable via CABD_LAUNCH); sim output byte-identical.
+2. cabd.service set no STEAM_BIN/MOONLIGHT_BIN/GREENLIGHT_BIN — cabd would
+   exec /fakes/* on real hardware. FIXED: unit now pins /usr/bin/steam,
+   /usr/bin/moonlight-qt, /usr/local/bin/greenlight (matching DEPLOY §3).
+Minor doc fixes: cabinet redeploy now states restart is REQUIRED after a
+code refresh; server redeploy wording no longer implies /opt/arcade is a
+git repo.
+
+**Evidence:** TEST-PEGASUS-META PASS, TEST-PROVISION PASS (exit 0 each).
+
+**Outcome:** GREEN. P6 closed. Next: P7 full regression + DONE v2.
