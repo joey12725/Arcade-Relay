@@ -1240,3 +1240,22 @@ cfg — no regression), TEST-M1 PASS, TEST-RENDER PASS. SOAK CLEAN (fixed
 chaos: 21 partitions, 9 kills, both kill flavors firing).
 
 **Outcome:** GREEN. Remaining gate: 4h clean soak window, then DONE v2.
+
+---
+
+## Iteration 52 — 2026-07-24 — Re-verification: READY
+
+**Re-verify verdict on b4df7a2: READY.** All five fixes confirmed real:
+10MiB adversarial POST through the tunnel → 200 with exact byte count (cap
+math verified, 413 path reasoned from aiohttp semantics); rendered
+retroarch.cfg carries savefile/savestate_directory=/saves and real RetroArch
+consumed it (20/20 cycles); reboot ack ordering analyzed sound (ack hits the
+socket buffer ms before the 1s-delayed reboot; buffered TCP survives
+SIGTERM); frontend restart correct in both supervision modes; A-20 accurate;
+commit purely additive. Two marginal non-blocking notes accepted (rapid
+double restart-frontend race; reboot ack under >1s WS backpressure).
+
+**Remaining gate:** fixed-chaos soak window >=4h CLEAN (started ~17:55Z).
+At ~19:20Z: 33 partitions, 14 heartbeat-kills + 27 cabd-kills, SOAK CLEAN.
+
+**Outcome:** software verdict READY; holding for the soak window, then DONE v2.
