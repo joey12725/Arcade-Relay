@@ -546,6 +546,63 @@ async def frontend_loop():
         await asyncio.sleep(0.2)
 
 
+# ---- save backup (spec §5: saves live on cabinet disk and are synced up to
+# the server opportunistically — a backup, never a dependency; any failure
+# is logged and retried next tick).
+SAVES_DIR = os.environ.get("CABD_SAVES_DIR", "/saves")
+SAVES_SYNC_S = float(os.environ.get("CABD_SAVES_SYNC_SECONDS", "3600"))
+saves = {"last_sha": None}
+
+
+def _saves_tarball():
+    """(content-sha256, tar.gz bytes) for SAVES_DIR, or (None, None) when
+    there is nothing to back up. The sha covers relative paths + file bytes,
+    NOT the tarball (gzip/mtime noise would defeat dedupe)."""
+    import hashlib
+    import io
+    import tarfile
+    if not os.path.isdir(SAVES_DIR):
+        return None, None
+    h = hashlib.sha256()
+    n_files = 0
+    for root, dirs, names in sorted(os.walk(SAVES_DIR)):
+        dirs.sort()
+        for name in sorted(names):
+            p = os.path.join(root, name)
+            h.update(os.path.relpath(p, SAVES_DIR).encode())
+            with open(p, "rb") as f:
+                h.update(f.read())
+            n_files += 1
+    if not n_files:
+        return None, None
+    buf = io.BytesIO()
+    with tarfile.open(fileobj=buf, mode="w:gz") as tar:
+        tar.add(SAVES_DIR, arcname="saves")
+    return h.hexdigest(), buf.getvalue()
+
+
+async def saves_backup_loop():
+    while True:
+        try:
+            sha, blob = await asyncio.to_thread(_saves_tarball)
+            if sha and sha != saves["last_sha"]:
+                async with aiohttp.ClientSession() as s:
+                    async with s.post(
+                            screensaver.MEDIA_BASE + "/saves/upload",
+                            data=blob,
+                            headers={"X-Saves-Sha256": sha,
+                                     "Content-Type": "application/gzip"},
+                            timeout=aiohttp.ClientTimeout(total=120)) as r:
+                        if r.status == 200:
+                            saves["last_sha"] = sha
+                            log(f"saves backed up: {len(blob)}B sha {sha[:12]}")
+                        else:
+                            log(f"saves backup rejected: HTTP {r.status}")
+        except Exception as e:  # noqa: BLE001 — opportunistic, never fatal
+            log(f"saves backup skipped: {e!r}")
+        await asyncio.sleep(SAVES_SYNC_S)
+
+
 # ---- remote view (spec §5.10): on-demand x11vnc for one-time interactive
 # chores (Steam/Xbox logins). x11vnc binds localhost only; every VNC client
 # is bridged over a cabinet-dialed WebSocket to the server, so the cabinet
@@ -785,6 +842,7 @@ async def main():
     asyncio.create_task(fifo_reader())
     asyncio.create_task(idle_loop())
     asyncio.create_task(clips_sync_loop())
+    asyncio.create_task(saves_backup_loop())
     asyncio.create_task(lifeline_loop(ws_state))
 
     # real hardware: evdev devices feed the same combo engine (A-17)

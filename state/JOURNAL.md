@@ -1001,3 +1001,34 @@ bidirectionally through client->server:5901->tunnel-WS->x11vnc (security types
 TEST-M1 PASS.
 
 **Outcome:** GREEN pending verifier. Next: P4.2 save-backup loop, then CLI batch.
+
+---
+
+## Iteration 45 — 2026-07-24 — P4.1 verifier PASS + P4.2 save-backup loop
+
+**Soak check:** SOAK CLEAN (new segment, 25 partitions).
+
+**P4.1 verifier verdict:** PASS, all probes green — sustained RFB session past the
+banner (ServerInit name = cabinet container hostname: definitive provenance; server
+has no VNC binaries); kill -9 x11vnc mid-session → clean client drop, cabd alive,
+fresh session works; --off closes listener (refused) + garbage token → 403, /health
+ok; partition mid-session → drop, heal, works again; diff additions-only. One
+non-blocking note (0.0.0.0:5901 + -nopw) — security explicitly out of scope.
+No findings to apply.
+
+**Unit P4.2 (spec §5: saves synced up opportunistically — backup, not dependency):**
+- cabd saves_backup_loop: every CABD_SAVES_SYNC_SECONDS (sim 2s, real default
+  3600) content-sha256 of /saves (relative paths + bytes, so gzip/mtime noise
+  can't defeat dedupe); on change POST tar.gz to server /saves/upload; every
+  failure logged + retried next tick, never fatal.
+- arcaded /saves/upload (atomic latest.tar.gz + meta.json) + /saves/status.
+- test-saves-backup.sh: new save uploaded w/ exact tar contents; unchanged tree
+  NOT re-uploaded (received_at stable over 3 ticks); modify → new sha + DATA2;
+  partition → no upload, cabd alive; heal → DATA3 arrives.
+
+**Debug trail:** test helper first used curl — not in the server image; switched
+to python urllib (endpoint itself was already working on first try).
+
+**Evidence:** TEST-SAVES-BACKUP PASS (exit 0). Regression TEST-M1 PASS. SOAK CLEAN.
+
+**Outcome:** GREEN pending verifier. Next: P4.3 CLI completeness batch.

@@ -214,6 +214,40 @@ async def cab_lifeline(request):
     return web.json_response(res["result"])
 
 
+# ---- save backup receiver: the cabinet POSTs a tar.gz of /saves whenever
+# its content-sha changes. Stored outside the state repo (binary blobs);
+# latest.tar.gz is replaced atomically, meta.json records provenance.
+SAVES_BACKUP_DIR = os.environ.get("SAVES_BACKUP_DIR", "/saves-backup")
+
+
+async def saves_upload(request):
+    blob = await request.read()
+    if not blob:
+        return web.json_response({"error": "empty body"}, status=400)
+    sha = request.headers.get("X-Saves-Sha256", "")
+    os.makedirs(SAVES_BACKUP_DIR, exist_ok=True)
+    tar_path = os.path.join(SAVES_BACKUP_DIR, "latest.tar.gz")
+    with open(tar_path + ".part", "wb") as f:
+        f.write(blob)
+    os.replace(tar_path + ".part", tar_path)
+    meta = {"received": True, "sha": sha, "bytes": len(blob),
+            "received_at": time.time()}
+    with open(os.path.join(SAVES_BACKUP_DIR, "meta.json.part"), "w") as f:
+        json.dump(meta, f)
+    os.replace(os.path.join(SAVES_BACKUP_DIR, "meta.json.part"),
+               os.path.join(SAVES_BACKUP_DIR, "meta.json"))
+    hub.log_event(f"saves backup received: {len(blob)}B sha {sha[:12]}")
+    return web.json_response(meta)
+
+
+async def saves_status(request):
+    try:
+        with open(os.path.join(SAVES_BACKUP_DIR, "meta.json")) as f:
+            return web.json_response(json.load(f))
+    except FileNotFoundError:
+        return web.json_response({"received": False})
+
+
 # ---- remote view (spec §5.10): on-demand VNC tunneled through the server
 # connection. The server listens on VNC_PORT; each connecting VNC client is
 # paired (by token) with a WS the cabinet dials back to /cab/vnc-tunnel, and
@@ -719,6 +753,8 @@ app.add_routes([
     web.get("/cab/screenshot", cab_screenshot),
     web.post("/cab/remote-view", cab_remote_view),
     web.get("/cab/vnc-tunnel", vnc_tunnel_ws),
+    web.post("/saves/upload", saves_upload),
+    web.get("/saves/status", saves_status),
     web.post("/cab/lifeline/{action}", cab_lifeline),
     web.get("/ui", webui),
     web.post("/games/launch", games_launch),

@@ -92,3 +92,6 @@ test-pegasus-meta:
 
 test-remote-view:
 	bash sim/scripts/test-remote-view.sh
+
+test-saves-backup:
+	bash sim/scripts/test-saves-backup.sh

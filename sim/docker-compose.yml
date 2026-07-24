@@ -60,6 +60,7 @@ services:
       FRONTEND_BIN: /fakes/pegasus
       RETROARCH_BIN: /fakes/retroarch
       CABD_MEDIA_BASE: http://toxiproxy:8666
+      CABD_SAVES_SYNC_SECONDS: "2"   # accelerated (real cabinet: hourly)
     healthcheck:
       # X up AND the full audio stack alive — a dead wireplumber means sets
       # silently no-op, which must fail health, not pass silently
