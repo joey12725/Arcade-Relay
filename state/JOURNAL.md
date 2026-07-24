@@ -916,3 +916,29 @@ Soak: CLEAN.
 
 **Outcome:** GREEN. The emulation path the cabinet will actually run is now tested
 end-to-end with the real emulator.
+
+---
+
+## Iteration 42 — 2026-07-24 — P3: Pegasus theme + generated collections + steam path
+
+**Soak check:** SOAK CLEAN.
+
+**Unit:**
+- cabinet/pegasus_gen.py: metadata.pegasus.txt generation from state — per-system
+  collections (systems ∪ emulators, launch via cabd-launch), Favorites collection
+  mirrored from library/favorites.yaml (UI-2), Streaming (.stream stubs +
+  cabd-launch stream), Steam (library/steam.yaml, EMU-4). Rendered at cabd startup
+  + every state.sync (stomped like all rendered config).
+- themes/pegasus-redblue/: theme.cfg + theme.qml (red/blue, 3-col oversized grid,
+  Favorites-first sort, muted Video trailers, UI-4 keys: accept/launch, page
+  next/prev collections, details=favorite toggle). qmllint: 0 errors after fixing
+  a REAL missing QtMultimedia import it caught.
+- cabd steam system: steam://rungameid/<appid> via STEAM_BIN (fake per A-8),
+  probe-less session; smoke: STEAM-LAUNCH OK (window, running state, kill).
+- A-18: real Pegasus binary unreachable in this env (GitHub blocked by session
+  proxy) — precisely documented; live render stays HARDWARE-TODO.
+
+**Evidence:** TEST-PEGASUS-META PASS (exit 0; incl. favorites add/remove propagation
+and vandalism-stomp on push); qmllint 0 errors; steam smoke OK.
+
+**Outcome:** GREEN pending verifier.

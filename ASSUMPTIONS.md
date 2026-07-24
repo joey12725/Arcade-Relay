@@ -75,3 +75,9 @@
   engine's hold/latch/multi-button semantics are unit-tested (tests/) and exercised
   end-to-end in sim via timed FIFO down/up lines. Only physical device enumeration
   remains hardware-scope.
+- **A-18 (real Pegasus binary unavailable in dev env):** pegasus-frontend isn't in
+  Debian and its GitHub releases are unreachable from this session (repo-scoped
+  proxy blocks api/github downloads — verified). The theme is validated with Qt6
+  qmllint (0 errors; caught a missing QtMultimedia import) and all generated
+  collection metadata is asserted by test-pegasus-meta; the live render + UI-4
+  navigation audit remain HARDWARE-TODO items against real Pegasus.

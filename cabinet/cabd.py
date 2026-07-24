@@ -24,6 +24,7 @@ import aiohttp
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import audio  # noqa: E402
 import inputs  # noqa: E402
+import pegasus_gen  # noqa: E402
 import launcher  # noqa: E402
 import lifeline  # noqa: E402
 import renderer  # noqa: E402
@@ -329,6 +330,18 @@ async def game_launch(system, path, args=()):
             game["rom"] = f"stream/{path}"
             log("stream launched:", game["rom"])
             return {"running": game["rom"]}
+        if system == "steam":
+            # spec §5.9: steam steam://rungameid/<appid>; window tracked for
+            # watchdog/HOME handling like any other session
+            argv = [os.environ.get("STEAM_BIN", "/fakes/steam"),
+                    f"steam://rungameid/{path}"]
+            sess = await asyncio.to_thread(
+                launcher.GameSession, path, (), argv, f"steam-fake {path}",
+                False, 20)
+            game["session"] = sess
+            game["rom"] = f"steam/{path}"
+            log("steam launched:", game["rom"])
+            return {"running": game["rom"]}
         # CTL-4: re-render configs from the state cache before EVERY launch
         rendered = await asyncio.to_thread(renderer.render, state["bundle"], system)
         log("rendered configs:", rendered)
@@ -596,6 +609,8 @@ async def handle_req(ws, data):
             state["bundle"] = bundle
             ll["last_sync"] = time.strftime("%H:%M:%SZ", time.gmtime())
             build_combo_engine()   # hotkeys may have changed
+            meta = await asyncio.to_thread(pegasus_gen.render_all, bundle)
+            log(f"pegasus metadata rendered: {len(meta)} files")
             applied = await asyncio.to_thread(
                 audio.apply_all, audio.policy_from_bundle(bundle))
             result = {"applied": True, "files": len(bundle),
@@ -663,6 +678,10 @@ async def main():
 
     if load_state_cache():
         log(f"state cache loaded: {len(state['bundle'])} files (offline-capable)")
+        try:
+            pegasus_gen.render_all(state["bundle"])   # frontend metadata before it starts
+        except OSError as e:
+            log(f"pegasus metadata render failed: {e!r}")
     else:
         log("no state cache yet; waiting for first state.sync")
     build_combo_engine()

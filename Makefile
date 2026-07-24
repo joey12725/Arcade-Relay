@@ -86,3 +86,6 @@ test-combos:
 
 test-real-retroarch:
 	bash sim/scripts/test-real-retroarch.sh
+
+test-pegasus-meta:
+	bash sim/scripts/test-pegasus-meta.sh
