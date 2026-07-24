@@ -62,9 +62,15 @@ done
 loginctl enable-linger "$ARCADE_USER"
 
 # --- stable controller identities across reboots (spec §5.5) ---
-install -m 0644 "$SRC_DIR/provision/99-arcade-controllers.rules" \
+install -D -m 0644 "$SRC_DIR/provision/99-arcade-controllers.rules" \
     /etc/udev/rules.d/99-arcade-controllers.rules
 udevadm control --reload 2>/dev/null || true
+
+# re-provisioning a live machine: pick up updated unit files immediately
+# (first install: no user manager yet -> harmless no-op)
+runuser -u "$ARCADE_USER" -- \
+    env XDG_RUNTIME_DIR="/run/user/$(id -u "$ARCADE_USER")" \
+    systemctl --user daemon-reload 2>/dev/null || true
 
 chown -R "$ARCADE_USER:$ARCADE_USER" "$HOME_DIR" /opt/arcade /roms /saves \
     /var/cache/arcade

@@ -1118,3 +1118,35 @@ verify flagged missing /usr/bin/python3 in the container (real catch of the
 stub set, fixed by stubbing python3 too).
 
 **Outcome:** GREEN pending verifier. Next: P6 DEPLOY.md runbook.
+
+---
+
+## Iteration 48 — 2026-07-24 — P5 verifier PASS (nits applied) + P6 DEPLOY.md
+
+**Soak check:** SOAK CLEAN (95 partitions this segment).
+
+**P5 verifier verdict:** PASS. Deep checks confirmed: manual wants-symlinks
+byte-identical to systemctl --user enable (container-verified); no login
+lockout from the tty1 startx guard; wss/https clean (no scheme assumptions);
+FRONTEND_BIN="" disables spawn correctly with env reaching launcher; no
+/statework hardcoding; seed-once idempotent. Container end-to-end of both
+install scripts (stubbed apt/loginctl/systemctl) PASSED all assertions.
+Applied findings: install -D for udev rules (bare-dir robustness),
+daemon-reload on re-provision (stale-unit fix), dev journal files excluded
+from production state seed. REAL gap flagged for P6: VNC listener (:5901,
+raw TCP) does not ride the HTTP tunnel hostname.
+
+**Unit P6 (DEPLOY.md):** full runbook — server install + Jellyfin bootstrap +
+ROMDL contract wiring; Cloudflare tunnel one-time setup INCLUDING the VNC
+answer (TCP ingress arcade-vnc.<domain> + `cloudflared access tcp`, or
+LAN-only; cloudflared example updated to match); cabinet reimage from
+Batocera (save/rom copy-off first), provision script, manual installs
+(pegasus-fe + theme + game_dirs, Steam i386, moonlight-qt, Greenlight);
+pairing checks; one-time interactive logins via remote view; smart-home
+curl example (AGT-5); first-boot HARDWARE-TODO walkthrough; rollback &
+recovery (state rollback, code redeploy, lifeline, saves restore, full
+cabinet loss).
+
+**Evidence:** TEST-PROVISION PASS after nit fixes (exit 0). SOAK CLEAN.
+
+**Outcome:** GREEN pending verifier. Next: P7 full regression + DONE v2.

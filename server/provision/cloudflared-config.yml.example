@@ -12,4 +12,10 @@ ingress:
   # hostname into arcaded. wss:// upgrade is handled by cloudflared.
   - hostname: arcade.<your-domain>
     service: http://localhost:8000
+  # Remote view: the VNC LISTENER (:5901) is raw TCP and does NOT ride the
+  # HTTP hostname above. Expose it as a TCP ingress; VNC clients then reach
+  # it via `cloudflared access tcp` (see DEPLOY.md). Skip this block if you
+  # only ever VNC from the server's own LAN.
+  - hostname: arcade-vnc.<your-domain>
+    service: tcp://localhost:5901
   - service: http_status:404

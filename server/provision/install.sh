@@ -26,6 +26,7 @@ install -m 0755 "$SRC_DIR/arcadectl" /usr/local/bin/arcadectl
 if [ ! -d "$STATE_DIR/.git" ]; then
     install -d "$STATE_DIR"
     cp -r "$REPO_DIR/state/." "$STATE_DIR/"
+    rm -f "$STATE_DIR/JOURNAL.md" "$STATE_DIR/STATE.md"   # dev notes, not config
     git -C "$STATE_DIR" init -q
     git -C "$STATE_DIR" -c user.name=arcaded -c user.email=arcaded@localhost \
         add -A
