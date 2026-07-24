@@ -537,6 +537,9 @@ async def audio_loop():
         await asyncio.sleep(1)   # pactl died (pipewire restart?) — reattach
 
 
+frontend = {"proc": None}
+
+
 async def frontend_loop():
     """Spec §5.2 #5: if the frontend dies, restart it."""
     if not os.access(FRONTEND_BIN, os.X_OK):
@@ -547,11 +550,38 @@ async def frontend_loop():
                                 stdout=subprocess.DEVNULL,
                                 stderr=subprocess.DEVNULL,
                                 preexec_fn=launcher.die_with_parent())
+        frontend["proc"] = proc
         log("frontend started, pid", proc.pid)
         while proc.poll() is None:
             await asyncio.sleep(0.5)
         log(f"frontend exited rc={proc.returncode}; respawning")
         await asyncio.sleep(0.2)
+
+
+async def frontend_restart():
+    """§6.2 restart-frontend. Two supervision modes: sim/cabd-owned (kill the
+    tracked proc, frontend_loop respawns) or systemd-owned (provisioned
+    hardware — pegasus.service, cabd's spawn loop disabled)."""
+    proc = frontend["proc"]
+    if proc is not None and proc.poll() is None:
+        proc.terminate()
+        return {"restarted": "frontend", "mode": "cabd"}
+    p = await asyncio.to_thread(
+        subprocess.run, ["systemctl", "--user", "restart", "pegasus"],
+        capture_output=True, text=True)
+    if p.returncode != 0:
+        raise RuntimeError(f"systemd restart failed: {p.stderr.strip()[:200]}")
+    return {"restarted": "frontend", "mode": "systemd"}
+
+
+REBOOT_CMD = os.environ.get("CABD_REBOOT_CMD", "systemctl reboot")
+
+
+def schedule_reboot():
+    """§7 system.reboot: ack first, reboot a beat later so the RPC reply
+    makes it out. Sim overrides CABD_REBOOT_CMD (can't reboot a container)."""
+    subprocess.Popen(["sh", "-c", f"sleep 1; {REBOOT_CMD}"],
+                     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
 
 NON_GAME_DIRS = {"art", "clips", "favorites", "streaming", "steam"}
@@ -758,6 +788,12 @@ async def handle_req(ws, data):
         elif method == "vnc.connect":
             asyncio.create_task(vnc_tunnel(params["token"]))
             result = {"connecting": True}
+        elif method == "system.reboot":
+            log("reboot requested:", REBOOT_CMD)
+            schedule_reboot()
+            result = {"rebooting": True}
+        elif method == "frontend.restart":
+            result = await frontend_restart()
         elif method == "library.list":
             result = {"systems": await asyncio.to_thread(library_list)}
         elif method == "system.logs":

@@ -1205,3 +1205,38 @@ three modes firing within 90s, SOAK CLEAN.
 
 **Outcome:** regression GREEN. Remaining for DONE v2: fresh clean soak window
 with fixed chaos, final whole-repo verifier sweep, DONE.md v2 + reports.
+
+---
+
+## Iteration 51 — 2026-07-24 — Final sweep verdict NOT-READY -> all findings fixed
+
+**Final whole-repo verifier sweep verdict:** NOT-READY (narrowly). Confirmed
+zero test-weakening across f16fdef..1342c2b (test-fallback rewrite judged
+STRONGER, chaos RNG fix judged STRONGER, CABD_LAUNCH judged EQUAL), hot paths
+clean. Findings, all fixed this iteration:
+- F1 HIGH: aiohttp default 1 MiB body cap would silently 413 every real
+  saves backup (sim used 5-byte files). Fixed: client_max_size 512MB
+  (ARCADED_MAX_BODY_MB); test-saves-backup step 1b round-trips a 3MB
+  savestate intact.
+- F2 MED-HIGH: nothing pointed RetroArch saves at /saves. Fixed:
+  cabinet.yaml retroarch block renders savefile_directory/
+  savestate_directory=/saves; DEPLOY.md appendix documents it.
+- F3 MED: cab reboot missing though M0 lists it. Fixed: system.reboot RPC
+  (ack-then-reboot via CABD_REBOOT_CMD, sim override touches a marker),
+  frontend.restart RPC (cabd-owned kill-and-respawn OR systemd mode on
+  hardware), arcadectl cab reboot / cab restart-frontend; test-cli-complete
+  steps 12-13 assert new frontend pid + reboot dispatch.
+- F5 LOW: events API invisible to agents. Fixed: arcadectl events [--limit]
+  + test step 11.
+- F4 MED: v1 scope deferrals now ledgered in ASSUMPTIONS A-20 (game:<id>
+  scope, CTL-3 interactive remapper, input.press/text, lifeline SSH/
+  transport bring-up, web UI library page).
+- F6 nits accepted as-is (bounded; hot paths unaffected — verifier's own
+  analysis).
+
+**Evidence:** TEST-SAVES-BACKUP PASS (with 3MB step), TEST-CLI-COMPLETE PASS
+(13 steps), TEST-REAL-RETROARCH PASS 20/20 (savefile_directory rendered into
+cfg — no regression), TEST-M1 PASS, TEST-RENDER PASS. SOAK CLEAN (fixed
+chaos: 21 partitions, 9 kills, both kill flavors firing).
+
+**Outcome:** GREEN. Remaining gate: 4h clean soak window, then DONE v2.

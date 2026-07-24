@@ -202,3 +202,10 @@ Work through **HARDWARE-TODO.md** in order. The high-value early items:
   the cabinet.
 - **Full cabinet loss:** reimage (§3) + `arcadectl state push` + restore
   saves + copy ROMs back. Nothing authoritative lives on the cabinet.
+
+---
+
+*Appendix: saves wiring.* `state/cabinet.yaml` renders
+`savefile_directory`/`savestate_directory = /saves` into retroarch.cfg, so
+RetroArch writes where the hourly backup loop watches. If you add non-libretro
+emulators later, point their save paths at `/saves/<system>/` too.

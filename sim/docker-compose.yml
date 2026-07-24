@@ -61,6 +61,7 @@ services:
       RETROARCH_BIN: /fakes/retroarch
       CABD_MEDIA_BASE: http://toxiproxy:8666
       CABD_SAVES_SYNC_SECONDS: "2"   # accelerated (real cabinet: hourly)
+      CABD_REBOOT_CMD: "touch /tmp/reboot-requested"   # can't reboot a container
     healthcheck:
       # X up AND the full audio stack alive — a dead wireplumber means sets
       # silently no-op, which must fail health, not pass silently

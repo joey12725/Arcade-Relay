@@ -39,6 +39,19 @@ assert data == b"DATA1", f"content mismatch: {data!r}"
 print("tar contains saves/snes/smw.srm == DATA1")
 EOF
 
+echo "== 1b. >1MiB save uploads (aiohttp default body cap would 413 it) =="
+cab sh -c 'head -c 3000000 /dev/urandom > /saves/snes/big.state'
+t=0; until [ "$(sha_now)" != "$sha1" ]; do
+    t=$((t+1)); [ $t -ge 30 ] && { echo "FAIL: big save never uploaded (body cap?)"; exit 1; }; sleep 0.5
+done
+srv python3 - <<'EOF'
+import tarfile
+info = tarfile.open("/saves-backup/latest.tar.gz").getmember("saves/snes/big.state")
+assert info.size == 3000000, f"big save truncated: {info.size}"
+print("3MB savestate round-tripped intact")
+EOF
+sha1=$(sha_now)   # new baseline for the dedupe + modify steps
+
 echo "== 2. unchanged saves are NOT re-uploaded (content-sha dedupe) =="
 at1=$(recv_at)
 sleep 7   # >3 sync ticks at 2s

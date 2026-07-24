@@ -325,6 +325,22 @@ async def vnc_tunnel_ws(request):
     return ws
 
 
+async def cab_reboot(request):
+    res = await hub.rpc("system.reboot", {})
+    if not res.get("ok"):
+        return web.json_response(res, status=500)
+    hub.log_event("cabinet reboot requested")
+    return web.json_response(res["result"])
+
+
+async def cab_restart_frontend(request):
+    res = await hub.rpc("frontend.restart", {})
+    if not res.get("ok"):
+        return web.json_response(res, status=500)
+    hub.log_event("frontend restart requested")
+    return web.json_response(res["result"])
+
+
 async def cab_screenshot(request):
     import base64
     res = await hub.rpc("system.screenshot", {})
@@ -903,7 +919,10 @@ async def games_kill(request):
     return web.json_response(res["result"])
 
 
-app = web.Application()
+# Body cap must fit save-backup tarballs (aiohttp's 1 MiB default would
+# silently 413 any real /saves tree — savestates alone are MBs each).
+app = web.Application(
+    client_max_size=int(os.environ.get("ARCADED_MAX_BODY_MB", "512")) * 2**20)
 app.add_routes([
     web.get("/", root),
     web.get("/health", health),
@@ -912,6 +931,8 @@ app.add_routes([
     web.get("/cab", cab_ws),
     web.post("/cab/exec", cab_exec),
     web.get("/cab/screenshot", cab_screenshot),
+    web.post("/cab/reboot", cab_reboot),
+    web.post("/cab/restart-frontend", cab_restart_frontend),
     web.post("/cab/remote-view", cab_remote_view),
     web.get("/cab/vnc-tunnel", vnc_tunnel_ws),
     web.post("/saves/upload", saves_upload),

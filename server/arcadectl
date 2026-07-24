@@ -40,6 +40,8 @@ def main():
     sub = ap.add_subparsers(dest="cmd", required=True)
 
     sub.add_parser("status")
+    ev = sub.add_parser("events")
+    ev.add_argument("--limit", type=int, default=50)
 
     games = sub.add_parser("games")
     gsub = games.add_subparsers(dest="gamescmd", required=True)
@@ -139,6 +141,8 @@ def main():
     ex.add_argument("argv", nargs=argparse.REMAINDER,
                     help="command to run on the cabinet (after --)")
     cabsub.add_parser("screenshot")
+    cabsub.add_parser("reboot")
+    cabsub.add_parser("restart-frontend")
     lf = cabsub.add_parser("lifeline")
     lf.add_argument("action", choices=["on", "off"])
     rvp = cabsub.add_parser("remote-view")
@@ -324,6 +328,20 @@ def main():
                 fav_id = hits[0]["id"]
             res = call("POST", f"/favorites/{args.favcmd}", {"id": fav_id})
         print(json.dumps(res) if args.as_json else "\n".join(res["favorites"]) or "(none)")
+        sys.exit(0)
+
+    if args.cmd == "events":
+        res = call("GET", "/events")
+        if args.as_json:
+            print(json.dumps(res[-args.limit:]))
+        else:
+            for e in res[-args.limit:]:
+                print(f"{e['ts']:.0f} {e['event']}")
+        sys.exit(0)
+
+    if args.cmd == "cab" and args.cabcmd in ("reboot", "restart-frontend"):
+        res = call("POST", f"/cab/{args.cabcmd}")
+        print(json.dumps(res))
         sys.exit(0)
 
     if args.cmd == "cab" and args.cabcmd == "lifeline":

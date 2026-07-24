@@ -127,4 +127,27 @@ t=0; until srv arcadectl --json status | grep -q '"screensaver": false'; do
     t=$((t+1)); [ $t -ge 20 ] && { echo "FAIL: toggle never turned it off"; exit 1; }; sleep 0.5
 done
 
+echo "== 11. events log queryable from the CLI =="
+srv arcadectl events | grep -q "game launched by query" \
+    || { echo "FAIL: events missing known entry"; exit 1; }
+srv arcadectl --json events --limit 5 | python3 -c \
+    'import sys,json; d=json.load(sys.stdin); assert 0 < len(d) <= 5, len(d); print("events json ok")'
+
+echo "== 12. cab restart-frontend: new frontend pid =="
+fe_old=$(cab pgrep -f "[p]egasus" | head -1)
+srv arcadectl --json cab restart-frontend | grep -q '"restarted": "frontend"'
+t=0; until fe_new=$(cab pgrep -f "[p]egasus" | head -1) && [ -n "$fe_new" ] \
+        && [ "$fe_new" != "$fe_old" ]; do
+    t=$((t+1)); [ $t -ge 20 ] && { echo "FAIL: frontend never respawned"; exit 1; }; sleep 0.5
+done
+cab sh -c 'xdotool search --name pegasus-fake >/dev/null' \
+    || { echo "FAIL: no frontend window after restart"; exit 1; }
+
+echo "== 13. cab reboot: RPC acked, reboot command dispatched =="
+cab rm -f /tmp/reboot-requested
+srv arcadectl --json cab reboot | grep -q '"rebooting": true'
+t=0; until cab test -e /tmp/reboot-requested; do
+    t=$((t+1)); [ $t -ge 10 ] && { echo "FAIL: reboot command never ran"; exit 1; }; sleep 0.5
+done
+
 echo "TEST-CLI-COMPLETE PASS"

@@ -94,3 +94,18 @@ Design decision recorded: Pegasus has ONE supervisor — pegasus.service
 (watchdog still refocuses by window title). The spec lists both a
 pegasus.service and "cabd restarts Pegasus"; dueling supervisors would race
 to double-spawn, so systemd owns the process and cabd owns focus/health.
+
+## A-20 — v1 scope deferrals (final-sweep ledger)
+Explicitly deferred, per final verifier sweep — implemented later without
+architecture changes; none block deploy:
+- Per-game mapping scope `game:<id>` (spec §5.7/§6.2): controls_map accepts
+  global + system:<sys> only.
+- CTL-3 interactive web remapper (press-button/click-target): the web UI
+  ships text-field mapping + live monitor instead; the CLI flow
+  (controls map/monitor/presets/diff) is the tested surface.
+- input.press / input.text RPCs (§5.10): use `cab exec -- xdotool key ...`.
+- Lifeline extra recovery paths (§5.11): ensure-SSH / fallback transport
+  bring-up not automated (lifeline shows status + 1s backoff; SSH is enabled
+  at provision time).
+- Web UI §6.3 library page / launch-favorites quick action / thumbnails:
+  CLI covers these (games list --favorites, games launch, favorites ...).

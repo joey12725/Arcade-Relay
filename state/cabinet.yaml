@@ -18,6 +18,9 @@ emulators:
 retroarch:
   video_driver: gl
   audio_driver: pulse
+  # Saves land where the backup loop watches (spec: saves synced to server).
+  savefile_directory: /saves
+  savestate_directory: /saves
   network_cmd_enable: "true"
   network_cmd_port: 55355
   video_fullscreen: "false"
