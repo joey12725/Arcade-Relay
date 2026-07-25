@@ -1324,3 +1324,32 @@ TEST-CLI-COMPLETE all PASS. SOAK CLEAN.
 
 **Outcome:** GREEN pending verifier. A-20 rewritten: only CTL-5 Bluetooth
 (spec says out of scope for v1) and web-UI box art remain deferred.
+
+## Iteration 54b — 2026-07-25 — P8 self-review hardening (pre-verifier)
+
+Three defects found by reading my own P8 diff, fixed before the verifier
+reported:
+- `--scope game:<id>` accepted anything containing a slash, so
+  `game:../../etc/passwd` or `game:snes/sub/dir.sfc` became bundle keys that
+  the renderer can never match (silent dead config, traversal-looking key in
+  a committed file). Now requires exactly `<system>/<rom-basename>`.
+- load-preset wrote `games.yaml` from `snap.get("games") or {}`, so loading a
+  preset SAVED BEFORE P8 (no games key) silently wiped every per-game map.
+  Now only presets that actually captured the layer may replace it.
+- `ssh_listening()` parsed /proc/net/tcp only; Debian's sshd commonly binds
+  :: (IPv6) only, which would report not-listening forever and re-run the
+  start command on every lifeline entry. Now checks tcp6 too, with the proc
+  paths injectable so the parse is testable where the kernel has IPv6 off.
+  Also added a bounded re-probe after starting ssh: a slow `systemctl start`
+  that returns (or times out) before the socket is up no longer reports a
+  false failure.
+
+**Evidence:** TEST-P8 PASS with new coverage (4 malformed scopes each exit 4
++ no file written into the state repo; legacy preset leaves per-game layer
+intact; tcp6-only listener detected with no false positive on an empty
+table). TEST-RENDER PASS, TEST-M2 PASS. SOAK CLEAN.
+
+**Note:** intermittent "service cabinet is not running" / stale-render
+failures during this window were container churn — the P8 verifier subagent
+was running make targets against the same arcade-sim project concurrently.
+Clean serial re-runs pass.

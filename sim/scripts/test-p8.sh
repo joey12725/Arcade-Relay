@@ -46,8 +46,28 @@ b = json.load(sys.stdin)
 m = b["controllers/games.yaml"]["games"]["snes/smw.sfc"]["remap"]
 assert m == {"a": "l"}, f"preset did not restore per-game layer: {m}"
 print("preset restored per-game layer")'
-rc=0; srv arcadectl controls map --scope game:bogus --set a=b 2>/dev/null || rc=$?
-[ "$rc" -eq 4 ] || { echo "FAIL: malformed game scope exited $rc, want 4"; exit 1; }
+for bad in "game:bogus" "game:../../etc/passwd" "game:snes/sub/dir.sfc" "game:/x"; do
+    rc=0; srv arcadectl controls map --scope "$bad" --set a=b 2>/dev/null || rc=$?
+    [ "$rc" -eq 4 ] || { echo "FAIL: scope '$bad' exited $rc, want 4"; exit 1; }
+done
+srv test -e /statework/controllers/passwd && { echo "FAIL: traversal wrote in state repo"; exit 1; } || true
+
+echo "== 2b. pre-P8 preset (no games key) must NOT wipe per-game maps =="
+srv python3 - <<'EOF'
+import yaml, pathlib
+# a preset saved before the per-game layer existed
+p = pathlib.Path("/statework/controllers/presets/legacy.yaml")
+snap = yaml.safe_load(pathlib.Path("/statework/controllers/presets/p8.yaml").read_text())
+snap.pop("games", None)
+p.write_text(yaml.safe_dump(snap))
+print("wrote legacy preset without a games key")
+EOF
+srv arcadectl controls load-preset legacy >/dev/null
+srv arcadectl --json state bundle | python3 -c '
+import json,sys
+m = json.load(sys.stdin)["controllers/games.yaml"]["games"]["snes/smw.sfc"]["remap"]
+assert m == {"a": "l"}, f"legacy preset wiped the per-game layer: {m}"
+print("legacy preset left the per-game layer intact")'
 
 echo "== 3. input.press logical combo: kills a running game (no focus needed) =="
 srv arcadectl games launch --system snes --path /roms/snes/smw.sfc >/dev/null
@@ -86,6 +106,24 @@ import lifeline
 r = lifeline.ensure_recovery_paths()
 assert r['ssh'] == 'already listening', r
 print('idempotent:', r)"
+# an IPv6-only sshd must also count (Debian binds :: by default). The sim
+# kernel has IPv6 off, so feed the parser a real-format tcp6 table.
+cab python3 - <<'EOF'
+import sys, tempfile, os
+sys.path.insert(0, '/cabinet')
+import lifeline
+tcp6 = ("  sl  local_address remote_address st tx_queue rx_queue tr tm->when retrnsmt uid timeout inode\n"
+        "   0: 00000000000000000000000000000000:0016 00000000000000000000000000000000:0000 0A "
+        "00000000:00000000 00:00000000 00000000     0        0 12345 1 0000 100 0\n")
+with tempfile.NamedTemporaryFile("w", suffix="tcp6", delete=False) as f:
+    f.write(tcp6); path = f.name
+empty = tempfile.NamedTemporaryFile("w", suffix="tcp", delete=False)
+empty.write("  sl  local_address remote_address st\n"); empty.close()
+assert lifeline.ssh_listening(22, (empty.name, path)), "IPv6-only sshd not detected"
+assert not lifeline.ssh_listening(22, (empty.name,)), "false positive on empty table"
+os.unlink(path); os.unlink(empty.name)
+print("tcp6-only listener detected (and no false positive)")
+EOF
 
 echo "== 6. panel button restarts networking while lifeline is up =="
 cab sh -c 'echo "a down" > /tmp/input-events'

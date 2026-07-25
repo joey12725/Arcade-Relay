@@ -441,7 +441,11 @@ async def controls_load_preset(request):
     _write_yaml("controllers/global.yaml", snap.get("global") or {})
     for sysname, data in (snap.get("systems") or {}).items():
         _write_yaml(f"controllers/systems/{sysname}.yaml", data)
-    _write_yaml("controllers/games.yaml", snap.get("games") or {})
+    # A preset saved before the per-game layer existed has no "games" key —
+    # restoring {} would silently wipe per-game maps it never captured. Only
+    # presets that actually snapshotted the layer may replace it.
+    if "games" in snap:
+        _write_yaml("controllers/games.yaml", snap["games"] or {})
     git_commit(f"arcadectl: controls load-preset {name}")
     push_state_soon()
     hub.log_event(f"preset loaded: {name}")
@@ -463,7 +467,12 @@ async def controls_map(request):
         # Layer 3 (spec §5.7): all per-game overrides live in one file keyed
         # by '<system>/<rom>', so the bundle stays small and diffable.
         gid = scope.split(":", 1)[1]
-        if "/" not in gid:
+        sysname, _, rom = gid.partition("/")
+        # exactly '<system>/<rom-basename>' — the id is a bundle key, and a
+        # junk key (traversal-looking or nested) would silently never match
+        # what the renderer computes from the launched rom path
+        if (not sysname or not rom or "/" in rom
+                or ".." in gid or gid != gid.strip()):
             return web.json_response(
                 {"error": f"game scope needs <system>/<rom>, got {gid!r}"},
                 status=400)

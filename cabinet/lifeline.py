@@ -82,16 +82,26 @@ def _sh(cmd, timeout=8):
         return False, repr(e)[:200]
 
 
-def ssh_listening(port=22):
-    """True if anything is listening on the SSH port (any bind address)."""
-    try:
-        with open("/proc/net/tcp") as f:
-            for line in f.read().splitlines()[1:]:
-                cols = line.split()
-                if int(cols[1].split(":")[1], 16) == port and cols[3] == "0A":
-                    return True
-    except OSError:
-        pass
+PROC_TCP = ("/proc/net/tcp", "/proc/net/tcp6")
+
+
+def ssh_listening(port=22, proc_files=PROC_TCP):
+    """True if anything is listening on the SSH port (any bind address).
+
+    Checks tcp6 as well as tcp: Debian's sshd commonly binds :: only, and
+    an IPv4-only probe would report 'not listening' forever and restart it
+    on every lifeline entry. proc_files is injectable so the tcp6 parse can
+    be tested where the kernel has IPv6 disabled.
+    """
+    for proc in proc_files:
+        try:
+            with open(proc) as f:
+                for line in f.read().splitlines()[1:]:
+                    cols = line.split()
+                    if int(cols[1].split(":")[1], 16) == port and cols[3] == "0A":
+                        return True
+        except OSError:
+            continue
     return False
 
 
@@ -102,7 +112,15 @@ def ensure_recovery_paths():
         acted["ssh"] = "already listening"
     else:
         ok, detail = _sh(SSH_START)
-        acted["ssh"] = "started" if (ok and ssh_listening()) else f"failed: {detail}"
+        # a slow starter (systemctl on a loaded boot) may return or time out
+        # before the socket is up — give the listener a moment before
+        # calling it failed. Retried on every lifeline entry regardless.
+        for _ in range(10):
+            if ssh_listening():
+                break
+            time.sleep(0.3)
+        acted["ssh"] = ("started" if ssh_listening()
+                        else f"failed: {detail or 'no listener'}")
     if TRANSPORT_START:
         ok, detail = _sh(TRANSPORT_START, timeout=8)
         acted["transport"] = "up" if ok else f"failed: {detail}"
