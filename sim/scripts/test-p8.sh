@@ -134,6 +134,37 @@ srv arcadectl --json cab lifeline restart-network | grep -q '"restarted": true' 
     || { echo "FAIL: remote restart-network failed"; exit 1; }
 srv arcadectl cab lifeline off >/dev/null
 
+echo "== 6b. concurrent lifeline on/off leaves no orphan overlay =="
+for i in 1 2 3 4 5 6; do
+    srv arcadectl cab lifeline on >/dev/null 2>&1 &
+    srv arcadectl cab lifeline off >/dev/null 2>&1 &
+done
+wait
+srv arcadectl cab lifeline off >/dev/null 2>&1 || true
+t=0; until ! cab sh -c 'xdotool search --name arcade-lifeline >/dev/null 2>&1'; do
+    t=$((t+1)); [ $t -ge 20 ] && { echo "FAIL: orphaned lifeline overlay survived off"; exit 1; }; sleep 0.5
+done
+cab pgrep -f "[-]-title=arcade-lifeline" >/dev/null \
+    && { echo "FAIL: orphaned lifeline mpv process"; exit 1; } || true
+srv arcadectl --json status | grep -q '"online": true' \
+    || { echo "FAIL: cabinet not healthy after lifeline storm"; exit 1; }
+
+echo "== 6c. /cab/input rejects non-string params with 400, not a raw 500 =="
+srv python3 - <<'EOF'
+import json, urllib.request, urllib.error
+for bad in ({"key": 123}, {"key": None}, {"text": ["x"]}, {"key": ""}, {}):
+    req = urllib.request.Request("http://localhost:8000/cab/input",
+                                 data=json.dumps(bad).encode(),
+                                 headers={"Content-Type": "application/json"},
+                                 method="POST")
+    try:
+        urllib.request.urlopen(req, timeout=10)
+        raise SystemExit(f"FAIL: {bad} was accepted")
+    except urllib.error.HTTPError as e:
+        assert e.code == 400, f"{bad} -> {e.code}, want 400"
+print("malformed input params rejected with 400")
+EOF
+
 echo "== 7. web UI: interactive remapper + library page wired to real endpoints =="
 srv python3 - <<'EOF'
 import urllib.request

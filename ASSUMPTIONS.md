@@ -114,3 +114,15 @@ because they are software, not hardware, and the mandate is the whole spec:
 Still deferred (unchanged): Bluetooth controllers (CTL-5, spec says out of
 scope for v1); box-art thumbnails in the web UI (art is delivered to the
 cabinet and shown by Pegasus; the web UI lists titles).
+
+## A-21 — Sim tests must run SERIALLY (one make target at a time)
+All test targets drive the same `arcade-sim` compose project: they
+`up --force-recreate` containers, mutate the shared state repo, and launch
+real mpv/RetroArch processes inside one cabinet container. Two suites (or a
+verifier subagent and the main loop) running at once recreate each other's
+containers mid-assertion and stack real AV processes until cabd is OOM-killed
+and respawns — producing failures like "service cabinet is not running" or a
+stale render, which do not reproduce serially (test-m2 verified 5/5 clean
+alone, 2 failures in 5 under concurrency). Verified root cause, not a product
+defect. Run one target at a time; give a verifier subagent exclusive use of
+the sim while it works.

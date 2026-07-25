@@ -330,10 +330,16 @@ async def vnc_tunnel_ws(request):
 
 async def cab_input(request):
     body = await request.json()
-    if "key" in body:
-        res = await hub.rpc("input.press", {"key": body["key"]})
-    elif "text" in body:
-        res = await hub.rpc("input.text", {"text": body["text"]})
+    # type-check here: a non-string reaching xdotool surfaces as a raw
+    # TypeError 500 from the cabinet instead of a usable 400
+    for field, method in (("key", "input.press"), ("text", "input.text")):
+        if field in body:
+            if not isinstance(body[field], str) or not body[field]:
+                return web.json_response(
+                    {"error": f"{field} must be a non-empty string"},
+                    status=400)
+            res = await hub.rpc(method, {field: body[field]})
+            break
     else:
         return web.json_response({"error": "need key or text"}, status=400)
     if not res.get("ok"):

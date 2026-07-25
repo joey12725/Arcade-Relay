@@ -153,9 +153,9 @@ async function refresh() {
     ['global','system:nes','system:snes','system:genesis','system:arcade',
      'system:gba','system:psx','system:gb'].forEach(s => scope.add(new Option(s, s)));
     renderTargets();
-    loadLibrary();
   }
   showCurrentMap();
+  loadLibrary();   // every cycle: ROMs delivered while the page is open must appear
   const q = await api('GET', '/roms/status');
   document.getElementById('queue').innerHTML = (q.queue || []).map(e =>
     `<li><b>${e.title}</b> — ${e.status} <small>${e.detail || ''}</small></li>`).join('') || '<li><small>empty</small></li>';
@@ -216,10 +216,19 @@ async function loadLibrary() {
   if (document.getElementById('libFavs').checked) qs.push('favorites=1');
   const r = await api('GET', '/games/list' + (qs.length ? '?' + qs.join('&') : ''))
                   .catch(() => ({games: []}));
-  if (!sysSel.options.length) {
+  // Rebuild the system list from the FULL library (the filtered response
+  // can't name systems it filtered out) whenever the set changes — a new
+  // system appearing must not require a page reload.
+  const all = sysSel.value || document.getElementById('libFavs').checked
+    ? await api('GET', '/games/list').catch(() => ({games: []})) : r;
+  const systems = [...new Set(all.games.map(g => g.system))].sort();
+  const shown = [...sysSel.options].slice(1).map(o => o.value);
+  if (systems.join() !== shown.join()) {
+    const keep = sysSel.value;
+    sysSel.innerHTML = '';
     sysSel.add(new Option('(all systems)', ''));
-    [...new Set(r.games.map(g => g.system))].sort()
-      .forEach(s => sysSel.add(new Option(s, s)));
+    systems.forEach(s => sysSel.add(new Option(s, s)));
+    sysSel.value = systems.includes(keep) ? keep : '';
   }
   document.getElementById('library').innerHTML = r.games.map(g =>
     `<li><button onclick="api('POST','/games/launch',

@@ -148,9 +148,18 @@ game = {"session": None, "rom": None}
 game_lock = asyncio.Lock()
 ss = {"on": False, "suppress_until": 0.0}
 ll = {"on": False, "last_sync": None, "recovery": {}}
+lifeline_lock = asyncio.Lock()
 
 
 async def lifeline_on():
+    # serialized with lifeline_off: interleaved on/off would let two
+    # lifeline.show() calls race, the second overwriting the module-global
+    # mpv handle and orphaning a fullscreen window nothing can close
+    async with lifeline_lock:
+        return await _lifeline_on()
+
+
+async def _lifeline_on():
     if ll["on"]:
         return {"lifeline": True}
     ll["on"] = True
@@ -174,10 +183,16 @@ async def lifeline_recover():
 
 
 async def lifeline_off():
-    ll["on"] = False
-    await asyncio.to_thread(lifeline.hide)
-    log("lifeline OFF")
-    return {"lifeline": False}
+    async with lifeline_lock:
+        ll["on"] = False
+        await asyncio.to_thread(lifeline.hide)
+        # belt and braces: if a racing show() ever leaked a window, this
+        # clears it so the cabinet can never be stuck behind the overlay
+        if lifeline.window_present():
+            log("lifeline: stray window found after hide; killing")
+            await asyncio.to_thread(lifeline.kill_strays)
+        log("lifeline OFF")
+        return {"lifeline": False}
 
 
 async def lifeline_restart_network():
@@ -201,7 +216,13 @@ async def lifeline_loop(ws_state):
             st = await asyncio.to_thread(
                 lifeline.checks, ws_state["connected"], ll["last_sync"])
             st["recovery"] = ll.get("recovery") or {}
-            await asyncio.to_thread(lifeline.show, st)
+            # Under the lock, and re-checked inside it: checks() takes
+            # seconds (ping/DNS), and an `off` landing in that window would
+            # otherwise have show() respawn the overlay right after hide().
+            async with lifeline_lock:
+                if not ll["on"]:
+                    continue
+                await asyncio.to_thread(lifeline.show, st)
         except Exception as e:  # noqa: BLE001
             log(f"lifeline refresh: {e!r}")
 

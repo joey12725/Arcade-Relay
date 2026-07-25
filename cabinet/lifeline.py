@@ -206,6 +206,26 @@ def running():
     return _proc is not None and _proc.poll() is None
 
 
+def window_present():
+    """True if ANY lifeline window is on screen, tracked or not — catches a
+    process orphaned by a racing show()."""
+    return launcher.find_window(LL_TITLE) is not None
+
+
+def kill_strays():
+    """Last-resort cleanup for an untracked lifeline window.
+
+    The "--" is load-bearing: the pattern itself starts with "--", so
+    without it pkill parses it as an unknown option and kills nothing.
+    """
+    subprocess.run(["pkill", "-9", "-f", "--", f"--title={LL_TITLE}"],
+                   capture_output=True)
+    deadline = time.monotonic() + 2
+    while time.monotonic() < deadline and window_present():
+        time.sleep(0.1)
+    launcher.focus_frontend()
+
+
 def hide():
     global _proc
     if _proc is not None and _proc.poll() is None:
