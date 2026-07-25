@@ -209,6 +209,25 @@ srv arcadectl cab lifeline off >/dev/null
 srv arcadectl screensaver enable-source "$SA" >/dev/null
 srv arcadectl screensaver set --idle 3600 >/dev/null
 
+echo "== 3h. a stalled media stream must NOT block a local game launch =="
+# Prime directive 1: Pegasus launches games locally and must never depend on
+# the server. A screensaver start whose media stalls used to hold the screen
+# lock for its full window timeout (measured 13.1s), hanging the frontend.
+srv arcadectl screensaver off >/dev/null || true
+srv arcadectl screensaver set --idle 3 --fallback local_clips >/dev/null
+tp toxic add -n ss_slow -t bandwidth -a rate=1 cab_link >/dev/null
+cab sh -c 'echo "BTN_A down" > /tmp/input-events'   # reset idle, then let it expire
+sleep 5   # a screensaver start is now in flight against a 1 KB/s link
+start_ms=$(cab sh -c 'date +%s%3N')
+cab python3 /cabinet/cabd-launch snes /roms/snes/game.rom >/dev/null 2>&1 || true
+end_ms=$(cab sh -c 'date +%s%3N')
+took=$((end_ms - start_ms))
+tp toxic remove -n ss_slow cab_link >/dev/null 2>&1 || true
+cab python3 /cabinet/cabd-launch kill >/dev/null 2>&1 || true
+echo "   local launch under a stalled stream: ${took}ms"
+[ "$took" -lt 8000 ] || { echo "FAIL: local launch blocked ${took}ms by a server-media stall"; exit 1; }
+srv arcadectl screensaver set --idle 3600 >/dev/null
+
 echo "== 4. cleanup =="
 srv arcadectl screensaver set --idle 3600 >/dev/null
 srv arcadectl screensaver off >/dev/null || true

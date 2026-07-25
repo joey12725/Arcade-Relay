@@ -1541,3 +1541,36 @@ TEST-M1, TEST-P8, TEST-JELLYFIN, WEBUI-LIVE, TEST-M6 all PASS.
 **Note on process:** an infrastructure outage (safety classifier) blocked all
 Bash for ~15 minutes mid-iteration. Nothing was committed until it cleared
 and the full serial suite was green — no red commits.
+
+## Iteration 61 — 2026-07-25 — re-verification PASS; launch-stall regression fixed
+
+**Re-verification of 579b234: PASS.** Deadlock audit clean (AST call-graph
+over every game_lock holder; _lifeline_on->_screensaver_off is the only
+nested case and correctly uses the unlocked variant). Storm probes could not
+make flag and screen disagree: zero orphan windows, zero cabd restarts, zero
+tracebacks. New features proven real, not just non-crashing: dim_clock
+renders a TICKING clock (1974 pixels differ across 3s, lit bbox is a centered
+text strip), shuffle produces 2 distinct orders vs 1 for continue_series,
+/thumb returns a valid JPEG (magic ffd8ffe0) and 404s for a bogus id.
+Mutation-tested my own new assertions: removing the ll["on"] guard fails 3f,
+reverting on_fallback fails 3d. Diff purely additive on tests (85/0).
+
+**One MEDIUM finding, fixed:** with a 1 KB/s toxic, screensaver.start() burned
+its full 15s window wait WHILE HOLDING the screen lock, so a local game
+launch measured 13.1s. That breaks prime directive 1 — Pegasus launches
+locally and must never wait on the server — and it was invisible to
+monitoring because heartbeats never take the lock. Fix: start()'s window
+timeout is now a parameter and screensaver_on passes 4s. Attract video is
+never worth stalling a player's launch.
+
+**Two LOW findings, fixed:** the watchdog mutated ss["on"] outside the lock
+(now takes it, and skips entirely while held so it can't race an in-flight
+start — non-blocking, so the 2s game budget is safe); ss["starting"] only
+guarded the idle path (moved into start_screensaver_now so it covers combo
+and CLI callers too).
+
+**Evidence:** new test 3h measures a local launch under a stalled stream:
+2982ms (was 13762ms). Mutation-tested: restoring the 15s timeout reproduces
+13762ms and FAILS the test. TEST-FALLBACK PASS 3/3 after the fix.
+TEST-SCREENSAVER, TEST-M1, TEST-P8, ACCEPT-M3, TEST-COMBOS, TEST-LOCAL all
+PASS. SOAK CLEAN (457 partitions, 178 kills).

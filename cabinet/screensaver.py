@@ -97,8 +97,13 @@ def get_prop(name):
     return ipc(["get_property", name]).get("data")
 
 
-def start(playlist, brightness):
-    """playlist: server-relative paths (/media/<id>). Returns True on window."""
+def start(playlist, brightness, window_timeout=15):
+    """playlist: server-relative paths (/media/<id>). Returns True on window.
+
+    window_timeout bounds the wait for mpv to map its window; a stalled
+    media stream can consume all of it, so callers holding a lock others
+    need should keep this short (see cabd.screensaver_on).
+    """
     global _proc
     stop(refocus=False)
     with open(PLAYLIST_PATH, "w") as f:
@@ -122,7 +127,7 @@ def start(playlist, brightness):
          f"--playlist={PLAYLIST_PATH}"],
         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
         env=env, preexec_fn=launcher.die_with_parent())
-    deadline = time.monotonic() + 15   # network stream spin-up
+    deadline = time.monotonic() + window_timeout
     win = None
     while time.monotonic() < deadline:
         if _proc.poll() is not None:

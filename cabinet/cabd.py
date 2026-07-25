@@ -355,7 +355,13 @@ async def screensaver_on(playlist, brightness):
             # video stacking on top of it during an outage is exactly when
             # the operator needs to read it.
             return {"screensaver": False, "note": "lifeline active"}
-        ok = await asyncio.to_thread(screensaver.start, playlist, brightness)
+        # Prime directive 1: a LOCAL game launch must never wait on the
+        # server. mpv's window can take the full timeout when the media
+        # stream is slow, so cap the in-lock wait at 4s — attract video is
+        # never worth stalling a player's launch. If the window shows up
+        # later the watchdog's heal path picks it up; if it never does,
+        # start() kills it.
+        ok = await asyncio.to_thread(screensaver.start, playlist, brightness, 4)
         ss["on"] = bool(ok)
         log(f"screensaver on -> {ss['on']}")
         return {"screensaver": ss["on"]}
@@ -375,8 +381,8 @@ async def screensaver_dim_clock(brightness):
 
 
 async def screensaver_off():
-    # Must hold the screen lock: screensaver.start() can spend up to 15s
-    # waiting for its window, and an unlocked off landing in that window
+    # Must hold the screen lock: screensaver.start() spends up to its window
+    # timeout waiting for mpv, and an unlocked off landing in that window
     # would "stop" a screensaver that then finishes starting and leaves a
     # live window behind — the flag says off, the screen says otherwise.
     async with game_lock:
@@ -409,20 +415,28 @@ async def idle_loop():
             continue
         if time.monotonic() - activity["last"] < idle_s:
             continue
-        # `starting` guards the window between "decided to start" and
-        # "flag is true": a start takes seconds (playlist fetch, mpv
-        # window), and without it the next tick starts a SECOND one whose
-        # handle replaces the first, orphaning it on screen.
-        ss["starting"] = True
-        try:
-            await start_screensaver_now()
-        finally:
-            ss["starting"] = False
+        await start_screensaver_now()
 
 
 async def start_screensaver_now():
     """Shared by idle timeout and the force combo/CLI: playlist over the
-    tunnel, local clip fallback when unreachable (prime directive 6)."""
+    tunnel, local clip fallback when unreachable (prime directive 6).
+
+    `ss["starting"]` covers the whole decide->flag window for EVERY caller
+    (idle, combo, CLI), not just idle: a start takes seconds (playlist
+    fetch, then mpv), and a second one begun in that window replaces the
+    first process handle, orphaning it on screen.
+    """
+    if ss["starting"]:
+        return {"screensaver": False, "note": "already starting"}
+    ss["starting"] = True
+    try:
+        return await _start_screensaver_now()
+    finally:
+        ss["starting"] = False
+
+
+async def _start_screensaver_now():
     cfg = state["bundle"].get("screensaver.yaml") or {}
 
     async def use_local_clips(why):
@@ -572,10 +586,16 @@ async def watchdog_loop():
     stale and idle_loop can relaunch it."""
     silent_since = None
     while True:
-        if ss["on"] and not screensaver.running():
-            ss["on"] = False
-            launcher.focus_frontend()
-            log("watchdog: screensaver died, flag cleared")
+        if ss["on"] and not screensaver.running() and not game_lock.locked():
+            # Under the screen lock like every other ss["on"] writer, and
+            # skipped entirely while the lock is held: a start in flight is
+            # about to set the flag itself, and clearing it here would race
+            # that. Non-blocking so the watchdog's 2s game budget is safe.
+            async with game_lock:
+                if ss["on"] and not screensaver.running():
+                    ss["on"] = False
+                    launcher.focus_frontend()
+                    log("watchdog: screensaver died, flag cleared")
         s = game["session"]
         if s is None:
             silent_since = None
