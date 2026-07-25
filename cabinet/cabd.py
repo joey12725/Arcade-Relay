@@ -362,6 +362,19 @@ async def start_screensaver_now():
     """Shared by idle timeout and the force combo/CLI: playlist over the
     tunnel, local clip fallback when unreachable (prime directive 6)."""
     cfg = state["bundle"].get("screensaver.yaml") or {}
+
+    async def use_local_clips(why):
+        """Same fallback for both no-playlist cases: the server being
+        unreachable, and the server answering with nothing to play."""
+        clips = local_clips()
+        fallback = cfg.get("fallback", "local_clips")
+        if clips and fallback == "local_clips":
+            log(f"idle: {why}; local clips fallback")
+            await screensaver_on(clips, cfg.get("brightness", 80))
+        else:
+            log(f"idle: {why}; no fallback available")
+            await asyncio.sleep(5)
+
     try:
         tmo = aiohttp.ClientTimeout(total=10)
         async with aiohttp.ClientSession(timeout=tmo) as s:
@@ -370,15 +383,15 @@ async def start_screensaver_now():
                 pl = await r.json()
         if pl.get("playlist"):
             await screensaver_on(pl["playlist"], pl.get("brightness", 80))
-    except Exception as e:  # noqa: BLE001
-        clips = local_clips()
-        fallback = cfg.get("fallback", "local_clips")
-        if clips and fallback == "local_clips":
-            log(f"idle: server unreachable ({e!r}); local clips fallback")
-            await screensaver_on(clips, cfg.get("brightness", 80))
         else:
-            log(f"idle: playlist fetch failed: {e!r}; no fallback available")
-            await asyncio.sleep(5)
+            # A reachable server with zero enabled sources returns an EMPTY
+            # playlist. That used to fall through silently: nothing started,
+            # nothing logged, and the except-branch fallback never ran
+            # because the fetch itself succeeded.
+            await use_local_clips("server returned an empty playlist "
+                                  "(no enabled sources)")
+    except Exception as e:  # noqa: BLE001
+        await use_local_clips(f"server unreachable ({e!r})")
 
 
 MOONLIGHT_BIN = os.environ.get("MOONLIGHT_BIN", "/fakes/moonlight")

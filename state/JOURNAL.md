@@ -1411,3 +1411,33 @@ the auditor was not weakened, it was made able to tell the two apart.
 
 **Evidence:** negative test rc=1 with V5 flagged; soak restarted with the
 new poller, SOAK CLEAN.
+
+## Iteration 57 — 2026-07-25 — P9 regression + a cold agent found a real bug
+
+**P9 full serial regression: ZERO failures.** 22/22 test targets (incl. the
+new test-p8 and test-webui-live) + accept-m0..m5 3/3 each. Results in
+scratchpad/p9-results.txt; accept-m0 ~20min/run, accept-m1 ~9.7min/run.
+
+**accept-m6 round 1: PASS** (brightness 80->40, Redline disabled, both
+git-committed) — and the cold agent, unprompted, reported a REAL product bug
+it noticed while working. Disabling the last enabled source leaves a
+reachable server returning an EMPTY playlist; start_screensaver_now() only
+started something `if pl.get("playlist")`, with no else. The local_clips
+fallback lives in the except branch, so a successful-but-empty fetch fell
+through silently: no screensaver on idle, nothing logged, and the configured
+fallback could not rescue it because nothing had failed.
+
+**Fix:** both no-playlist cases now share one fallback path — server
+unreachable AND server-returned-nothing. Logged distinctly ("empty playlist
+(no enabled sources)" vs "server unreachable"). New test-fallback step 3b
+proves it end to end: disable every source, assert the playlist really is
+[], idle out, and require a local clip to be PLAYING (mpv path prop), plus
+the log line. No prior test covered this, which is why it survived ~57
+iterations and four verifier sweeps.
+
+**Also fixed:** my own step-2 assertion in test-fallback was racy — pgrep
+sees the respawned mpv instantly but its window maps a beat later, so a
+single xdotool sample could run too early. Now waits for the window.
+
+**Evidence:** TEST-FALLBACK PASS x2, TEST-SCREENSAVER PASS, ACCEPT-M3 PASS,
+ACCEPT-M6 PASS (round 1/3). SOAK CLEAN.

@@ -70,7 +70,9 @@ t=0; until newpid=$(cab pgrep -f "[a]rcade-screensaver" 2>/dev/null) \
         && [ -n "$newpid" ] && [ "$newpid" != "$oldpid" ]; do
     t=$((t+1)); [ $t -ge 60 ] && { echo "FAIL: self-heal relaunch failed"; exit 1; }; sleep 0.5
 done
-cab sh -c 'xdotool search --name arcade-screensaver >/dev/null' \
+# the new process is visible to pgrep the instant it spawns; its window is
+# mapped a beat later, so wait for it rather than sampling once
+cab sh -c 'for i in $(seq 1 40); do xdotool search --name arcade-screensaver >/dev/null 2>&1 && exit 0; sleep 0.25; done; exit 1' \
     || { echo "FAIL: relaunched screensaver has no window"; exit 1; }
 echo "   self-healed: screensaver relaunched (pid $oldpid -> $newpid)"
 
@@ -81,6 +83,28 @@ sleep 5   # idle=3 elapsed, but suppressed
 ss_window && { echo "FAIL: screensaver started during suppression"; exit 1; } || true
 cab sh -c 'for i in $(seq 1 60); do xdotool search --name arcade-screensaver >/dev/null 2>&1 && exit 0; sleep 0.5; done; echo post-suppression-relaunch-failed; exit 1'
 echo "   suppression honored and expired correctly"
+
+echo "== 3b. reachable server + ZERO enabled sources -> local clips, not silence =="
+# The server answers fine and returns an empty playlist. This must take the
+# clips fallback: previously it fell through silently (nothing started,
+# nothing logged) because the except-branch fallback needs a FAILED fetch.
+srv arcadectl screensaver off >/dev/null || true
+srv arcadectl screensaver disable-source "$SA" >/dev/null
+srv arcadectl --json screensaver playlist | grep -q '"playlist": \[\]' \
+    || { echo "FAIL: playlist not empty after disabling every source"; exit 1; }
+cab sh -c 'echo "BTN_A down" > /tmp/input-events'   # reset the idle clock
+srv arcadectl screensaver set --idle 3 >/dev/null
+cab sh -c 'for i in $(seq 1 60); do xdotool search --name arcade-screensaver >/dev/null 2>&1 && exit 0; sleep 0.5; done; echo empty-playlist-never-started; exit 1'
+cab grep -q "empty playlist" /tmp/cabd.log || { echo "FAIL: empty-playlist path not logged"; exit 1; }
+cab python3 -c "
+import sys; sys.path.insert(0, '/cabinet')
+import screensaver
+p = screensaver.get_prop('path')
+assert p and p.startswith('/var/cache/arcade-clips/'), f'not a local clip: {p}'
+print('empty playlist -> local clip:', p)"
+srv arcadectl screensaver off >/dev/null || true
+srv arcadectl screensaver enable-source "$SA" >/dev/null
+srv arcadectl screensaver set --idle 3600 >/dev/null
 
 echo "== 4. cleanup =="
 srv arcadectl screensaver set --idle 3600 >/dev/null
