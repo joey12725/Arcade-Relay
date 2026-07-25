@@ -95,17 +95,22 @@ Design decision recorded: Pegasus has ONE supervisor — pegasus.service
 pegasus.service and "cabd restarts Pegasus"; dueling supervisors would race
 to double-spawn, so systemd owns the process and cabd owns focus/health.
 
-## A-20 — v1 scope deferrals (final-sweep ledger)
-Explicitly deferred, per final verifier sweep — implemented later without
-architecture changes; none block deploy:
-- Per-game mapping scope `game:<id>` (spec §5.7/§6.2): controls_map accepts
-  global + system:<sys> only.
-- CTL-3 interactive web remapper (press-button/click-target): the web UI
-  ships text-field mapping + live monitor instead; the CLI flow
-  (controls map/monitor/presets/diff) is the tested surface.
-- input.press / input.text RPCs (§5.10): use `cab exec -- xdotool key ...`.
-- Lifeline extra recovery paths (§5.11): ensure-SSH / fallback transport
-  bring-up not automated (lifeline shows status + 1s backoff; SSH is enabled
-  at provision time).
-- Web UI §6.3 library page / launch-favorites quick action / thumbnails:
-  CLI covers these (games list --favorites, games launch, favorites ...).
+## A-20 — v1 scope deferrals (SUPERSEDED by P8, iteration 54)
+The items below were deferred at the first DONE v2, then implemented in P8
+because they are software, not hardware, and the mandate is the whole spec:
+- Per-game mapping scope `game:<sys>/<rom>` (§5.7 layer 3) — IMPLEMENTED
+  (controllers/games.yaml, merged over the system layer at render time).
+- CTL-3 interactive web remapper (press physical button → click logical
+  target, live evdev relay) — IMPLEMENTED (webui capture()/assign()).
+- `input.press` / `input.text` RPCs (§5.10) — IMPLEMENTED (logical combos
+  fire the same handlers as the panel; other keys go to xdotool).
+- Lifeline recovery paths (§5.11: ensure SSH listening, fallback transport,
+  restart networking on a panel button) — IMPLEMENTED, commands overridable
+  per environment (LIFELINE_SSH_CMD / _TRANSPORT_CMD / _NET_RESTART_CMD);
+  the sim proves each by its observable effect (a real :22 listener, marker
+  files), and the real systemd/NetworkManager/tailscale commands are the
+  hardware defaults (A-19 scope).
+- Web UI library page + launch/favorite quick actions (§6.3) — IMPLEMENTED.
+Still deferred (unchanged): Bluetooth controllers (CTL-5, spec says out of
+scope for v1); box-art thumbnails in the web UI (art is delivered to the
+cabinet and shown by Pegasus; the web UI lists titles).

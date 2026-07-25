@@ -209,3 +209,17 @@ Work through **HARDWARE-TODO.md** in order. The high-value early items:
 `savefile_directory`/`savestate_directory = /saves` into retroarch.cfg, so
 RetroArch writes where the hourly backup loop watches. If you add non-libretro
 emulators later, point their save paths at `/saves/<system>/` too.
+
+*Appendix: lifeline recovery.* While lifeline mode is up, cabd tries to bring
+the cabinet back by itself: ensures SSH is listening, brings up a fallback
+transport if configured, and restarts networking when the panel's `a` button
+is pressed (remotely: `arcadectl cab lifeline restart-network`). Override the
+commands per machine with `LIFELINE_SSH_CMD`, `LIFELINE_TRANSPORT_CMD` (e.g.
+`tailscale up`), `LIFELINE_NET_RESTART_CMD` in `cabd.service`.
+
+*Appendix: per-game controls.* Three mapping layers, most specific wins:
+`--scope global`, `--scope system:<sys>`, `--scope game:<sys>/<rom>`. Per-game
+overrides live in `state/controllers/games.yaml` and are merged over the
+system layer into the remap file rendered before each launch. The web UI's
+remapper does this interactively: pick scope, press the physical button, click
+the logical target.

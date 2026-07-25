@@ -62,6 +62,11 @@ services:
       CABD_MEDIA_BASE: http://toxiproxy:8666
       CABD_SAVES_SYNC_SECONDS: "2"   # accelerated (real cabinet: hourly)
       CABD_REBOOT_CMD: "touch /tmp/reboot-requested"   # can't reboot a container
+      # no systemd/NetworkManager in a container: recovery paths are proven
+      # by their effects, with the real commands set on hardware (A-19)
+      LIFELINE_SSH_CMD: "/simscripts/fake-sshd.sh"
+      LIFELINE_TRANSPORT_CMD: "touch /tmp/transport-up"
+      LIFELINE_NET_RESTART_CMD: "touch /tmp/net-restarted"
     healthcheck:
       # X up AND the full audio stack alive — a dead wireplumber means sets
       # silently no-op, which must fail health, not pass silently

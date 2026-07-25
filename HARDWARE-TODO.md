@@ -48,3 +48,12 @@ Things that can only be verified on real hardware. Not faked green in the sim.
   under static validation per A-19).
 - [ ] udev rules: replace the placeholder DragonRise encoder ids in
   99-arcade-controllers.rules with lsusb values from the actual panel.
+- [ ] Lifeline recovery commands on real hardware: cabd.service ships no
+  LIFELINE_* overrides, so defaults apply — `systemctl start ssh`,
+  `systemctl restart NetworkManager`, and no fallback transport. Verify ssh
+  actually starts, confirm the NetworkManager unit name matches your install
+  (some Debian setups use systemd-networkd/ifupdown), and set
+  LIFELINE_TRANSPORT_CMD if you add Tailscale.
+- [ ] Panel button for lifeline network restart: the "a" button triggers it.
+  Confirm the physical button mapped to `a` is reachable/obvious on the
+  lifeline screen, and that it does not fight any Pegasus binding.

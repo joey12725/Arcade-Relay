@@ -72,20 +72,32 @@
 
   <div class="card red">
     <h2>Controller remapper</h2>
+    <!-- CTL-3 flagship flow: pick scope -> press the physical button (cabd
+         relays live evdev events) -> click the logical target. -->
     <div class="row">
-      <select id="scope"></select>
-      <input type="text" id="btn" placeholder="button" size="7">
-      <span>→</span>
-      <input type="text" id="tgt" placeholder="target" size="7">
-      <button onclick="remap()">Map</button>
+      <select id="scope" onchange="showCurrentMap()"></select>
+      <button id="captureBtn" onclick="capture()">1. Press a button…</button>
+      <b id="captured">—</b>
     </div>
+    <div class="row" id="targets"></div>
+    <div class="row"><small id="mapStatus">Pick a scope, capture a physical
+      button, then click the logical target it should become.</small></div>
     <div class="row">
       <input type="text" id="preset" placeholder="preset name" size="10">
       <button onclick="api('POST','/controls/save-preset',{name:val('preset')}).then(refresh)">Save</button>
       <button onclick="api('POST','/controls/load-preset',{name:val('preset')}).then(refresh)">Load</button>
     </div>
     <div class="row"><small>Presets: <span id="presets"></span></small></div>
-    <div class="row"><button onclick="monitor()">Monitor 3s</button> <span id="mon"></span></div>
+    <div class="row"><small>Current map: <span id="curmap"></span></small></div>
+  </div>
+
+  <div class="card">
+    <h2>Library</h2>
+    <div class="row">
+      <select id="libSystem" onchange="loadLibrary()"></select>
+      <label><input type="checkbox" id="libFavs" onchange="loadLibrary()"> favorites only</label>
+    </div>
+    <ul id="library"></ul>
   </div>
 
   <div class="card">
@@ -138,20 +150,84 @@ async function refresh() {
   });
   const scope = document.getElementById('scope');
   if (!scope.options.length) {
-    ['global','system:nes','system:snes','system:genesis','system:arcade','system:gba','system:psx']
-      .forEach(s => scope.add(new Option(s, s)));
+    ['global','system:nes','system:snes','system:genesis','system:arcade',
+     'system:gba','system:psx','system:gb'].forEach(s => scope.add(new Option(s, s)));
+    renderTargets();
+    loadLibrary();
   }
+  showCurrentMap();
   const q = await api('GET', '/roms/status');
   document.getElementById('queue').innerHTML = (q.queue || []).map(e =>
     `<li><b>${e.title}</b> — ${e.status} <small>${e.detail || ''}</small></li>`).join('') || '<li><small>empty</small></li>';
 }
-function remap() {
-  api('POST', '/controls/map', {scope: val('scope'), set: {[val('btn')]: val('tgt')}}).then(refresh);
+// ---- CTL-3 interactive remapper ----
+const TARGETS = ['a','b','x','y','l','r','start','select','up','down','left','right'];
+let capturedButton = null;
+
+function renderTargets() {
+  document.getElementById('targets').innerHTML = TARGETS.map(t =>
+    `<button class="tgt" onclick="assign('${t}')">${t}</button>`).join(' ');
 }
-async function monitor() {
-  document.getElementById('mon').textContent = 'listening…';
-  const r = await api('POST', '/controls/monitor', {seconds: 3});
-  document.getElementById('mon').textContent = (r.events || []).join(', ') || '(no input)';
+
+async function capture() {
+  const btn = document.getElementById('captureBtn');
+  btn.textContent = 'listening… press it now';
+  // live evdev events relayed from cabd (input.monitor RPC)
+  const r = await api('POST', '/controls/monitor', {seconds: 3}).catch(() => ({}));
+  const down = (r.events || []).map(e => e.split(' ')[0]).filter(Boolean);
+  capturedButton = down.length ? down[0] : null;
+  document.getElementById('captured').textContent = capturedButton || '(nothing)';
+  document.getElementById('mapStatus').textContent = capturedButton
+    ? `Captured "${capturedButton}" — now click the logical target.`
+    : 'No input seen. Press the physical button while capturing.';
+  btn.textContent = '1. Press a button…';
+}
+
+async function assign(target) {
+  if (!capturedButton) {
+    document.getElementById('mapStatus').textContent =
+      'Capture a physical button first.';
+    return;
+  }
+  await api('POST', '/controls/map',
+            {scope: val('scope'), set: {[capturedButton]: target}});
+  document.getElementById('mapStatus').textContent =
+    `Mapped ${capturedButton} → ${target} in ${val('scope')} (committed).`;
+  capturedButton = null;
+  document.getElementById('captured').textContent = '—';
+  refresh();
+}
+
+async function showCurrentMap() {
+  const b = await api('GET', '/state/bundle').catch(() => ({}));
+  const scope = val('scope');
+  const data = scope === 'global'
+    ? (b['controllers/global.yaml'] || {}).buttons
+    : (b['controllers/systems/' + scope.split(':')[1] + '.yaml'] || {}).remap;
+  document.getElementById('curmap').textContent =
+    Object.entries(data || {}).map(([k, v]) => `${k}→${v}`).join('  ') || '(none)';
+}
+
+// ---- library page (§6.3): browse, favorite, launch ----
+async function loadLibrary() {
+  const sysSel = document.getElementById('libSystem');
+  const qs = [];
+  if (sysSel.value) qs.push('system=' + encodeURIComponent(sysSel.value));
+  if (document.getElementById('libFavs').checked) qs.push('favorites=1');
+  const r = await api('GET', '/games/list' + (qs.length ? '?' + qs.join('&') : ''))
+                  .catch(() => ({games: []}));
+  if (!sysSel.options.length) {
+    sysSel.add(new Option('(all systems)', ''));
+    [...new Set(r.games.map(g => g.system))].sort()
+      .forEach(s => sysSel.add(new Option(s, s)));
+  }
+  document.getElementById('library').innerHTML = r.games.map(g =>
+    `<li><button onclick="api('POST','/games/launch',
+        {system:'${g.system}',path:'${g.path}'}).then(refresh)">▶</button>
+     <button class="${g.favorite ? '' : 'red'}"
+       onclick="api('POST','/favorites/${g.favorite ? 'remove' : 'add'}',
+         {id:'${g.id}'}).then(loadLibrary)">${g.favorite ? '★' : '☆'}</button>
+     ${g.id}</li>`).join('') || '<li><small>no games</small></li>';
 }
 function shot() { document.getElementById('shot').src = '/cab/screenshot?' + Date.now(); }
 refresh(); shot(); setInterval(refresh, 5000);

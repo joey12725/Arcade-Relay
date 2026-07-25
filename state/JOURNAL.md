@@ -1277,3 +1277,50 @@ hardware-only scope), NIGHTLY-REPORT.md final, STATE.md → PROJECT DONE.
 **Loop stopped.** Mandate satisfied to the limit of this environment:
 spec implemented, tested (20 test targets, 7×3 acceptance chains, ~20
 adversarial reviews), and deploy-ready (provisioning + runbook + ledgers).
+
+---
+
+## Iteration 54 — 2026-07-25 — P8: the A-20 deferrals were software, not hardware
+
+**Trigger:** re-read of the mandate ("entire project done"). A-20 listed five
+spec surfaces as "v1 deferrals" — but they are software the sim can prove, so
+deferring them left the spec unimplemented. Implemented all five.
+
+**Unit:**
+- Per-game mapping scope (§5.7 layer 3): `controls map --scope game:<sys>/<rom>`
+  → controllers/games.yaml; renderer.render(bundle, system, rom_path) merges
+  the per-game remap OVER the per-system layer into the same .rmp the launch
+  consumes (games without overrides render byte-identically); preset
+  snapshots now carry the games layer too.
+- Synthetic input (§5.10): `input.press` (logical combos home/screensaver/
+  lifeline fire the same handlers as the panel — no focus needed; anything
+  else goes to xdotool) and `input.text`; REST /cab/input; `arcadectl cab
+  press|type`.
+- Lifeline recovery paths (§5.11): ensure_recovery_paths() (ssh listening
+  probed via /proc/net/tcp, fallback transport if configured) runs in the
+  BACKGROUND on lifeline.on (a wedged network command must never delay the
+  diagnostics screen or the RPC reply); panel `a` button and
+  `arcadectl cab lifeline restart-network` bounce networking; status screen
+  shows recovery results. All commands env-overridable per machine.
+- CTL-3 flagship remapper (§5.7/§6.3): web UI now does press-physical-button
+  (live evdev via input.monitor) → click-logical-target, with current-map
+  display; replaced the text-field stub.
+- Web UI library page (§6.3): browse by system, favorites filter, launch and
+  favorite/unfavorite inline.
+
+**Debug trail:** lifeline.on first timed out (RPC 504) — the fake sshd's
+daemonized child inherited the captured stdout pipe, so subprocess.run
+blocked to its timeout. Two fixes: the sim fake fully detaches (setsid +
+redirect), and _sh() writes to a temp file instead of a pipe with an 8s
+deadline — real daemons (sshd, tailscaled) would have caused the same hang on
+hardware, so this was a genuine bug, not a test artifact.
+
+**Evidence:** TEST-P8 PASS (exit 0, 7 steps: per-game layering both ways,
+commit + preset round-trip, malformed scope exits 4, press home kills a game,
+xdotool routing + bogus key exits 4, ssh listener really opened + idempotent
+re-run, panel button and remote restart-network, web UI wiring + live
+endpoints). Regression: TEST-RENDER, TEST-M1, TEST-M2, TEST-M6, TEST-COMBOS,
+TEST-CLI-COMPLETE all PASS. SOAK CLEAN.
+
+**Outcome:** GREEN pending verifier. A-20 rewritten: only CTL-5 Bluetooth
+(spec says out of scope for v1) and web-UI box art remain deferred.

@@ -205,9 +205,12 @@ async def cab_exec(request):
 
 async def cab_lifeline(request):
     action = request.match_info["action"]
-    if action not in ("on", "off"):
-        return web.json_response({"error": "on|off"}, status=400)
-    res = await hub.rpc(f"lifeline.{action}", {})
+    if action not in ("on", "off", "restart-network"):
+        return web.json_response({"error": "on|off|restart-network"},
+                                 status=400)
+    method = ("lifeline.restart_network" if action == "restart-network"
+              else f"lifeline.{action}")
+    res = await hub.rpc(method, {})
     if not res.get("ok"):
         return web.json_response(res, status=500)
     hub.log_event(f"lifeline {action}")
@@ -325,6 +328,20 @@ async def vnc_tunnel_ws(request):
     return ws
 
 
+async def cab_input(request):
+    body = await request.json()
+    if "key" in body:
+        res = await hub.rpc("input.press", {"key": body["key"]})
+    elif "text" in body:
+        res = await hub.rpc("input.text", {"text": body["text"]})
+    else:
+        return web.json_response({"error": "need key or text"}, status=400)
+    if not res.get("ok"):
+        return web.json_response(res, status=500)
+    hub.log_event(f"synthetic input: {body.get('key') or 'text'}")
+    return web.json_response(res["result"])
+
+
 async def cab_reboot(request):
     res = await hub.rpc("system.reboot", {})
     if not res.get("ok"):
@@ -393,7 +410,8 @@ def _write_yaml(rel, data):
 def controls_snapshot():
     """Preset = named snapshot of all mapping layers (CTL-2)."""
     root = pathlib.Path(STATE_DIR) / "controllers"
-    snap = {"global": _read_yaml("controllers/global.yaml"), "systems": {}}
+    snap = {"global": _read_yaml("controllers/global.yaml"), "systems": {},
+            "games": _read_yaml("controllers/games.yaml")}
     sysdir = root / "systems"
     if sysdir.is_dir():
         for p in sorted(sysdir.glob("*.yaml")):
@@ -423,6 +441,7 @@ async def controls_load_preset(request):
     _write_yaml("controllers/global.yaml", snap.get("global") or {})
     for sysname, data in (snap.get("systems") or {}).items():
         _write_yaml(f"controllers/systems/{sysname}.yaml", data)
+    _write_yaml("controllers/games.yaml", snap.get("games") or {})
     git_commit(f"arcadectl: controls load-preset {name}")
     push_state_soon()
     hub.log_event(f"preset loaded: {name}")
@@ -440,6 +459,18 @@ async def controls_map(request):
         rel = f"controllers/systems/{scope.split(':', 1)[1]}.yaml"
         data = _read_yaml(rel)
         data.setdefault("remap", {}).update(sets)
+    elif scope.startswith("game:"):
+        # Layer 3 (spec §5.7): all per-game overrides live in one file keyed
+        # by '<system>/<rom>', so the bundle stays small and diffable.
+        gid = scope.split(":", 1)[1]
+        if "/" not in gid:
+            return web.json_response(
+                {"error": f"game scope needs <system>/<rom>, got {gid!r}"},
+                status=400)
+        rel = "controllers/games.yaml"
+        data = _read_yaml(rel)
+        data.setdefault("games", {}).setdefault(gid, {}) \
+            .setdefault("remap", {}).update(sets)
     else:
         return web.json_response({"error": f"bad scope {scope}"}, status=400)
     _write_yaml(rel, data)
@@ -931,6 +962,7 @@ app.add_routes([
     web.get("/cab", cab_ws),
     web.post("/cab/exec", cab_exec),
     web.get("/cab/screenshot", cab_screenshot),
+    web.post("/cab/input", cab_input),
     web.post("/cab/reboot", cab_reboot),
     web.post("/cab/restart-frontend", cab_restart_frontend),
     web.post("/cab/remote-view", cab_remote_view),

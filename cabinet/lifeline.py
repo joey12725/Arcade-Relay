@@ -51,6 +51,72 @@ def checks(ws_connected, last_sync):
     }
 
 
+# --- recovery paths (spec §5.11: while lifeline is up, bring up every
+# recovery path the cabinet can reach by itself). Each is idempotent, never
+# raises, and reports what it did so the status screen can show it.
+SSH_START = os.environ.get("LIFELINE_SSH_CMD", "systemctl start ssh")
+TRANSPORT_START = os.environ.get("LIFELINE_TRANSPORT_CMD", "")   # e.g. tailscale up
+NET_RESTART = os.environ.get("LIFELINE_NET_RESTART_CMD",
+                             "systemctl restart NetworkManager")
+
+
+def _sh(cmd, timeout=8):
+    """Run a recovery command with a hard deadline.
+
+    Output goes to a temp file rather than a pipe: a recovery command that
+    spawns a surviving daemon (sshd, tailscaled) would keep an inherited
+    pipe open, and capture_output would block until the timeout even though
+    the command itself already returned. Timeouts stay well under the
+    server's RPC budget so lifeline.on always answers.
+    """
+    import tempfile
+    try:
+        with tempfile.TemporaryFile("w+") as out:
+            p = subprocess.run(["sh", "-c", cmd], stdout=out,
+                               stderr=subprocess.STDOUT, timeout=timeout)
+            out.seek(0)
+            return p.returncode == 0, out.read().strip()[:200]
+    except subprocess.TimeoutExpired:
+        return False, f"timed out after {timeout}s"
+    except (OSError, subprocess.SubprocessError) as e:
+        return False, repr(e)[:200]
+
+
+def ssh_listening(port=22):
+    """True if anything is listening on the SSH port (any bind address)."""
+    try:
+        with open("/proc/net/tcp") as f:
+            for line in f.read().splitlines()[1:]:
+                cols = line.split()
+                if int(cols[1].split(":")[1], 16) == port and cols[3] == "0A":
+                    return True
+    except OSError:
+        pass
+    return False
+
+
+def ensure_recovery_paths():
+    """Idempotent: only acts on what is actually down."""
+    acted = {}
+    if ssh_listening():
+        acted["ssh"] = "already listening"
+    else:
+        ok, detail = _sh(SSH_START)
+        acted["ssh"] = "started" if (ok and ssh_listening()) else f"failed: {detail}"
+    if TRANSPORT_START:
+        ok, detail = _sh(TRANSPORT_START, timeout=8)
+        acted["transport"] = "up" if ok else f"failed: {detail}"
+    else:
+        acted["transport"] = "not configured"
+    return acted
+
+
+def restart_network():
+    """Button-press recovery (§5.11): bounce networking, then re-check."""
+    ok, detail = _sh(NET_RESTART, timeout=20)
+    return {"restarted": ok, "detail": detail}
+
+
 def render(status, version="cabd/1.0"):
     from PIL import Image, ImageDraw
     img = Image.new("RGB", (1024, 768), BG)
@@ -70,6 +136,11 @@ def render(status, version="cabd/1.0"):
     d.text((60, y + 10), f"ip {status['ip']}   uptime {status['uptime_s']}s   "
                          f"{version}   last-sync {status['last_sync']}", fill=FG)
     d.text((60, y + 50), "reconnect: maximum aggression (1s)", fill=BLUE)
+    rec = status.get("recovery") or {}
+    if rec:
+        d.text((60, y + 90), "recovery: " + "  ".join(
+            f"{k}={v}" for k, v in sorted(rec.items())), fill=FG)
+    d.text((60, y + 130), "press A: restart networking", fill=BLUE)
     img.save(LL_PNG)
 
 

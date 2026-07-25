@@ -116,7 +116,8 @@ def main():
         cp = csub.add_parser(c)
         cp.add_argument("name")
     cm = csub.add_parser("map")
-    cm.add_argument("--scope", required=True, help="global | system:<sys>")
+    cm.add_argument("--scope", required=True,
+                    help="global | system:<sys> | game:<sys>/<rom>")
     cm.add_argument("--set", dest="sets", action="append", required=True,
                     metavar="BTN=TARGET")
     mon = csub.add_parser("monitor")
@@ -143,8 +144,12 @@ def main():
     cabsub.add_parser("screenshot")
     cabsub.add_parser("reboot")
     cabsub.add_parser("restart-frontend")
+    ip = cabsub.add_parser("press")
+    ip.add_argument("key", help="home|screensaver|lifeline, or an X key spec")
+    it = cabsub.add_parser("type")
+    it.add_argument("text")
     lf = cabsub.add_parser("lifeline")
-    lf.add_argument("action", choices=["on", "off"])
+    lf.add_argument("action", choices=["on", "off", "restart-network"])
     rvp = cabsub.add_parser("remote-view")
     rvp.add_argument("--off", action="store_true",
                      help="stop the VNC session instead of starting one")
@@ -337,6 +342,12 @@ def main():
         else:
             for e in res[-args.limit:]:
                 print(f"{e['ts']:.0f} {e['event']}")
+        sys.exit(0)
+
+    if args.cmd == "cab" and args.cabcmd in ("press", "type"):
+        body = {"key": args.key} if args.cabcmd == "press" else {"text": args.text}
+        res = call("POST", "/cab/input", body)
+        print(json.dumps(res))
         sys.exit(0)
 
     if args.cmd == "cab" and args.cabcmd in ("reboot", "restart-frontend"):

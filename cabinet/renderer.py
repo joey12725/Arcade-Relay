@@ -19,8 +19,19 @@ def _write(path, lines):
     return path
 
 
-def render(bundle, system):
-    """Returns list of written paths."""
+def game_key(system, rom_path):
+    """Per-game mapping id: '<system>/<rom-basename>' (matches favorites)."""
+    return f"{system}/{os.path.basename(rom_path)}" if rom_path else None
+
+
+def render(bundle, system, rom_path=None):
+    """Returns list of written paths.
+
+    Mapping layers (spec §5.7, most specific wins): global buttons ->
+    per-system remap -> per-game remap. The per-game layer is merged ON TOP
+    of the system layer into the same .rmp the launch consumes, so a game
+    with no overrides renders byte-identically to before.
+    """
     os.makedirs(RENDER_DIR, exist_ok=True)
     files = []
 
@@ -30,9 +41,14 @@ def render(bundle, system):
     lines += [f'{k} = "{v}"' for k, v in sorted(ra.items())]
     files.append(_write(os.path.join(RENDER_DIR, "retroarch.cfg"), lines))
 
-    sysmap = (bundle.get(f"controllers/systems/{system}.yaml") or {}).get("remap", {})
+    remap = dict((bundle.get(f"controllers/systems/{system}.yaml")
+                  or {}).get("remap", {}))
+    key = game_key(system, rom_path)
+    if key:
+        games = (bundle.get("controllers/games.yaml") or {}).get("games") or {}
+        remap.update((games.get(key) or {}).get("remap", {}))
     files.append(_write(
         os.path.join(RENDER_DIR, f"{system}.rmp"),
-        [f'{k} = "{v}"' for k, v in sorted(sysmap.items())]))
+        [f'{k} = "{v}"' for k, v in sorted(remap.items())]))
 
     return files

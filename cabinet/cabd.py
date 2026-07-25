@@ -83,9 +83,14 @@ async def fifo_reader():
                     # "<button> down|up" lines feed the PRODUCTION combo
                     # engine (same one the evdev source drives on hardware)
                     parts = l.split()
-                    if len(parts) == 2 and parts[1] in ("down", "up") \
-                            and combo_engine is not None:
-                        combo_engine.key_event(parts[0], parts[1] == "down")
+                    if len(parts) == 2 and parts[1] in ("down", "up"):
+                        if combo_engine is not None:
+                            combo_engine.key_event(parts[0], parts[1] == "down")
+                        # §5.11: on the lifeline screen, a maps to
+                        # "restart networking" — the one on-cabinet repair
+                        # action that needs no keyboard and no server.
+                        if ll["on"] and parts[0] == "a" and parts[1] == "down":
+                            asyncio.create_task(lifeline_restart_network())
                 if ss["on"]:
                     asyncio.create_task(screensaver_off())
                 # legacy direct combo line (kept for older tests)
@@ -142,7 +147,7 @@ def log(*a):
 game = {"session": None, "rom": None}
 game_lock = asyncio.Lock()
 ss = {"on": False, "suppress_until": 0.0}
-ll = {"on": False, "last_sync": None}
+ll = {"on": False, "last_sync": None, "recovery": {}}
 
 
 async def lifeline_on():
@@ -151,10 +156,21 @@ async def lifeline_on():
     ll["on"] = True
     if ss["on"]:
         await screensaver_off()
-    ok = await asyncio.to_thread(
-        lifeline.show, lifeline.checks(ws_state["connected"], ll["last_sync"]))
-    log(f"lifeline ON (display={ok}); reconnect cap -> 1s")
+    st = await asyncio.to_thread(
+        lifeline.checks, ws_state["connected"], ll["last_sync"])
+    ok = await asyncio.to_thread(lifeline.show, st)
+    # §5.11: bring up every recovery path we can reach ourselves. Runs in the
+    # background — the diagnostics screen (and this RPC's answer) must never
+    # wait on a wedged network command.
+    asyncio.create_task(lifeline_recover())
+    log(f"lifeline ON (display={ok}); reconnect cap -> 1s; recovery starting")
     return {"lifeline": True}
+
+
+async def lifeline_recover():
+    ll["recovery"] = {"ssh": "starting…", "transport": "starting…"}
+    ll["recovery"] = await asyncio.to_thread(lifeline.ensure_recovery_paths)
+    log(f"lifeline recovery paths: {ll['recovery']}")
 
 
 async def lifeline_off():
@@ -162,6 +178,17 @@ async def lifeline_off():
     await asyncio.to_thread(lifeline.hide)
     log("lifeline OFF")
     return {"lifeline": False}
+
+
+async def lifeline_restart_network():
+    """§5.11 button-press recovery; result shows on the lifeline screen."""
+    log("lifeline: restarting networking (panel button)")
+    res = await asyncio.to_thread(lifeline.restart_network)
+    ll["recovery"] = {**(ll.get("recovery") or {}),
+                      "net-restart": "ok" if res["restarted"]
+                      else f"failed: {res['detail']}"}
+    log(f"lifeline: net restart -> {res}")
+    return res
 
 
 async def lifeline_loop(ws_state):
@@ -173,6 +200,7 @@ async def lifeline_loop(ws_state):
         try:
             st = await asyncio.to_thread(
                 lifeline.checks, ws_state["connected"], ll["last_sync"])
+            st["recovery"] = ll.get("recovery") or {}
             await asyncio.to_thread(lifeline.show, st)
         except Exception as e:  # noqa: BLE001
             log(f"lifeline refresh: {e!r}")
@@ -192,6 +220,35 @@ async def on_combo(name):
             await lifeline_off()
         else:
             await lifeline_on()
+
+
+LOGICAL_COMBOS = ("home", "screensaver", "lifeline")
+
+
+async def input_press(what):
+    """Spec §5.10 synthetic input. Two flavors:
+      - a logical combo name (home/screensaver/lifeline): fire the same
+        handler the panel combo does — works with no window focused;
+      - anything else: an X key spec handed to xdotool (Return, ctrl+q, a).
+    """
+    if what in LOGICAL_COMBOS:
+        await on_combo(what)
+        return {"pressed": what, "via": "combo"}
+    p = await asyncio.to_thread(
+        subprocess.run, ["xdotool", "key", "--clearmodifiers", what],
+        capture_output=True, text=True, timeout=10)
+    if p.returncode != 0:
+        raise RuntimeError(f"xdotool key {what!r}: {p.stderr.strip()[:200]}")
+    return {"pressed": what, "via": "xdotool"}
+
+
+async def input_text(text):
+    p = await asyncio.to_thread(
+        subprocess.run, ["xdotool", "type", "--clearmodifiers", "--", text],
+        capture_output=True, text=True, timeout=30)
+    if p.returncode != 0:
+        raise RuntimeError(f"xdotool type: {p.stderr.strip()[:200]}")
+    return {"typed": len(text)}
 
 
 combo_engine = None   # built in main() once state (hotkeys) is loaded
@@ -354,7 +411,8 @@ async def game_launch(system, path, args=()):
             log("steam launched:", game["rom"])
             return {"running": game["rom"]}
         # CTL-4: re-render configs from the state cache before EVERY launch
-        rendered = await asyncio.to_thread(renderer.render, state["bundle"], system)
+        rendered = await asyncio.to_thread(renderer.render, state["bundle"],
+                                           system, path)
         log("rendered configs:", rendered)
         emulators = (state["bundle"].get("cabinet.yaml") or {}).get("emulators") or {}
         if system in emulators:
@@ -788,6 +846,12 @@ async def handle_req(ws, data):
         elif method == "vnc.connect":
             asyncio.create_task(vnc_tunnel(params["token"]))
             result = {"connecting": True}
+        elif method == "lifeline.restart_network":
+            result = await lifeline_restart_network()
+        elif method == "input.press":
+            result = await input_press(params["key"])
+        elif method == "input.text":
+            result = await input_text(params["text"])
         elif method == "system.reboot":
             log("reboot requested:", REBOOT_CMD)
             schedule_reboot()

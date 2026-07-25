@@ -101,3 +101,6 @@ test-cli-complete:
 
 test-provision:
 	bash sim/scripts/test-provision.sh
+
+test-p8:
+	bash sim/scripts/test-p8.sh
