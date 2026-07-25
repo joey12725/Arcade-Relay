@@ -1441,3 +1441,34 @@ single xdotool sample could run too early. Now waits for the window.
 
 **Evidence:** TEST-FALLBACK PASS x2, TEST-SCREENSAVER PASS, ACCEPT-M3 PASS,
 ACCEPT-M6 PASS (round 1/3). SOAK CLEAN.
+
+## Iteration 58 — 2026-07-25 — accept-m6 round 2 PASS + second cold-agent find
+
+**accept-m6 round 2: PASS.** The cold agent again reported a real
+inconsistency unprompted: after my iteration-57 fix, the IDLE path falls back
+to local clips when no sources are enabled, but the FORCED path
+(`arcadectl screensaver on`) still hard-errored 400/exit 4. Same cabinet
+state, two different answers — attract mode plays on idle but the button
+says "no enabled sources". That asymmetry was unintended.
+
+**Fix:** /screensaver/on now asks cabd for `screensaver.on_fallback` when the
+resolved playlist is empty; cabd uses the same local clip cache the idle path
+uses. It still fails loudly (400 -> exit 4) when there are no sources AND no
+cached clips, which is the genuinely unserviceable case.
+
+**Also investigated (no behavior change):** the agent noted clips_sync_loop
+refills the cache from the same enabled-sources playlist, so with zero
+sources the cache can never be replenished. That is correct-by-design —
+there is nothing legitimate to cache from a library the owner disabled, and
+nothing evicts existing clips — but it was silent. Now logged: "no enabled
+sources; cache frozen at N clip(s)".
+
+**Evidence:** TEST-FALLBACK PASS with new step 3c (forced-on falls back to a
+real playing clip; no-sources-AND-no-clips still exits 4). Regression:
+TEST-SCREENSAVER, TEST-M6, ACCEPT-M3, TEST-CLI-COMPLETE all PASS.
+ACCEPT-M6 2/3.
+
+**Worth noting:** two consecutive cold agents each surfaced a real defect
+that ~57 iterations and five adversarial verifier sweeps had missed. The M6
+gate is doing more than proving docs are usable — a fresh reader operating
+the system finds things a reviewer looking at diffs does not.

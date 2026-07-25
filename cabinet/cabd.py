@@ -309,6 +309,13 @@ async def clips_sync_loop():
                     async with s.get(screensaver.MEDIA_BASE
                                      + "/screensaver/playlist") as r:
                         pl = (await r.json()).get("playlist", [])
+                    if not pl:
+                        # Correct-by-design (nothing to cache from a library
+                        # the owner disabled) but worth saying out loud: the
+                        # offline cache is frozen at its current contents
+                        # until a source is re-enabled.
+                        log(f"clips sync: no enabled sources; cache frozen at "
+                            f"{len(local_clips())} clip(s)")
                     for n, path in enumerate(pl[:2]):
                         dst = os.path.join(CLIPS_DIR, f"clip-{n}.ts")
                         if os.path.exists(dst) and os.path.getsize(dst) > 100_000:
@@ -861,6 +868,16 @@ async def handle_req(ws, data):
         elif method == "screensaver.on":
             result = await screensaver_on(params.get("playlist", []),
                                           params.get("brightness", 80))
+        elif method == "screensaver.on_fallback":
+            # forced on with no server playlist: use the local clip cache,
+            # exactly as the idle path does
+            clips = local_clips()
+            if clips:
+                result = await screensaver_on(clips,
+                                              params.get("brightness", 80))
+                log("screensaver forced on from local clips (no sources)")
+            else:
+                result = {"screensaver": False, "note": "no cached clips"}
         elif method == "screensaver.off":
             result = await screensaver_off()
         elif method == "screensaver.set":

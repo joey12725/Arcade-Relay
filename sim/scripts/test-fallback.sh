@@ -103,6 +103,24 @@ p = screensaver.get_prop('path')
 assert p and p.startswith('/var/cache/arcade-clips/'), f'not a local clip: {p}'
 print('empty playlist -> local clip:', p)"
 srv arcadectl screensaver off >/dev/null || true
+
+echo "== 3c. forced ON with no sources also falls back (idle and button agree) =="
+srv arcadectl screensaver on >/dev/null \
+    || { echo "FAIL: forced on errored where idle falls back"; exit 1; }
+cab sh -c 'for i in $(seq 1 40); do xdotool search --name arcade-screensaver >/dev/null 2>&1 && exit 0; sleep 0.25; done; exit 1' \
+    || { echo "FAIL: forced-on fallback produced no window"; exit 1; }
+cab python3 -c "
+import sys; sys.path.insert(0, '/cabinet')
+import screensaver
+p = screensaver.get_prop('path')
+assert p and p.startswith('/var/cache/arcade-clips/'), f'not a local clip: {p}'
+print('forced on -> local clip:', p)"
+srv arcadectl screensaver off >/dev/null || true
+# with NO sources and NO clips, it must still fail loudly (not silently)
+cab sh -c 'mkdir -p /tmp/clip-stash && mv /var/cache/arcade-clips/*.ts /tmp/clip-stash/'
+rc=0; srv arcadectl screensaver on >/dev/null 2>&1 || rc=$?
+[ "$rc" -eq 4 ] || { echo "FAIL: no sources + no clips exited $rc, want 4"; exit 1; }
+cab sh -c 'mv /tmp/clip-stash/*.ts /var/cache/arcade-clips/'
 srv arcadectl screensaver enable-source "$SA" >/dev/null
 srv arcadectl screensaver set --idle 3600 >/dev/null
 

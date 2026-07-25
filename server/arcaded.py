@@ -637,11 +637,20 @@ async def screensaver_cmd(request):
     if action == "on":
         pl = json.loads((await screensaver_playlist(request)).text)
         if not pl.get("playlist"):
-            return web.json_response(
-                {"error": "no enabled screensaver sources — enable one with "
-                          "`arcadectl screensaver enable-source <id>`"},
-                status=400)
-        res = await hub.rpc("screensaver.on", pl)
+            # No enabled sources. The cabinet's idle path falls back to its
+            # local clip cache here, so forcing it on must too — otherwise
+            # the same state gives attract mode on idle but an error from
+            # the button, which is just confusing. cabd reports whether the
+            # fallback actually had clips.
+            res = await hub.rpc("screensaver.on_fallback", pl)
+            if res.get("ok") and not res["result"].get("screensaver"):
+                return web.json_response(
+                    {"error": "no enabled screensaver sources and no cached "
+                              "clips — enable one with `arcadectl screensaver "
+                              "enable-source <id>`"},
+                    status=400)
+        else:
+            res = await hub.rpc("screensaver.on", pl)
     else:
         res = await hub.rpc("screensaver.off", {})
     if not res.get("ok"):
