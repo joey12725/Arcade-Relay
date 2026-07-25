@@ -1353,3 +1353,37 @@ table). TEST-RENDER PASS, TEST-M2 PASS. SOAK CLEAN.
 failures during this window were container churn — the P8 verifier subagent
 was running make targets against the same arcade-sim project concurrently.
 Clean serial re-runs pass.
+
+## Iteration 55 — 2026-07-25 — P8 verifier FAIL -> all findings closed
+
+**Verifier verdict on d10daee: FAIL** (correctly — S1/S2 were real and only
+fixed in my uncommitted tree at the time; 592f51f committed them). Findings:
+- S1 preset wipe / S2 IPv4-only ssh probe / S3 "the fake papered over S2":
+  already fixed in 592f51f; verifier confirmed the working tree would PASS.
+- S5 library page never refreshed (verified in real Chromium: 2 ROMs added,
+  page still showed "no games" after 14s). Root cause: loadLibrary() was
+  called only inside a first-paint guard, and the dropdown guard was
+  permanently false once "(all systems)" existed. FIXED: loadLibrary runs
+  every cycle; the system filter rebuilds when the set of systems changes.
+- S6 lifeline race: no lock, so interleaved on/off orphaned a fullscreen
+  mpv nothing could close. FIXED in two places — a lifeline_lock around
+  on/off, AND the refresh loop (the real leak: checks() takes seconds doing
+  ping/DNS, so an `off` landing mid-refresh let show() respawn the overlay
+  right after hide(); now re-checks ll["on"] inside the lock). Plus a
+  stray-window sweep on off — whose pkill silently killed nothing until I
+  added "--", because the pattern itself starts with "--".
+- S7 /cab/input 500 + raw TypeError on non-string params -> now 400.
+- S4 test-m2 flake: investigated, NOT a product bug. 5/5 clean serially;
+  the verifier's own concurrent test runs recreated containers mid-assertion
+  and stacked real AV processes until cabd was OOM-killed. Ledgered as A-21
+  (sim tests must run serially; a verifier gets exclusive use of the sim).
+
+**New test:** test-webui-live drives /ui in real Chromium (live library
+refresh with no reload, filter narrowing, favorite click landing in state,
+full CTL-3 capture->assign->commit chain) — replacing the string-grep
+"proof" the verifier rightly called out as fake-green.
+
+**Evidence:** TEST-P8 PASS x3 consecutive (incl. the concurrent lifeline
+storm), WEBUI-LIVE PASS, TEST-M2 PASS x5 serial, TEST-RENDER PASS.
+
+**Outcome:** GREEN. Next: P9 full serial regression + final sweep.
