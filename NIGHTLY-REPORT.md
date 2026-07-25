@@ -1,23 +1,44 @@
-# NIGHTLY REPORT — 2026-07-24 (final)
+# NIGHTLY REPORT — 2026-07-25 (final)
 
-**Status: DONE.** All milestones (M-SIM, M0–M6) certified 3/3; deploy-readiness
-phases P1–P7 complete; final adversarial sweep → findings fixed → **READY**;
-fixed-chaos soak window 4h00m cumulative, zero violations (262 partitions,
-90+142 kills in the final segment alone). See DONE.md v2 for the full record.
+**Status: DONE (v3).** The whole spec is implemented and tested, not just the
+parts the sim made convenient. See `DONE.md` (v3 section) for the full record.
 
-## Today
-- P3 findings applied; P4 shipped (remote view / save backup / CLI
-  completeness) + 3 verifier PASSes; P5 provisioning + PASS; P6 DEPLOY.md
-  (verifier caught 2 real deploy blockers — fixed); P7 full regression
-  (20/20 test targets, accept chains 3/3, cold-agent M6 3/3), final sweep
-  NOT-READY→fixed→READY; soak chaos RNG bug found & fixed; final 4h
-  fixed-chaos window completed clean.
+## What changed since the last "done"
 
-## Risks / next steps for the human
-- Hardware bring-up is the only remaining work: follow DEPLOY.md, then walk
-  HARDWARE-TODO.md. Watch items: real-Steam window tracking, theme on real
-  Pegasus (Qt 5.15), udev encoder ids.
-- ROMDL is a contract-faithful fake (A-5): wire the real downloader in
-  server/romdl.py when ready.
+DONE v2 had parked five spec surfaces in ASSUMPTIONS A-20 as "v1 deferrals".
+They were software, not hardware, so P8 built them: per-game mapping scope,
+synthetic input (`input.press`/`input.text`), lifeline recovery paths, the
+CTL-3 interactive remapper, the web UI library page — plus source thumbnails
+and the `mode`/`fallback` settings, which had been accepted by the API and
+git-committed while doing nothing at all.
 
-The autonomous loop has stopped (mandate satisfied).
+## Verification
+
+- P9 full serial regression: **zero failures** (22/22 test targets,
+  accept-m0…m5 3/3, accept-m6 3/3 with cold agents).
+- Soak: **4h23m clean**, one unbroken window, all three chaos modes firing
+  (458 partitions, 178 heartbeat-kills, 274 cabd-kills).
+- ~9 adversarial reviews total; 4 FAIL verdicts, each catching real defects.
+  New assertions are mutation-tested — removing a guard makes them fail.
+
+## Notable
+
+Two bugs were found by **accept-m6 cold agents** doing an unrelated task, and
+five more by the final sweep — two of those inside code my own fixes had just
+touched. A 5/6-flaky test turned out to be hiding four screen-ownership
+races. And the sweep caught a 13-second local game launch stall behind a
+stalled media stream before it shipped — a prime-directive-1 violation that
+heartbeat monitoring could never have surfaced.
+
+## For the human
+
+Hardware bring-up is all that remains: follow `DEPLOY.md`, then work
+`HARDWARE-TODO.md`. Watch items: real-Steam window tracking, the theme on
+real Pegasus (Qt 5.15), udev encoder ids, and the lifeline recovery commands
+(defaults assume systemd + NetworkManager). `server/romdl.py` is still the
+contract-faithful fake — swap in the real downloader when ready.
+
+The one genuine deferral is CTL-5 Bluetooth, which the spec itself puts out
+of scope for v1.
+
+The autonomous loop has stopped.

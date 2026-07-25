@@ -164,3 +164,81 @@ save-backup body cap.
 
 **The loop is stopping here: the spec is implemented, tested, and
 deploy-ready to the limit of what this environment can prove.**
+
+---
+
+# DONE v3 — the whole spec (2026-07-25, iterations 54–61)
+
+**Why there is a v3.** DONE v2 declared the project finished with five spec
+surfaces parked in `ASSUMPTIONS.md` A-20 as "v1 scope deferrals". They were
+software, not hardware — the sim could prove every one. Deferring them left
+the spec unimplemented, so P8/P9 built and tested them.
+
+## What P8 added
+
+| Spec surface | Delivered |
+|---|---|
+| §5.7 layer 3 — per-game mapping | `controls map --scope game:<sys>/<rom>` → `controllers/games.yaml`, merged over the per-system layer at render time; presets snapshot it |
+| §5.10 — synthetic input | `input.press` / `input.text`; logical combos fire the same handlers as the panel (no focus needed), other keys go to xdotool |
+| §5.11 — lifeline recovery | ensure SSH listening, fallback transport, restart networking from the panel `a` button or remotely; all commands env-overridable per machine |
+| §5.7/§6.3 — CTL-3 flagship remapper | press physical button (live evdev relay) → click logical target, replacing the text-field stub |
+| §6.3 — library page | browse by system, favorites filter, launch and favorite inline |
+| §6.3 — source thumbnails | `/thumb` proxy over Jellyfin images (browser needs no Jellyfin creds) |
+| §5.5 — `mode`, `fallback` | shuffle_episodes/continue_series honored server-side; `dim_clock` and `off` implemented; invalid values rejected instead of silently committed |
+
+## Bugs this phase caught — and who caught them
+
+**Two were found by accept-m6 cold agents doing an unrelated task.** The M6
+gate turns out to prove more than "the docs are usable": a fresh reader
+*operating* the system finds what a reviewer reading diffs does not.
+
+1. A reachable server with zero enabled sources returned an empty playlist,
+   and the screensaver silently started nothing — the `local_clips` fallback
+   lived in the `except` branch, so a successful-but-empty fetch fell through.
+2. After fixing that, idle fell back to clips while the CLI's forced-on still
+   hard-errored on the same cabinet state.
+
+**Five more came from the final adversarial sweep**, two of them inside code
+my own fixes had just touched:
+
+3. The screensaver could cover the LIFELINE screen — the only on-cabinet
+   repair surface — exactly during the outage you'd need it for.
+4. The fix for #2 re-introduced the same asymmetry in a new place:
+   `on_fallback` ignored the `fallback:` key it was meant to honor.
+5. `arcaded` discarded cabd's own reason and printed "enable a source" even
+   when the real cause was "game running".
+6. `cab press a` never reached the lifeline network restart; only the
+   physical button did.
+7. A-20 deferred "library box art" — a requirement the spec never made.
+   The real §6.3 requirement was thumbnails on the *sources* list, so
+   deferring a misquoted requirement had hidden a genuine gap.
+
+**A cluster of four screen-ownership races** surfaced while refusing to
+accept a 5/6-flaky test: `screensaver_off` took no lock while `start()` can
+wait seconds for a window; the idle loop could start a second screensaver
+over the first; lifeline used a separate lock; `stop()` left untracked
+windows mapped. `game_lock` is now the single screen-ownership lock.
+
+**And one regression the sweep caught before shipping:** a stalled media
+stream held that lock for its full window wait, so a *local* game launch took
+13.1s — breaking prime directive 1, and invisible to monitoring because
+heartbeats never take the lock. Capped to 4s; measured 2982ms, and the test
+is mutation-tested (restoring the old timeout reproduces 13.7s and fails).
+
+## Verification
+
+- **P9 full serial regression: zero failures.** 22/22 test targets,
+  accept-m0…m5 3/3 each, accept-m6 3/3 with genuinely cold subagents.
+- **Soak: 4h23m clean** in one unbroken window with all three chaos modes
+  firing (458 partitions, 178 heartbeat-kills, 274 cabd-kills). The poller
+  was also made honest first — it had been measuring host load, not the
+  product, and was fixed with a negative test rather than a looser threshold.
+- **~9 adversarial verifier reviews across the project; 4 FAIL verdicts, each
+  catching real defects.** New assertions are mutation-tested: removing a
+  guard makes the test fail.
+
+## What remains
+
+Hardware only — `DEPLOY.md` is the runbook, `HARDWARE-TODO.md` the checklist.
+The single genuine deferral is **CTL-5 Bluetooth controllers**, which the
+spec itself puts out of scope for v1 in four places.
