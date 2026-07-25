@@ -7,6 +7,8 @@
 <style>
   :root { --red: #e23b3b; --blue: #2b4fd8; --bg: #10121a; --card: #1a1e2c; --fg: #eef0f8; }
   * { box-sizing: border-box; }
+  .thumb { height: 34px; border-radius: 3px; vertical-align: middle;
+           margin: 0 6px; }
   body { margin: 0; font-family: system-ui, sans-serif; background: var(--bg); color: var(--fg); }
   header { background: linear-gradient(90deg, var(--red), var(--blue)); padding: 14px 22px;
            font-size: 22px; font-weight: 800; letter-spacing: 1px; }
@@ -142,7 +144,9 @@ async function refresh() {
     document.getElementById('sources').innerHTML = srcs.map(s =>
       `<li><button class="${s.enabled ? '' : 'red'}"
         onclick="api('POST','/screensaver/set-source',{id:'${s.id}',enabled:${!s.enabled}}).then(refresh)">
-        ${s.enabled ? '✓' : '✗'}</button> ${s.name} <small>${s.type}</small></li>`).join('');
+        ${s.enabled ? '✓' : '✗'}</button>
+       ${s.thumb ? `<img src="${s.thumb}" alt="" class="thumb">` : ''}
+       ${s.name} <small>${s.type}</small></li>`).join('');
   }).catch(() => {});
 
   api('GET', '/controls/presets').then(p => {

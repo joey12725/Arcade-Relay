@@ -1490,3 +1490,54 @@ accept-m6 3/3, zero regressions from the two screensaver fixes.
 **Soak:** window opened 18:34Z with the hardened poller; at 20:05Z it shows
 216 partitions, 87 heartbeat-kills, 125 cabd-kills, SOAK CLEAN. Gate is >=4h
 (~22:34Z).
+
+## Iteration 60 — 2026-07-25 — final sweep NOT-READY: all 7 findings + 4 real races fixed
+
+**Sweep verdict: NOT-READY**, correctly. Two findings were in code my own
+earlier fixes had touched. All closed:
+
+1. HIGH — screensaver could bury the LIFELINE screen (screensaver_on had no
+   ll["on"] guard). §5.11 makes lifeline the only on-cabinet repair surface;
+   burying it under attract video during an outage defeats it. Guarded in
+   both screensaver_on and screensaver_dim_clock.
+2. HIGH — on_fallback ignored the `fallback:` key, so `fallback: off` still
+   played clips when forced on. This was the SAME idle-vs-forced asymmetry
+   iteration 58 set out to fix, re-introduced inside the fix itself.
+3. arcaded discarded cabd's own note and printed "enable a source" even when
+   the real reason was "game running". Now relays the note.
+4. `cab press a` didn't reach the lifeline network restart (only the physical
+   FIFO path did) — §5.10 says synthetic input covers anything scriptable.
+5. A-20 deferred "library box art", a requirement the SPEC NEVER MADE; the
+   real §6.3 requirement is thumbnails on the SOURCES list. Deferring a
+   misquoted requirement hid a genuine gap. Implemented: jellyfin.image() +
+   arcaded /thumb proxy (browser needs no Jellyfin creds) + webui img.
+6. `mode: shuffle_episodes` and `fallback: dim_clock|off` were accepted,
+   git-committed, and did NOTHING — no consumer existed. Implemented all
+   three (server-side shuffle; dim clock via a generated mpv source; `off`
+   stays on the frontend); invalid values now rejected 400 instead of
+   silently stored; arcadectl gains --fallback (SCR-5 "all params via CLI").
+7. DONE.md's claim that lifeline was left for the hardware phase is stale
+   (P1 built it, P8 added recovery). Corrected in place.
+
+**Four REAL races found while stabilizing test-fallback** (it was 5/6 flaky —
+I chased it rather than accepting a flaky gate):
+- screensaver_off took NO lock while screensaver.start() can wait 15s for its
+  window: an off could interleave with an in-flight start, which then
+  finished and left a live window with the flag reading "off".
+- the idle loop could start a SECOND screensaver while the first was still
+  starting; the new handle replaced the old, orphaning it on screen.
+- lifeline used a separate lock from the screensaver, so a screensaver start
+  already in flight could land on top of a lifeline that had just come up.
+- screensaver.stop() only killed the tracked process, leaving orphans mapped.
+Fixes: game_lock is now the SINGLE screen-ownership lock (lifeline_lock
+removed; lifeline's slow checks() moved outside it so it can't stall a game
+launch), ss["starting"] guards the decide->flag window, stop() sweeps
+untracked windows, and _screensaver_off is the unlocked variant for callers
+already holding the lock.
+
+**Evidence:** TEST-FALLBACK PASS 6/6 consecutive (was 5/6). TEST-SCREENSAVER,
+TEST-M1, TEST-P8, TEST-JELLYFIN, WEBUI-LIVE, TEST-M6 all PASS.
+
+**Note on process:** an infrastructure outage (safety classifier) blocked all
+Bash for ~15 minutes mid-iteration. Nothing was committed until it cleared
+and the full serial suite was green — no red commits.

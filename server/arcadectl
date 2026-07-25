@@ -76,7 +76,9 @@ def main():
     sset = sssub.add_parser("set")
     sset.add_argument("--brightness", type=int)
     sset.add_argument("--idle", type=int, dest="idle_seconds")
-    sset.add_argument("--mode")
+    sset.add_argument("--mode", choices=["shuffle_episodes", "continue_series"])
+    sset.add_argument("--fallback", choices=["local_clips", "dim_clock", "off"],
+                      help="what to show when no playlist is available")
     for c in ("enable-source", "disable-source"):
         sp = sssub.add_parser(c)
         sp.add_argument("id")
@@ -246,7 +248,8 @@ def main():
             body = {k: v for k, v in
                     (("brightness", args.brightness),
                      ("idle_seconds", args.idle_seconds),
-                     ("mode", args.mode)) if v is not None}
+                     ("mode", args.mode),
+                     ("fallback", args.fallback)) if v is not None}
             res = call("POST", "/screensaver/set", body)
         else:
             res = call("POST", "/screensaver/set-source",

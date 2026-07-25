@@ -14,6 +14,7 @@ import asyncio
 import json
 import os
 import pathlib
+import random
 import subprocess
 import time
 import uuid
@@ -539,6 +540,17 @@ async def screensaver_sources(request):
         {**i, "enabled": enabled.get(i["id"], False)} for i in lib])
 
 
+async def thumb_proxy(request):
+    """Jellyfin Primary image for a source (spec §6.3 thumbnails). Proxied
+    so the browser needs no Jellyfin credentials or reachability."""
+    got = await jellyfin.image(request.match_info["item_id"])
+    if got is None:
+        raise web.HTTPNotFound(text="no image for this item")
+    body, ctype = got
+    return web.Response(body=body, content_type=ctype.split(";")[0],
+                        headers={"Cache-Control": "max-age=3600"})
+
+
 async def screensaver_set_source(request):
     body = await request.json()
     sid, enable = body["id"], bool(body["enabled"])
@@ -567,9 +579,16 @@ async def screensaver_playlist(request):
             continue
         for vid in await jellyfin.episodes_of(s["jellyfin_id"]):
             out.append(f"/media/{vid}")
+    # spec §5.5: mode shuffle_episodes (default) | continue_series. Shuffle
+    # here rather than on the cabinet so every fetch is a fresh random walk
+    # (mid-library selection is explicitly fine); continue_series keeps
+    # Jellyfin's episode order.
+    if cfg.get("mode", "shuffle_episodes") == "shuffle_episodes":
+        random.shuffle(out)
     return web.json_response({"playlist": out,
                               "brightness": cfg["brightness"],
-                              "mode": cfg["mode"]})
+                              "mode": cfg["mode"],
+                              "fallback": cfg.get("fallback", "local_clips")})
 
 
 async def media_proxy(request):
@@ -604,6 +623,14 @@ async def screensaver_get(request):
 async def screensaver_set(request):
     body = await request.json()
     cfg = load_screensaver()
+    # reject values nothing implements: committing `fallback: dimclock`
+    # would look like it worked and silently do nothing at idle
+    for k, allowed in (("mode", ("shuffle_episodes", "continue_series")),
+                       ("fallback", ("local_clips", "dim_clock", "off"))):
+        if k in body and body[k] not in allowed:
+            return web.json_response(
+                {"error": f"{k} must be one of {', '.join(allowed)}"},
+                status=400)
     changes = []
     for k in ("brightness", "idle_seconds", "mode", "fallback"):
         if k in body:
@@ -644,11 +671,17 @@ async def screensaver_cmd(request):
             # fallback actually had clips.
             res = await hub.rpc("screensaver.on_fallback", pl)
             if res.get("ok") and not res["result"].get("screensaver"):
-                return web.json_response(
-                    {"error": "no enabled screensaver sources and no cached "
-                              "clips — enable one with `arcadectl screensaver "
-                              "enable-source <id>`"},
-                    status=400)
+                # cabd says WHY it declined (game running, lifeline up,
+                # fallback disabled, no clips); relaying its own note beats
+                # a canned "enable a source" that may fix nothing.
+                note = res["result"].get("note", "")
+                hint = ("no enabled screensaver sources and no cached clips"
+                        if note == "no cached clips" else
+                        f"screensaver not started: {note}")
+                if note in ("no cached clips", ""):
+                    hint += (" — enable one with `arcadectl screensaver "
+                             "enable-source <id>`")
+                return web.json_response({"error": hint}, status=400)
         else:
             res = await hub.rpc("screensaver.on", pl)
     else:
@@ -1017,6 +1050,7 @@ app.add_routes([
     web.get("/screensaver", screensaver_get),
     web.post("/screensaver/set", screensaver_set),
     web.get("/screensaver/sources", screensaver_sources),
+    web.get("/thumb/{item_id}", thumb_proxy),
     web.post("/screensaver/set-source", screensaver_set_source),
     web.get("/screensaver/playlist", screensaver_playlist),
     web.post("/screensaver/disable", screensaver_disable),

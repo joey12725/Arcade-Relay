@@ -29,6 +29,41 @@ def _vf(brightness):
     return f"lavfi=[colorchannelmixer=rr={f}:gg={f}:bb={f}]"
 
 
+def start_dim_clock(brightness=30):
+    """`fallback: dim_clock` (spec §5.5): no media to play, so show a dim
+    clock rather than a black screen or the frontend. Same window title and
+    process handle as media playback, so on/off, the watchdog and the
+    brightness IPC all treat it identically."""
+    global _proc
+    stop(refocus=False)
+    f = max(0, min(int(brightness), 100)) / 100.0
+    grey = int(224 * f)
+    # A generated source (no media file, no network) with the clock drawn
+    # on top: works fully offline, which is the whole point of a fallback.
+    _proc = subprocess.Popen(
+        ["mpv", "--no-config", "--fs", "--really-quiet", f"--title={SS_TITLE}",
+         f"--input-ipc-server={SS_SOCK}", "--vo=x11", "--loop=inf",
+         # plain %{localtime}: a strftime argument needs escaped colons,
+         # which lavfi's own [...] parsing then mangles — not worth the
+         # fight for a fallback clock
+         "--vf=lavfi=[drawtext=text='%{localtime}':fontsize=48:"
+         f"fontcolor=0x{grey:02x}{grey:02x}{grey:02x}:"
+         "x=(w-text_w)/2:y=(h-text_h)/2]",
+         "av://lavfi:color=c=black:s=640x480:r=5"],
+        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        preexec_fn=launcher.die_with_parent())
+    deadline = time.monotonic() + 10
+    while time.monotonic() < deadline:
+        if _proc.poll() is not None:
+            return False
+        if launcher.find_window(SS_TITLE):
+            launcher.focus_window(launcher.find_window(SS_TITLE))
+            return True
+        time.sleep(0.1)
+    _proc.kill()
+    return False
+
+
 def ipc(command, timeout=2.0):
     """One mpv JSON-IPC request; filters out event traffic by request_id."""
     global _req_id
@@ -112,6 +147,23 @@ def running():
     return _proc is not None and _proc.poll() is None
 
 
+def window_present():
+    """True if ANY screensaver window is mapped, tracked or not."""
+    return launcher.find_window(SS_TITLE) is not None
+
+
+def kill_strays():
+    """Kill screensaver mpv processes we are no longer tracking.
+
+    start() replaces the module-global handle, so a start that raced another
+    start leaves the earlier process running with its window mapped — the
+    flag then says "off" while the screen still shows attract video. The
+    "--" is required: the pattern begins with "--".
+    """
+    subprocess.run(["pkill", "-9", "-f", "--", f"--title={SS_TITLE}"],
+                   capture_output=True)
+
+
 def stop(refocus=True):
     global _proc
     if _proc is not None and _proc.poll() is None:
@@ -125,5 +177,11 @@ def stop(refocus=True):
             _proc.kill()
             _proc.wait(timeout=2)
     _proc = None
+    # anything still holding the screensaver window is an orphan from a
+    # raced start; reality must match the flag we are about to report
+    deadline = time.monotonic() + 1
+    while time.monotonic() < deadline and launcher.find_window(SS_TITLE):
+        kill_strays()
+        time.sleep(0.1)
     if refocus:
         launcher.focus_frontend()

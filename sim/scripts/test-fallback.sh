@@ -121,6 +121,91 @@ cab sh -c 'mkdir -p /tmp/clip-stash && mv /var/cache/arcade-clips/*.ts /tmp/clip
 rc=0; srv arcadectl screensaver on >/dev/null 2>&1 || rc=$?
 [ "$rc" -eq 4 ] || { echo "FAIL: no sources + no clips exited $rc, want 4"; exit 1; }
 cab sh -c 'mv /tmp/clip-stash/*.ts /var/cache/arcade-clips/'
+
+echo "== 3d. fallback: off / dim_clock are honored by BOTH idle and forced =="
+srv arcadectl screensaver off >/dev/null || true
+t=0; until ! cab sh -c 'xdotool search --name arcade-screensaver >/dev/null 2>&1'; do
+    t=$((t+1)); [ $t -ge 20 ] && { echo "FAIL: screensaver would not stop"; exit 1; }; sleep 0.5
+done
+srv arcadectl screensaver set --fallback off >/dev/null
+# a start decided before the policy change may still be in flight; let it
+# land and stop it, so what we assert next is the NEW policy's behavior
+sleep 3
+srv arcadectl screensaver off >/dev/null || true
+t=0; until ! cab sh -c 'xdotool search --name arcade-screensaver >/dev/null 2>&1'; do
+    t=$((t+1)); [ $t -ge 20 ] && { echo "FAIL: screensaver would not stop (pre-off)"; exit 1; }; sleep 0.5
+done
+rc=0; srv arcadectl screensaver on >/dev/null 2>&1 || rc=$?
+[ "$rc" -eq 4 ] || { echo "FAIL: forced-on with fallback=off exited $rc, want 4"; exit 1; }
+cab sh -c 'xdotool search --name arcade-screensaver >/dev/null 2>&1' \
+    && { echo "FAIL: fallback=off still started a screensaver"; exit 1; } || true
+cab sh -c 'echo "BTN_A down" > /tmp/input-events'
+srv arcadectl screensaver set --idle 3 >/dev/null
+sleep 6   # idle elapsed: with fallback=off nothing may appear
+cab sh -c 'xdotool search --name arcade-screensaver >/dev/null 2>&1' \
+    && { echo "FAIL: idle started a screensaver with fallback=off"; exit 1; } || true
+cab grep -q "fallback is 'off'" /tmp/cabd.log || { echo "FAIL: fallback=off not logged"; exit 1; }
+
+srv arcadectl screensaver set --fallback dim_clock >/dev/null
+srv arcadectl screensaver on >/dev/null \
+    || { echo "FAIL: forced-on with fallback=dim_clock errored"; exit 1; }
+cab sh -c 'for i in $(seq 1 40); do xdotool search --name arcade-screensaver >/dev/null 2>&1 && exit 0; sleep 0.25; done; exit 1' \
+    || { echo "FAIL: dim_clock produced no window"; exit 1; }
+cab pgrep -f "drawtext" >/dev/null || { echo "FAIL: dim_clock window is not the clock"; exit 1; }
+srv arcadectl --json status | grep -q '"screensaver": true' \
+    || { echo "FAIL: dim_clock did not set the screensaver flag"; exit 1; }
+srv arcadectl screensaver off >/dev/null
+srv arcadectl screensaver set --fallback local_clips >/dev/null
+
+echo "== 3e. invalid mode/fallback values are rejected, not silently committed =="
+# CLI rejects at parse time (exit 2, usage) ...
+for bad in "--fallback dimclock" "--mode shuffle"; do
+    rc=0; srv arcadectl screensaver set $bad >/dev/null 2>&1 || rc=$?
+    [ "$rc" -eq 2 ] || { echo "FAIL: CLI took '$bad' (exit $rc, want 2 usage)"; exit 1; }
+done
+# ... and the REST API rejects it too, so no other client can commit a
+# value nothing implements
+srv python3 - <<'EOF'
+import json, urllib.request, urllib.error
+for bad in ({"fallback": "dimclock"}, {"mode": "shuffle"}, {"fallback": "on"}):
+    req = urllib.request.Request("http://localhost:8000/screensaver/set",
+                                 data=json.dumps(bad).encode(),
+                                 headers={"Content-Type": "application/json"},
+                                 method="POST")
+    try:
+        urllib.request.urlopen(req, timeout=10)
+        raise SystemExit(f"FAIL: server accepted {bad}")
+    except urllib.error.HTTPError as e:
+        assert e.code == 400, f"{bad} -> {e.code}, want 400"
+print("invalid mode/fallback rejected by CLI and API")
+EOF
+srv arcadectl --json screensaver status | grep -q '"fallback": "local_clips"' \
+    || { echo "FAIL: a rejected value leaked into state"; exit 1; }
+
+echo "== 3f. screensaver must never cover the lifeline screen =="
+srv arcadectl cab lifeline on >/dev/null
+rc=0; srv arcadectl screensaver on >/dev/null 2>&1 || rc=$?
+[ "$rc" -eq 4 ] || { echo "FAIL: forced screensaver over lifeline exited $rc, want 4"; exit 1; }
+cab sh -c 'xdotool search --name arcade-screensaver >/dev/null 2>&1' \
+    && { echo "FAIL: screensaver started on top of lifeline"; exit 1; } || true
+cab sh -c 'echo "BTN_A down" > /tmp/input-events'   # also resets idle clock
+sleep 6   # idle=3 elapsed while lifeline is up
+cab sh -c 'xdotool search --name arcade-screensaver >/dev/null 2>&1' \
+    && { echo "FAIL: idle screensaver buried the lifeline screen"; exit 1; } || true
+cab sh -c 'xdotool search --name arcade-lifeline >/dev/null' \
+    || { echo "FAIL: lifeline window gone"; exit 1; }
+srv arcadectl cab lifeline off >/dev/null
+
+echo "== 3g. cab press a restarts networking while lifeline is up =="
+cab rm -f /tmp/net-restarted
+srv arcadectl cab lifeline on >/dev/null
+srv arcadectl --json cab press a | grep -q '"via": "lifeline"' \
+    || { echo "FAIL: press a not routed to the lifeline action"; exit 1; }
+t=0; until cab test -e /tmp/net-restarted; do
+    t=$((t+1)); [ $t -ge 20 ] && { echo "FAIL: press a did not restart networking"; exit 1; }; sleep 0.5
+done
+srv arcadectl cab lifeline off >/dev/null
+
 srv arcadectl screensaver enable-source "$SA" >/dev/null
 srv arcadectl screensaver set --idle 3600 >/dev/null
 

@@ -71,9 +71,13 @@ Work `HARDWARE-TODO.md` top to bottom (Debian install, real RetroArch/Pegasus +
 redblue QML theme + UI-4 audit, evdev combos, Cloudflare tunnel, real ROMDL swap-in,
 Sunshine/Moonlight + Greenlight sign-ins, 24h real-scale accept-m0, continuous 8h+
 soak). Assumptions A-1..A-16 in `ASSUMPTIONS.md` record every sim-vs-real judgment
-call, each with its hardware follow-up. Lifeline mode (§5.11) is the one spec
-feature deliberately left for the hardware phase — it is inseparable from real
-network interfaces and panel input.
+call, each with its hardware follow-up.
+
+> **Superseded by P1/P8 (see the v2 and v3 sections below).** This paragraph
+> originally said lifeline mode (§5.11) was deliberately left for the hardware
+> phase. It isn't: P1 built the status screen and P8 added the recovery paths
+> (ensure SSH, fallback transport, restart networking from the panel button),
+> all tested in the sim. Only the real-network verification is hardware scope.
 
 ## Numbers
 

@@ -111,9 +111,20 @@ because they are software, not hardware, and the mandate is the whole spec:
   files), and the real systemd/NetworkManager/tailscale commands are the
   hardware defaults (A-19 scope).
 - Web UI library page + launch/favorite quick actions (§6.3) — IMPLEMENTED.
-Still deferred (unchanged): Bluetooth controllers (CTL-5, spec says out of
-scope for v1); box-art thumbnails in the web UI (art is delivered to the
-cabinet and shown by Pegasus; the web UI lists titles).
+- Screensaver-source thumbnails (§6.3 "checkbox list w/ thumbnails") —
+  IMPLEMENTED (jellyfin.image + arcaded /thumb proxy so the browser needs no
+  Jellyfin credentials; the source list renders them). NB: an earlier version
+  of this entry deferred "box art in the library", which the spec never asked
+  for — the real requirement was thumbnails on the SOURCES list, and deferring
+  a misquoted requirement hid a genuine gap. Caught by the final sweep.
+- `mode: shuffle_episodes | continue_series` (§5.5) — IMPLEMENTED (the server
+  shuffles the resolved playlist; continue_series keeps Jellyfin order). It
+  was previously stored and returned but had no consumer.
+- `fallback: dim_clock | off` (§5.5) — IMPLEMENTED (dim clock via a generated
+  mpv source; `off` stays on the frontend). Both were accepted and committed
+  by the API while doing nothing; invalid values are now rejected 400.
+Still deferred (unchanged): Bluetooth controllers (CTL-5) — the spec puts it
+out of scope for v1 in four places (§4.1, §5.7, §8, §10).
 
 ## A-21 — Sim tests must run SERIALLY (one make target at a time)
 All test targets drive the same `arcade-sim` compose project: they

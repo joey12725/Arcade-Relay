@@ -145,28 +145,36 @@ def log(*a):
 # ---------------------------------------------------------------- games
 
 game = {"session": None, "rom": None}
+# ONE lock for "who owns the screen": games, screensaver, dim clock and
+# lifeline all contend for the same display. Separate locks let an in-flight
+# screensaver start land on top of a lifeline that had just come up.
 game_lock = asyncio.Lock()
-ss = {"on": False, "suppress_until": 0.0}
+ss = {"on": False, "suppress_until": 0.0, "starting": False}
 ll = {"on": False, "last_sync": None, "recovery": {}}
-lifeline_lock = asyncio.Lock()
 
 
 async def lifeline_on():
-    # serialized with lifeline_off: interleaved on/off would let two
-    # lifeline.show() calls race, the second overwriting the module-global
-    # mpv handle and orphaning a fullscreen window nothing can close
-    async with lifeline_lock:
-        return await _lifeline_on()
+    # The status ladder (ping/DNS) takes seconds — run it BEFORE taking the
+    # screen lock, or a lifeline request would stall every game launch for
+    # its duration. Nothing else may start a window in the meantime because
+    # ll["on"] is set under the lock and every other starter checks it.
+    if ll["on"]:
+        return {"lifeline": True}
+    st = await asyncio.to_thread(
+        lifeline.checks, ws_state["connected"], ll["last_sync"])
+    # game_lock is the screen-ownership lock: serializes lifeline on/off
+    # against each other AND against screensaver/dim-clock/game starts, so
+    # nothing can map a window on top of a lifeline that just came up.
+    async with game_lock:
+        return await _lifeline_on(st)
 
 
-async def _lifeline_on():
+async def _lifeline_on(st):
     if ll["on"]:
         return {"lifeline": True}
     ll["on"] = True
     if ss["on"]:
-        await screensaver_off()
-    st = await asyncio.to_thread(
-        lifeline.checks, ws_state["connected"], ll["last_sync"])
+        await _screensaver_off()   # we already hold game_lock
     ok = await asyncio.to_thread(lifeline.show, st)
     # §5.11: bring up every recovery path we can reach ourselves. Runs in the
     # background — the diagnostics screen (and this RPC's answer) must never
@@ -183,7 +191,7 @@ async def lifeline_recover():
 
 
 async def lifeline_off():
-    async with lifeline_lock:
+    async with game_lock:
         ll["on"] = False
         await asyncio.to_thread(lifeline.hide)
         # belt and braces: if a racing show() ever leaked a window, this
@@ -219,7 +227,7 @@ async def lifeline_loop(ws_state):
             # Under the lock, and re-checked inside it: checks() takes
             # seconds (ping/DNS), and an `off` landing in that window would
             # otherwise have show() respawn the overlay right after hide().
-            async with lifeline_lock:
+            async with game_lock:
                 if not ll["on"]:
                     continue
                 await asyncio.to_thread(lifeline.show, st)
@@ -255,6 +263,13 @@ async def input_press(what):
     if what in LOGICAL_COMBOS:
         await on_combo(what)
         return {"pressed": what, "via": "combo"}
+    if ll["on"] and what == "a":
+        # §5.10 says synthetic input covers anything scriptable; the panel's
+        # lifeline repair button must be one of those things. Without this,
+        # `cab press a` went to xdotool and did nothing while the physical
+        # button restarted networking.
+        await lifeline_restart_network()
+        return {"pressed": what, "via": "lifeline"}
     p = await asyncio.to_thread(
         subprocess.run, ["xdotool", "key", "--clearmodifiers", what],
         capture_output=True, text=True, timeout=10)
@@ -335,14 +350,45 @@ async def screensaver_on(playlist, brightness):
     async with game_lock:   # never fight a game launch for the screen
         if game["session"] is not None:
             return {"screensaver": False, "note": "game running"}
+        if ll["on"]:
+            # §5.11: lifeline is the ONLY on-cabinet repair surface. Attract
+            # video stacking on top of it during an outage is exactly when
+            # the operator needs to read it.
+            return {"screensaver": False, "note": "lifeline active"}
         ok = await asyncio.to_thread(screensaver.start, playlist, brightness)
         ss["on"] = bool(ok)
         log(f"screensaver on -> {ss['on']}")
         return {"screensaver": ss["on"]}
 
 
+async def screensaver_dim_clock(brightness):
+    """`fallback: dim_clock`: same lifecycle/flag as media playback."""
+    async with game_lock:
+        if game["session"] is not None:
+            return {"screensaver": False, "note": "game running"}
+        if ll["on"]:
+            return {"screensaver": False, "note": "lifeline active"}
+        ok = await asyncio.to_thread(screensaver.start_dim_clock, brightness)
+        ss["on"] = bool(ok)
+        log(f"screensaver dim clock -> {ss['on']}")
+        return {"screensaver": ss["on"], "mode": "dim_clock"}
+
+
 async def screensaver_off():
+    # Must hold the screen lock: screensaver.start() can spend up to 15s
+    # waiting for its window, and an unlocked off landing in that window
+    # would "stop" a screensaver that then finishes starting and leaves a
+    # live window behind — the flag says off, the screen says otherwise.
+    async with game_lock:
+        return await _screensaver_off()
+
+
+async def _screensaver_off():
+    """Caller must hold game_lock."""
     if not ss["on"]:
+        # still sweep: a raced start may have left an untracked window
+        if screensaver.window_present():
+            await asyncio.to_thread(screensaver.stop, False)
         return {"screensaver": False}
     ss["on"] = False
     await asyncio.to_thread(screensaver.stop)
@@ -356,13 +402,22 @@ async def idle_loop():
         await asyncio.sleep(0.5)
         cfg = state["bundle"].get("screensaver.yaml") or {}
         idle_s = float(cfg.get("idle_seconds", 300))
-        if ss["on"] or game["session"] is not None:
+        if ss["on"] or ss["starting"] or ll["on"] \
+                or game["session"] is not None:
             continue
         if time.monotonic() < ss["suppress_until"]:
             continue
         if time.monotonic() - activity["last"] < idle_s:
             continue
-        await start_screensaver_now()
+        # `starting` guards the window between "decided to start" and
+        # "flag is true": a start takes seconds (playlist fetch, mpv
+        # window), and without it the next tick starts a SECOND one whose
+        # handle replaces the first, orphaning it on screen.
+        ss["starting"] = True
+        try:
+            await start_screensaver_now()
+        finally:
+            ss["starting"] = False
 
 
 async def start_screensaver_now():
@@ -372,10 +427,21 @@ async def start_screensaver_now():
 
     async def use_local_clips(why):
         """Same fallback for both no-playlist cases: the server being
-        unreachable, and the server answering with nothing to play."""
-        clips = local_clips()
+        unreachable, and the server answering with nothing to play.
+        Honors `fallback:` (spec §5.5): local_clips | dim_clock | off."""
+        # re-read: the playlist fetch above can take seconds, and a
+        # state.sync landing in that window may have changed the policy we
+        # are about to act on
+        cfg = state["bundle"].get("screensaver.yaml") or {}
         fallback = cfg.get("fallback", "local_clips")
-        if clips and fallback == "local_clips":
+        clips = local_clips()
+        if fallback == "off":
+            log(f"idle: {why}; fallback is 'off', staying on the frontend")
+            await asyncio.sleep(5)
+        elif fallback == "dim_clock":
+            log(f"idle: {why}; dim clock fallback")
+            await screensaver_dim_clock(cfg.get("brightness", 80))
+        elif clips:
             log(f"idle: {why}; local clips fallback")
             await screensaver_on(clips, cfg.get("brightness", 80))
         else:
@@ -869,10 +935,19 @@ async def handle_req(ws, data):
             result = await screensaver_on(params.get("playlist", []),
                                           params.get("brightness", 80))
         elif method == "screensaver.on_fallback":
-            # forced on with no server playlist: use the local clip cache,
-            # exactly as the idle path does
+            # Forced on with no server playlist: same decision the idle path
+            # makes — including honoring the `fallback:` config key, which
+            # this branch previously ignored (it played clips even when the
+            # owner had set fallback: off).
+            cfg = state["bundle"].get("screensaver.yaml") or {}
+            fallback = cfg.get("fallback", "local_clips")
             clips = local_clips()
-            if clips:
+            if fallback == "dim_clock":
+                result = await screensaver_dim_clock(
+                    params.get("brightness", 80))
+            elif fallback == "off":
+                result = {"screensaver": False, "note": "fallback is 'off'"}
+            elif clips:
                 result = await screensaver_on(clips,
                                               params.get("brightness", 80))
                 log("screensaver forced on from local clips (no sources)")

@@ -7,6 +7,7 @@ pre-configured Jellyfin just authenticates (OQ-7).
 import asyncio
 import json
 import os
+import urllib.error
 import urllib.parse
 import urllib.request
 
@@ -87,8 +88,30 @@ async def items():
     data = await asyncio.to_thread(
         _req, "GET",
         "/Items?IncludeItemTypes=Series,Movie&Recursive=true", None, t)
-    return [{"id": i["Id"], "name": i["Name"], "type": i["Type"]}
+    return [{"id": i["Id"], "name": i["Name"], "type": i["Type"],
+             # thumbnail (spec §6.3 "checkbox list w/ thumbnails"); served
+             # through arcaded's /thumb proxy so the browser never needs to
+             # reach Jellyfin directly
+             "thumb": (f"/thumb/{i['Id']}"
+                       if (i.get("ImageTags") or {}).get("Primary") else None)}
             for i in data.get("Items", [])]
+
+
+async def image(item_id, max_height=180):
+    """Raw Primary image bytes + content type, or None if the item has none."""
+    t = await token()
+
+    def _fetch():
+        url = (f"{JF_URL}/Items/{item_id}/Images/Primary"
+               f"?maxHeight={max_height}&quality=80")
+        req = urllib.request.Request(url)
+        req.add_header("X-Emby-Token", t)
+        try:
+            with urllib.request.urlopen(req, timeout=20) as r:
+                return r.read(), r.headers.get("Content-Type", "image/jpeg")
+        except urllib.error.HTTPError:
+            return None
+    return await asyncio.to_thread(_fetch)
 
 
 async def episodes_of(item_id):
