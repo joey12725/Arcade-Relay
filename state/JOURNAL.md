@@ -1472,3 +1472,21 @@ ACCEPT-M6 2/3.
 that ~57 iterations and five adversarial verifier sweeps had missed. The M6
 gate is doing more than proving docs are usable — a fresh reader operating
 the system finds things a reviewer looking at diffs does not.
+
+## Iteration 59 — 2026-07-25 — accept-m6 3/3, P9 gate all-green
+
+**accept-m6 round 3: PASS.** Cold agent (third distinct wording) completed
+the task from docs alone. Notably it described the empty-sources behavior
+CORRECTLY — "will fall back to local_clips rather than streaming the
+library" — which is exactly what rounds 1 and 2 found broken and I fixed in
+iterations 57-58. The fix is now what a fresh reader observes.
+
+**accept-m6: 3/3** (all with genuinely cold subagents given only a repo path
+and a task sentence in different wordings).
+
+**P9 tally:** 22/22 test targets serial PASS, accept-m0..m5 3/3 each,
+accept-m6 3/3, zero regressions from the two screensaver fixes.
+
+**Soak:** window opened 18:34Z with the hardened poller; at 20:05Z it shows
+216 partitions, 87 heartbeat-kills, 125 cabd-kills, SOAK CLEAN. Gate is >=4h
+(~22:34Z).
