@@ -153,7 +153,10 @@ def near_cabd_kill(ts):
     return any(k - SLACK_MS <= ts <= k + CABD_GRACE_MS for k in cabd_kills)
 
 for ts, m in status:
-    if m != "ONLINE" and not in_partition(ts) and not near_cabd_kill(ts):
+    # the poller may append a reason after the state (e.g. "POLLERR
+    # TimeoutError"), so compare the state token, not the whole message
+    if m.split()[0] != "ONLINE" and not in_partition(ts) \
+            and not near_cabd_kill(ts):
         violations.append(f"V5 server saw {m} outside chaos window at {ts}")
 
 sage = time.time() * 1000 - status[-1][0]

@@ -1387,3 +1387,27 @@ full CTL-3 capture->assign->commit chain) — replacing the string-grep
 storm), WEBUI-LIVE PASS, TEST-M2 PASS x5 serial, TEST-RENDER PASS.
 
 **Outcome:** GREEN. Next: P9 full serial regression + final sweep.
+
+## Iteration 56 — 2026-07-25 — soak V5 violation: auditor measured the host, not the product
+
+**Soak check: VIOLATION (3)** — two V5 POLLERRs + one V3, all inside a
+~700ms window at 17:49:59Z. That is exactly when I was running the serial
+test-m2 x5 loop on the same host.
+
+**Investigation (violations preempt everything):** cabd respawn measured
+directly: 235ms to respawn, 1060ms to reconnect — far inside the 8s grace,
+so the product is healthy. The poller used a 1s timeout with NO retry, so
+one slow response on a loaded box is indistinguishable from a dead server.
+Both POLLERR samples sat between ONLINE samples 500ms either side: the
+server never went away.
+
+**Fix (poller honesty, not threshold-loosening):** 3s timeout, 3 attempts
+with 150ms gaps, and the exception type is now recorded in the log line
+(ConnectionRefusedError vs TimeoutError) so a genuine outage stays
+distinguishable from host slowness. soak-status compares the STATE TOKEN so
+the reason suffix parses. Negative-tested: a synthetic run of three
+consecutive "POLLERR ConnectionRefusedError" samples still exits 1 with V5 —
+the auditor was not weakened, it was made able to tell the two apart.
+
+**Evidence:** negative test rc=1 with V5 flagged; soak restarted with the
+new poller, SOAK CLEAN.
