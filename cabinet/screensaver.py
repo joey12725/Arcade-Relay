@@ -22,6 +22,30 @@ PLAYLIST_PATH = "/tmp/ss-playlist.m3u"
 
 _proc = None
 _req_id = 0
+_outro = {"seconds": 0}   # trim from the tail of each item (0 = off)
+
+
+def outro_tick():
+    """Advance the playlist early when the tail trim is reached.
+
+    Called on cabd's poll loop rather than run as a thread: the duration is
+    only knowable once mpv has loaded each file, and a poll keeps this
+    dependent on nothing but the IPC socket that already exists.
+    """
+    n = _outro["seconds"]
+    if n <= 0 or not running():
+        return False
+    try:
+        remaining = ipc(["get_property", "time-remaining"], timeout=0.4).get("data")
+    except (OSError, TimeoutError, ValueError):
+        return False
+    if remaining is None or remaining > n:
+        return False
+    try:
+        ipc(["playlist-next", "force"], timeout=0.4)
+        return True
+    except (OSError, TimeoutError):
+        return False
 
 
 def _vf(brightness):
@@ -97,12 +121,33 @@ def get_prop(name):
     return ipc(["get_property", name]).get("data")
 
 
-def start(playlist, brightness, window_timeout=15):
+# Aspect handling on a 4:3 panel fed 16:9 source (SCR-2 is "crop"; the
+# other two are owner preference, since each trades something away):
+#   crop    — fill the screen, lose ~25% of frame width  (panscan 1.0)
+#   bars    — whole frame, black bars top/bottom          (panscan 0.0)
+#   stretch — whole frame, no bars, geometry distorted    (no keepaspect)
+ASPECT_MODES = ("crop", "bars", "stretch")
+
+
+def _aspect_args(mode):
+    if mode == "stretch":
+        return ["--no-keepaspect", "--panscan=0.0"]
+    if mode == "bars":
+        return ["--keepaspect", "--panscan=0.0"]
+    return ["--keepaspect", "--panscan=1.0"]     # crop (default)
+
+
+def start(playlist, brightness, window_timeout=15, aspect="crop",
+          skip_intro_s=0, skip_outro_s=0):
     """playlist: server-relative paths (/media/<id>). Returns True on window.
 
     window_timeout bounds the wait for mpv to map its window; a stalled
     media stream can consume all of it, so callers holding a lock others
     need should keep this short (see cabd.screensaver_on).
+
+    skip_intro_s / skip_outro_s trim the head and tail of every item — mpv
+    applies --start to each playlist entry, and the outro is handled by a
+    watcher script since the trim depends on each file's own duration.
     """
     global _proc
     stop(refocus=False)
@@ -119,14 +164,18 @@ def start(playlist, brightness, window_timeout=15):
         os.unlink(SS_SOCK)
     except FileNotFoundError:
         pass
+    argv = ["mpv", "--no-config", "--fs", *_aspect_args(aspect),
+            f"--input-ipc-server={SS_SOCK}", f"--vf={_vf(brightness)}",
+            "--loop-playlist=inf", "--really-quiet", f"--title={SS_TITLE}",
+            "--ao=pulse,pipewire,null", "--vo=x11",
+            f"--playlist={PLAYLIST_PATH}"]
+    if skip_intro_s > 0:
+        argv.append(f"--start=+{int(skip_intro_s)}")
     _proc = subprocess.Popen(
-        ["mpv", "--no-config", "--fs", "--panscan=1.0", "--keepaspect",
-         f"--input-ipc-server={SS_SOCK}", f"--vf={_vf(brightness)}",
-         "--loop-playlist=inf", "--really-quiet", f"--title={SS_TITLE}",
-         "--ao=pulse,pipewire,null", "--vo=x11",
-         f"--playlist={PLAYLIST_PATH}"],
+        argv,
         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
         env=env, preexec_fn=launcher.die_with_parent())
+    _outro["seconds"] = max(0, int(skip_outro_s))
     deadline = time.monotonic() + window_timeout
     win = None
     while time.monotonic() < deadline:

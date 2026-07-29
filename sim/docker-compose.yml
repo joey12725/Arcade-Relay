@@ -6,7 +6,7 @@ name: arcade-sim
 # the real system would use over the Cloudflare tunnel (ASSUMPTIONS A-6).
 #
 #   cabnet:  cabinet, toxiproxy
-#   srvnet:  server, jellyfin, toxiproxy
+#   srvnet:  server, plex, toxiproxy
 #
 # Only toxiproxy straddles both networks.
 
@@ -31,19 +31,25 @@ services:
       timeout: 3s
       retries: 5
 
-  jellyfin:
-    image: jellyfin/jellyfin:latest
+  plex:
+    image: plexinc/pms-docker:latest
     networks: [srvnet]
+    environment:
+      # Unclaimed server: answers its HTTP API to local clients with no
+      # token. A real claimed server sets PLEX_TOKEN on arcaded instead.
+      ALLOWED_NETWORKS: 0.0.0.0/0
+      PLEX_UID: "0"
+      PLEX_GID: "0"
     volumes:
-      - ./.data/jellyfin/config:/config
-      - ./.data/jellyfin/cache:/cache
+      - ./.data/plex/config:/config
+      - ./.data/plex/transcode:/transcode
       - ./media:/media:ro
     healthcheck:
-      test: ["CMD", "curl", "-fsS", "http://localhost:8096/health"]
+      test: ["CMD-SHELL", "curl -fsS http://localhost:32400/identity | grep -q machineIdentifier"]
       interval: 10s
       timeout: 5s
       retries: 30
-      start_period: 60s
+      start_period: 40s
 
   cabinet:
     build: ./cabinet

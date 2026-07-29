@@ -23,7 +23,7 @@ import aiohttp
 import yaml
 from aiohttp import WSMsgType, web
 
-import jellyfin
+import plex as jellyfin   # Plex adapter, same 4-function contract
 import romdl
 
 RPC_TIMEOUT = float(os.environ.get("ARCADED_RPC_TIMEOUT", "15"))
@@ -541,8 +541,8 @@ async def screensaver_sources(request):
 
 
 async def thumb_proxy(request):
-    """Jellyfin Primary image for a source (spec §6.3 thumbnails). Proxied
-    so the browser needs no Jellyfin credentials or reachability."""
+    """Plex poster for a source (spec §6.3 thumbnails). Proxied so the
+    browser needs no Plex credentials or reachability."""
     got = await jellyfin.image(request.match_info["item_id"])
     if got is None:
         raise web.HTTPNotFound(text="no image for this item")
@@ -592,13 +592,13 @@ async def screensaver_playlist(request):
 
 
 async def media_proxy(request):
-    """Reverse-proxy a transcoded Jellyfin stream so media rides the
+    """Reverse-proxy a transcoded Plex stream so media rides the
     cabinet<->server link (Cloudflare tunnel in prod, toxiproxy in sim)."""
     video_id = request.match_info["video_id"]
     path = await jellyfin.stream_path(video_id)
     resp = web.StreamResponse()
     # total=None is load-bearing: the default 300s total timeout would kill
-    # any stream longer than 5 minutes mid-play (Jellyfin transcodes are
+    # any stream longer than 5 minutes mid-play (Plex transcodes are
     # throttled to near-realtime)
     tmo = aiohttp.ClientTimeout(total=None, sock_connect=30, sock_read=120)
     fwd_headers = {}
