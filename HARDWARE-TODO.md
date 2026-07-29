@@ -57,3 +57,12 @@ Things that can only be verified on real hardware. Not faked green in the sim.
 - [ ] Panel button for lifeline network restart: the "a" button triggers it.
   Confirm the physical button mapped to `a` is reachable/obvious on the
   lifeline screen, and that it does not fight any Pegasus binding.
+- [ ] Dev toolchain on the real cabinet: run `cabinet/provision/devtools.sh`
+  (install.sh calls it automatically). Verified end-to-end in a Debian
+  container — Node 24, npm, Claude Code, Codex CLI, Tailscale, git, ripgrep,
+  jq, tmux. On hardware, follow up with the one interactive step:
+  `tailscale up` (browser auth, do it via remote view), then set
+  LIFELINE_TRANSPORT_CMD="tailscale up" in cabd.service so lifeline can
+  bring the fallback transport up by itself.
+- [ ] "T3 Code" was requested for the cabinet toolchain but is ambiguous —
+  devtools.sh has a NPM_TOOLS array; add the package name there and re-run.

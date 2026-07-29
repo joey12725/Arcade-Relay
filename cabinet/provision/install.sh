@@ -75,4 +75,9 @@ runuser -u "$ARCADE_USER" -- \
 chown -R "$ARCADE_USER:$ARCADE_USER" "$HOME_DIR" /opt/arcade /roms /saves \
     /var/cache/arcade
 
+# --- agentic development toolchain (optional; never fails the arcade) ---
+if [ "${SKIP_DEVTOOLS:-0}" != "1" ]; then
+    ARCADE_USER="$ARCADE_USER" bash "$SRC_DIR/provision/devtools.sh" || true
+fi
+
 echo "cabinet provisioned for server $SERVER_HOST — reboot to enter kiosk"
