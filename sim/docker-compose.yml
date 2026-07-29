@@ -23,6 +23,17 @@ services:
   server:
     build: ../server
     networks: [srvnet]
+    environment:
+      # MUST be an IP, not the "plex" service name. An unclaimed PMS decides
+      # "is this request local?" from the *Host header*, not the source IP:
+      # a Host it cannot parse as an IP/localhost is logged as
+      #   "Request came in with unrecognized domain / IP 'plex' in header
+      #    Host; treating as non-local"
+      # and every API route except /identity answers 401. Pinning plex to a
+      # static address lets arcaded address it by IP, which is what makes
+      # the token-free unclaimed path work. (allowedNetworks does NOT
+      # affect this — verified with the pref both set and cleared.)
+      PLEX_URL: http://172.31.7.10:32400
     volumes:
       - ../state:/state-seed:ro   # entrypoint seeds a writable git repo from this
     healthcheck:
@@ -33,11 +44,16 @@ services:
 
   plex:
     image: plexinc/pms-docker:latest
-    networks: [srvnet]
+    networks:
+      srvnet:
+        ipv4_address: 172.31.7.10   # arcaded must address Plex by IP; see server.PLEX_URL
     environment:
       # Unclaimed server: answers its HTTP API to local clients with no
       # token. A real claimed server sets PLEX_TOKEN on arcaded instead.
-      ALLOWED_NETWORKS: 0.0.0.0/0
+      # NB: this pref is NOT what unlocks the API (the Host header is), and
+      # PMS rejects 0.0.0.0/0 outright -- "Illegal allowlist entry has
+      # too-short prefix" -- so use a real CIDR.
+      ALLOWED_NETWORKS: 172.31.7.0/24
       PLEX_UID: "0"
       PLEX_GID: "0"
     volumes:
@@ -84,4 +100,7 @@ services:
 
 networks:
   cabnet: {}
-  srvnet: {}
+  srvnet:
+    ipam:
+      config:
+        - subnet: 172.31.7.0/24   # fixed so plex can hold a stable IP (see plex.networks)

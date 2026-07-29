@@ -1,0 +1,20 @@
+# Streaming tiles (spec §5.8) and their per-app quality.
+#
+# `quality` is optional per entry; anything omitted falls back to `defaults`.
+# These ride the LAN (desktop <-> cabinet over Wi-Fi 6E), NOT the Cloudflare
+# tunnel, so the bitrate here can be far higher than the screensaver's cap.
+defaults:
+  resolution: 1920x1080
+  fps: 60
+  bitrate_kbps: 20000
+
+entries:
+  - name: Steam Big Picture
+    kind: moonlight
+    target: Desktop
+  - name: Game Pass Cloud
+    kind: greenlight
+    target: Game Pass Cloud
+    quality:
+      # xCloud tops out at 1080p60 and is bandwidth-sensitive; give it less
+      bitrate_kbps: 10000

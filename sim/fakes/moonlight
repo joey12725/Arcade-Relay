@@ -1,7 +1,11 @@
 #!/usr/bin/env python3
 """Fake Moonlight client (A-8): real X window, killed via SIGTERM by cabd.
-Usage: moonlight stream <host> <app> [...]
+Usage: moonlight stream [--resolution WxH] [--fps N] [--bitrate K] <host> <app>
+
+Writes its full argv to /tmp/moonlight-argv so tests can assert that the
+per-app quality settings from state actually reached the client.
 """
+import argparse
 import ctypes
 import signal
 import subprocess
@@ -12,7 +16,18 @@ def _die_with_parent():
     ctypes.CDLL("libc.so.6", use_errno=True).prctl(1, signal.SIGKILL)
 
 
-app = sys.argv[3] if len(sys.argv) > 3 else "unknown"
+with open("/tmp/moonlight-argv", "w") as f:
+    f.write(" ".join(sys.argv) + "\n")
+
+ap = argparse.ArgumentParser()
+ap.add_argument("mode", nargs="?", default="stream")
+ap.add_argument("--resolution", default="1920x1080")
+ap.add_argument("--fps", default="60")
+ap.add_argument("--bitrate", default="20000")
+ap.add_argument("rest", nargs=argparse.REMAINDER)
+args = ap.parse_args()
+positional = [a for a in args.rest if not a.startswith("--")]
+app = positional[1] if len(positional) > 1 else "unknown"
 mpv = subprocess.Popen(
     ["mpv", "--no-config", "--vo=x11", "--force-window=yes",
      "--ao=pulse,pipewire,null", "--loop=inf", "--really-quiet",

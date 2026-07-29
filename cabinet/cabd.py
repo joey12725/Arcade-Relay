@@ -486,17 +486,41 @@ GREENLIGHT_BIN = os.environ.get("GREENLIGHT_BIN", "/fakes/greenlight")
 DESKTOP_HOST = os.environ.get("STREAM_DESKTOP_HOST", "desktop.lan")
 
 
+def stream_quality(target):
+    """Per-app quality from state, falling back to the defaults block.
+
+    Streams ride the LAN, not the tunnel, so these are deliberately
+    independent of the screensaver's 480p cap.
+    """
+    cfg = state["bundle"].get("library/streaming.yaml") or {}
+    q = dict(cfg.get("defaults") or {})
+    for e in (cfg.get("entries") or []):
+        if e.get("target") == target or e.get("name") == target:
+            q.update(e.get("quality") or {})
+            break
+    return q
+
+
 def _stream_session(path):
     """path: 'moonlight:<app>' or 'greenlight:<title>' (spec §5.8)."""
     kind, _, target = path.partition(":")
+    q = stream_quality(target)
+    res = str(q.get("resolution", "1920x1080"))
+    fps = str(q.get("fps", 60))
+    kbps = int(q.get("bitrate_kbps", 20000))
     if kind == "moonlight":
-        argv = [MOONLIGHT_BIN, "stream", DESKTOP_HOST, target]
+        # moonlight-qt: --resolution WxH --fps N --bitrate <kbps>
+        argv = [MOONLIGHT_BIN, "stream",
+                "--resolution", res, "--fps", fps, "--bitrate", str(kbps),
+                DESKTOP_HOST, target]
         title = f"^moonlight-fake {target}$"   # anchored: xdotool --name is regex
     elif kind == "greenlight":
-        argv = [GREENLIGHT_BIN, target]
+        argv = [GREENLIGHT_BIN, "--resolution", res, "--fps", fps,
+                "--bitrate", str(kbps), target]
         title = f"^greenlight-fake {target}$"
     else:
         raise ValueError(f"unknown stream kind {kind}")
+    log(f"stream {kind}:{target} at {res}@{fps} {kbps}kbps")
     return launcher.GameSession(path, argv=argv, title=title, probe=False,
                                 window_timeout=15)
 
@@ -769,6 +793,96 @@ def schedule_reboot():
                      stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
 
+def _human(n):
+    for unit in ("B", "KB", "MB", "GB", "TB"):
+        if n < 1024 or unit == "TB":
+            return f"{n:.0f}{unit}" if unit == "B" else f"{n:.1f}{unit}"
+        n /= 1024.0
+
+
+def health_report():
+    """Disk / uptime / load / temp / versions — the things that quietly go
+    wrong on a cabinet nobody logs into (ROM libraries fill drives)."""
+    out = {}
+    try:
+        st = os.statvfs("/")
+        total = st.f_blocks * st.f_frsize
+        free = st.f_bavail * st.f_frsize
+        out["disk_total_h"] = _human(total)
+        out["disk_free_h"] = _human(free)
+        out["disk_used_pct"] = round(100.0 * (total - free) / total, 1) if total else 0
+    except OSError:
+        pass
+    try:
+        with open("/proc/uptime") as f:
+            secs = float(f.read().split()[0])
+        d, rem = divmod(int(secs), 86400)
+        h, m = divmod(rem // 60, 60)
+        out["uptime_h"] = (f"{d}d {h}h {m}m" if d else f"{h}h {m}m")
+    except OSError:
+        pass
+    try:
+        out["load"] = [f"{v:.2f}" for v in os.getloadavg()]
+    except OSError:
+        pass
+    # thermal zone: present on real hardware, usually absent in a container
+    try:
+        import glob
+        for z in sorted(glob.glob("/sys/class/thermal/thermal_zone*/temp")):
+            with open(z) as f:
+                out["temp_c"] = round(int(f.read().strip()) / 1000.0, 1)
+            break
+    except (OSError, ValueError):
+        pass
+    clips = local_clips()
+    out["clips"] = len(clips)
+    try:
+        out["clips_h"] = _human(sum(os.path.getsize(c) for c in clips))
+    except OSError:
+        out["clips_h"] = "0B"
+    vers = []
+    for name, argv in (("cabd", None),
+                       ("mpv", ["mpv", "--version"]),
+                       ("retroarch", [os.environ.get("REAL_RETROARCH",
+                                                     "/usr/bin/retroarch"),
+                                      "--version"])):
+        if argv is None:
+            vers.append("cabd/1.0")
+            continue
+        try:
+            p = subprocess.run(argv, capture_output=True, text=True, timeout=5)
+            first = (p.stdout or p.stderr).splitlines()
+            if first:
+                vers.append(" ".join(first[0].split()[:2]))
+        except (OSError, subprocess.SubprocessError):
+            pass
+    out["versions"] = vers
+    out["ip"] = lifeline.checks(False, None).get("ip")
+    out["ssh_user"] = os.environ.get("CABD_SSH_USER", "arcade")
+    return out
+
+
+def clear_caches():
+    """Drop the offline clip cache (it refills from the server) and any
+    stale render output. Never touches /roms or /saves."""
+    freed = 0
+    for path in local_clips():
+        try:
+            freed += os.path.getsize(path)
+            os.unlink(path)
+        except OSError:
+            pass
+    for stale in ("/tmp/ss-playlist.m3u", "/tmp/lifeline.png"):
+        try:
+            freed += os.path.getsize(stale)
+            os.unlink(stale)
+        except OSError:
+            pass
+    log(f"caches cleared, freed {_human(freed)}")
+    return {"freed_bytes": freed, "freed_h": _human(freed),
+            "clips_remaining": len(local_clips())}
+
+
 NON_GAME_DIRS = {"art", "clips", "favorites", "streaming", "steam"}
 
 
@@ -1004,6 +1118,10 @@ async def handle_req(ws, data):
             result = {"rebooting": True}
         elif method == "frontend.restart":
             result = await frontend_restart()
+        elif method == "system.health":
+            result = await asyncio.to_thread(health_report)
+        elif method == "system.clear_cache":
+            result = await asyncio.to_thread(clear_caches)
         elif method == "library.list":
             result = {"systems": await asyncio.to_thread(library_list)}
         elif method == "system.logs":

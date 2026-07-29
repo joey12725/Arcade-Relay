@@ -68,8 +68,57 @@
     <div class="row"><label>Idle (s)</label>
       <input type="text" id="idle" size="6">
       <button onclick="api('POST','/screensaver/set',{idle_seconds:+document.getElementById('idle').value}).then(refresh)">Set</button></div>
+    <div class="row"><label>Aspect</label>
+      <select id="aspect" onchange="api('POST','/screensaver/set',{aspect:this.value}).then(refresh)">
+        <option value="crop">crop (fill 4:3, lose sides)</option>
+        <option value="bars">bars (whole frame, letterbox)</option>
+        <option value="stretch">stretch (fill, distorted)</option>
+      </select></div>
+    <div class="row"><label>Shuffle</label>
+      <select id="shuffle" onchange="api('POST','/screensaver/set',{shuffle:this.value}).then(refresh)">
+        <option value="in_order">in order</option>
+        <option value="random_episode">random episode (any series)</option>
+        <option value="even_series">even chance per series</option>
+        <option value="round_robin">round robin (all series before repeat)</option>
+        <option value="decay">avoid recently played series</option>
+      </select></div>
+    <div class="row"><label>Movies</label>
+      <label><input type="checkbox" id="moviesAsSeries"
+        onchange="api('POST','/screensaver/set',{movies_as_series:this.checked}).then(refresh)">
+        each movie counts as its own series</label></div>
+    <div class="row"><label>Skip (s)</label>
+      <input type="text" id="skipIntro" size="4" placeholder="intro">
+      <input type="text" id="skipOutro" size="4" placeholder="outro">
+      <button onclick="api('POST','/screensaver/set',{skip_intro_s:+val('skipIntro')||0,skip_outro_s:+val('skipOutro')||0}).then(refresh)">Set</button></div>
     <h2 style="margin-top:14px">Sources</h2>
+    <div class="row">
+      <input type="text" id="srcFilter" size="14" placeholder="filter shows/movies"
+             oninput="renderSources()">
+      <button onclick="setAllSources(true)">Enable all</button>
+      <button class="red" onclick="setAllSources(false)">Disable all</button>
+    </div>
     <ul id="sources"></ul>
+  </div>
+
+  <div class="card">
+    <h2>Streaming quality</h2>
+    <div class="row"><small>LAN streams — independent of the screensaver's
+      480p tunnel cap.</small></div>
+    <div id="streamApps"></div>
+  </div>
+
+  <div class="card red">
+    <h2>Cabinet health</h2>
+    <div id="health"><small>loading…</small></div>
+    <div class="row">
+      <button onclick="clearCache()">Clear cache</button>
+      <span id="cacheMsg"></span>
+    </div>
+    <div class="row">
+      <a id="sshLink" href="#" class="btn">Open SSH</a>
+      <button onclick="copySsh()">Copy ssh command</button>
+      <small id="sshHint"></small>
+    </div>
   </div>
 
   <div class="card red">
@@ -141,13 +190,27 @@ async function refresh() {
   document.getElementById('idle').value = ss.idle_seconds;
 
   api('GET', '/screensaver/sources').then(srcs => {
-    document.getElementById('sources').innerHTML = srcs.map(s =>
-      `<li><button class="${s.enabled ? '' : 'red'}"
-        onclick="api('POST','/screensaver/set-source',{id:'${s.id}',enabled:${!s.enabled}}).then(refresh)">
-        ${s.enabled ? '✓' : '✗'}</button>
-       ${s.thumb ? `<img src="${s.thumb}" alt="" class="thumb">` : ''}
-       ${s.name} <small>${s.type}</small></li>`).join('');
+    window._sources = srcs;
+    renderSources();
   }).catch(() => {});
+
+  api('GET', '/screensaver').then(ss2 => {
+    for (const [id, key] of [['aspect','aspect'], ['shuffle','shuffle']]) {
+      const el = document.getElementById(id);
+      if (el && ss2[key]) el.value = ss2[key];
+    }
+    const mv = document.getElementById('moviesAsSeries');
+    if (mv) mv.checked = ss2.movies_as_series !== false;
+    const si = document.getElementById('skipIntro');
+    const so = document.getElementById('skipOutro');
+    if (si && document.activeElement !== si) si.value = ss2.skip_intro_s ?? 0;
+    if (so && document.activeElement !== so) so.value = ss2.skip_outro_s ?? 0;
+  }).catch(() => {});
+
+  loadStreamApps();
+  loadHealth();
+
+
 
   api('GET', '/controls/presets').then(p => {
     document.getElementById('presets').textContent = p.presets.join(', ') || '(none)';
@@ -242,6 +305,94 @@ async function loadLibrary() {
          {id:'${g.id}'}).then(loadLibrary)">${g.favorite ? '★' : '☆'}</button>
      ${g.id}</li>`).join('') || '<li><small>no games</small></li>';
 }
+
+// ---- screensaver sources: filter + bulk enable/disable ----
+function renderSources() {
+  const q = (document.getElementById('srcFilter')?.value || '').toLowerCase();
+  const list = (window._sources || []).filter(s => !q || s.name.toLowerCase().includes(q));
+  document.getElementById('sources').innerHTML = list.map(s =>
+    `<li><button class="${s.enabled ? '' : 'red'}"
+      onclick="api('POST','/screensaver/set-source',{id:'${s.id}',enabled:${!s.enabled}}).then(refresh)">
+      ${s.enabled ? '✓' : '✗'}</button>
+     ${s.thumb ? `<img src="${s.thumb}" alt="" class="thumb">` : ''}
+     ${s.name} <small>${s.type}</small></li>`).join('')
+    || '<li><small>no matching sources</small></li>';
+}
+
+async function setAllSources(enabled) {
+  const q = (document.getElementById('srcFilter')?.value || '').toLowerCase();
+  const list = (window._sources || []).filter(s => !q || s.name.toLowerCase().includes(q));
+  for (const s of list) {
+    if (s.enabled !== enabled) {
+      await api('POST', '/screensaver/set-source', {id: s.id, enabled});
+    }
+  }
+  refresh();
+}
+
+// ---- streaming quality ----
+async function loadStreamApps() {
+  const r = await api('GET', '/stream/apps').catch(() => ({apps: []}));
+  document.getElementById('streamApps').innerHTML = (r.apps || []).map(a => {
+    const q = a.quality || {};
+    const id = a.name.replace(/[^a-z0-9]/gi, '');
+    return `<div class="row"><b>${a.name}</b> <small>${a.kind}</small><br>
+      <input type="text" id="res${id}" size="9" value="${q.resolution || ''}">
+      <input type="text" id="fps${id}" size="3" value="${q.fps || ''}">
+      <input type="text" id="bit${id}" size="6" value="${q.bitrate_kbps || ''}">
+      <button onclick="setQuality('${a.name.replace(/'/g, "\\'")}','${id}')">Set</button>
+      <br><small>resolution / fps / kbps</small></div>`;
+  }).join('') || '<small>no stream apps</small>';
+}
+
+async function setQuality(name, id) {
+  const body = {app: name};
+  const res = val('res' + id), fps = val('fps' + id), bit = val('bit' + id);
+  if (res) body.resolution = res;
+  if (fps) body.fps = +fps;
+  if (bit) body.bitrate_kbps = +bit;
+  await api('POST', '/stream/set-quality', body).catch(e => alert('rejected: ' + e));
+  loadStreamApps();
+}
+
+// ---- cabinet health + cache + ssh ----
+async function loadHealth() {
+  const h = await api('GET', '/cab/health').catch(() => null);
+  const el = document.getElementById('health');
+  if (!h) { el.innerHTML = '<small>cabinet offline</small>'; return; }
+  const pct = h.disk_used_pct ?? 0;
+  el.innerHTML = `
+    <div class="row"><label>Disk</label>
+      <b style="color:${pct > 90 ? 'var(--red)' : 'inherit'}">${pct}% used</b>
+      <small>${h.disk_free_h || ''} free of ${h.disk_total_h || ''}</small></div>
+    <div class="row"><label>Uptime</label>${h.uptime_h || '?'}</div>
+    <div class="row"><label>Load</label>${(h.load || []).join('  ')}</div>
+    <div class="row"><label>Temp</label>${h.temp_c != null ? h.temp_c + ' °C' : 'n/a'}</div>
+    <div class="row"><label>Clip cache</label>${h.clips || 0} file(s), ${h.clips_h || '0B'}</div>
+    <div class="row"><small>${(h.versions || []).join(' · ')}</small></div>`;
+  const link = document.getElementById('sshLink');
+  if (h.ssh_user && h.ip) {
+    link.href = `ssh://${h.ssh_user}@${h.ip}`;
+    window._sshCmd = `ssh ${h.ssh_user}@${h.ip}`;
+    document.getElementById('sshHint').textContent =
+      'opens your terminal on macOS; Windows needs an ssh:// handler — use Copy';
+  }
+}
+
+async function clearCache() {
+  const msg = document.getElementById('cacheMsg');
+  msg.textContent = 'clearing…';
+  const r = await api('POST', '/cab/clear-cache').catch(() => null);
+  msg.textContent = r ? `freed ${r.freed_h || '0B'}` : 'failed';
+  loadHealth();
+}
+
+function copySsh() {
+  const cmd = window._sshCmd || '';
+  navigator.clipboard?.writeText(cmd);
+  document.getElementById('sshHint').textContent = 'copied: ' + cmd;
+}
+
 function shot() { document.getElementById('shot').src = '/cab/screenshot?' + Date.now(); }
 refresh(); shot(); setInterval(refresh, 5000);
 </script>

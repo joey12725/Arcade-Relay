@@ -105,5 +105,8 @@ test-provision:
 test-p8:
 	bash sim/scripts/test-p8.sh
 
+test-stream-quality:
+	bash sim/scripts/test-stream-quality.sh
+
 test-webui-live:
 	bash sim/scripts/test-webui-live.sh

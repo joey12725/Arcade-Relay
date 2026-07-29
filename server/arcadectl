@@ -137,6 +137,13 @@ def main():
     stsub2.add_parser("apps")
     sl = stsub2.add_parser("launch")
     sl.add_argument("app", help="app name (case-insensitive substring)")
+    sq = stsub2.add_parser("set-quality")
+    sq.add_argument("app", nargs="?", default="defaults",
+                    help="app name, or 'defaults' for every app")
+    sq.add_argument("--resolution", help="e.g. 1920x1080")
+    sq.add_argument("--fps", type=int)
+    sq.add_argument("--bitrate", type=int, dest="bitrate_kbps",
+                    help="kbps (LAN stream, not the tunnel)")
 
     cab = sub.add_parser("cab")
     cabsub = cab.add_subparsers(dest="cabcmd", required=True)
@@ -208,6 +215,13 @@ def main():
     if args.cmd == "stream":
         if args.streamcmd == "apps":
             res = call("GET", "/stream/apps")
+        elif args.streamcmd == "set-quality":
+            body = {"app": args.app}
+            for k in ("resolution", "fps", "bitrate_kbps"):
+                v = getattr(args, k, None)
+                if v is not None:
+                    body[k] = v
+            res = call("POST", "/stream/set-quality", body)
         else:
             res = call("POST", "/stream/launch", {"app": args.app})
         print(json.dumps(res))

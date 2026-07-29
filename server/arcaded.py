@@ -15,6 +15,7 @@ import json
 import os
 import pathlib
 import random
+import re
 import subprocess
 import time
 import uuid
@@ -25,6 +26,7 @@ from aiohttp import WSMsgType, web
 
 import plex as jellyfin   # Plex adapter, same 4-function contract
 import romdl
+import shuffle
 
 RPC_TIMEOUT = float(os.environ.get("ARCADED_RPC_TIMEOUT", "15"))
 MISSED_BEATS_OFFLINE = 3  # spec §5.2: offline after 3 missed heartbeats
@@ -349,6 +351,21 @@ async def cab_input(request):
     return web.json_response(res["result"])
 
 
+async def cab_health(request):
+    res = await hub.rpc("system.health", {})
+    if not res.get("ok"):
+        return web.json_response(res, status=500)
+    return web.json_response(res["result"])
+
+
+async def cab_clear_cache(request):
+    res = await hub.rpc("system.clear_cache", {})
+    if not res.get("ok"):
+        return web.json_response(res, status=500)
+    hub.log_event(f"cache cleared: {res['result'].get('freed_h')}")
+    return web.json_response(res["result"])
+
+
 async def cab_reboot(request):
     res = await hub.rpc("system.reboot", {})
     if not res.get("ok"):
@@ -517,6 +534,7 @@ async def state_rollback(request):
     return web.json_response({"rolled_back_to": commit})
 
 
+screensaver_aspect_modes = ("crop", "bars", "stretch")
 SCREENSAVER_REL = "screensaver.yaml"
 
 
@@ -527,14 +545,30 @@ def load_screensaver():
     d.setdefault("mode", "shuffle_episodes")
     d.setdefault("sources", [])
     d.setdefault("fallback", "local_clips")
+    # 4:3 panel handling for 16:9 source (crop keeps today's behavior)
+    d.setdefault("aspect", "crop")
+    # trim titles/credits off each item
+    d.setdefault("skip_intro_s", 0)
+    d.setdefault("skip_outro_s", 0)
+    # queue ordering (server/shuffle.py) — `mode` above is the legacy
+    # two-value key the spec named; `shuffle` is the richer policy set and
+    # wins when both are present
+    d.setdefault("shuffle", shuffle.DEFAULT_POLICY)
+    d.setdefault("movies_as_series", True)
     return d
+
+
+def source_id(s):
+    """Sources were keyed by `jellyfin_id` before the Plex migration; accept
+    either so an existing state repo keeps working."""
+    return s.get("plex_id") or s.get("jellyfin_id")
 
 
 async def screensaver_sources(request):
     """Every series/movie in Jellyfin, merged with enabled flags (SCR-4)."""
     lib = await jellyfin.items()
     cfg = load_screensaver()
-    enabled = {s["jellyfin_id"]: s.get("enabled", False)
+    enabled = {source_id(s): s.get("enabled", False)
                for s in cfg["sources"]}
     return web.json_response([
         {**i, "enabled": enabled.get(i["id"], False)} for i in lib])
@@ -556,11 +590,11 @@ async def screensaver_set_source(request):
     sid, enable = body["id"], bool(body["enabled"])
     cfg = load_screensaver()
     for s in cfg["sources"]:
-        if s["jellyfin_id"] == sid:
+        if source_id(s) == sid:
             s["enabled"] = enable
             break
     else:
-        cfg["sources"].append({"jellyfin_id": sid, "enabled": enable})
+        cfg["sources"].append({"plex_id": sid, "enabled": enable})
     _write_yaml(SCREENSAVER_REL, cfg)
     git_commit(f"arcadectl: screensaver {'enable' if enable else 'disable'}-source {sid}")
     push_state_soon()
@@ -573,45 +607,85 @@ async def screensaver_playlist(request):
     The cabinet reaches these through the same tunnel path as everything
     else (SCR-1)."""
     cfg = load_screensaver()
-    out = []
-    for s in cfg["sources"]:
-        if not s.get("enabled"):
+    lib = {i["id"]: i for i in (await jellyfin.items())}
+    entries = []
+    for si, src in enumerate(cfg["sources"]):
+        if not src.get("enabled"):
             continue
-        for vid in await jellyfin.episodes_of(s["jellyfin_id"]):
-            out.append(f"/media/{vid}")
-    # spec §5.5: mode shuffle_episodes (default) | continue_series. Shuffle
-    # here rather than on the cabinet so every fetch is a fresh random walk
-    # (mid-library selection is explicitly fine); continue_series keeps
-    # Jellyfin's episode order.
-    if cfg.get("mode", "shuffle_episodes") == "shuffle_episodes":
-        random.shuffle(out)
+        sid = source_id(src)
+        meta = lib.get(sid) or {}
+        for idx, vid in enumerate(await jellyfin.episodes_of(sid)):
+            entries.append({"id": f"/media/{vid}", "source_id": sid,
+                            "source_type": meta.get("type", "Series"),
+                            "index": idx, "source_index": si})
+    # Ordering policy (server/shuffle.py). The legacy `mode` key maps onto
+    # the new policy set so an old state repo keeps its behavior.
+    policy = cfg.get("shuffle") or shuffle.DEFAULT_POLICY
+    if cfg.get("mode") == "continue_series" and "shuffle" not in cfg:
+        policy = "in_order"
+    out = shuffle.order(entries, policy,
+                        movies_as_series=bool(cfg.get("movies_as_series", True)))
     return web.json_response({"playlist": out,
                               "brightness": cfg["brightness"],
                               "mode": cfg["mode"],
+                              "shuffle": policy,
+                              "movies_as_series": bool(cfg.get("movies_as_series", True)),
+                              "aspect": cfg.get("aspect", "crop"),
+                              "skip_intro_s": int(cfg.get("skip_intro_s", 0)),
+                              "skip_outro_s": int(cfg.get("skip_outro_s", 0)),
                               "fallback": cfg.get("fallback", "local_clips")})
 
 
+FFMPEG = os.environ.get("FFMPEG_BIN", "ffmpeg")
+MEDIA_MAX_HEIGHT = int(os.environ.get("SCREENSAVER_MAX_HEIGHT", "480"))
+MEDIA_BITRATE_K = int(os.environ.get("SCREENSAVER_VIDEO_BITRATE", "1500000")) // 1000
+
+
 async def media_proxy(request):
-    """Reverse-proxy a transcoded Plex stream so media rides the
-    cabinet<->server link (Cloudflare tunnel in prod, toxiproxy in sim)."""
+    """Serve a 480p/1.5Mbps transcode of a library item to the cabinet.
+
+    arcaded owns this transcode rather than asking Plex for one. Two reasons:
+    Plex's universal transcoder needs a per-session `decision` handshake AND
+    downloads codecs from codecs.plex.tv on first use, so a server without
+    internet egress fails at the sub-playlist with a 500; and doing it here
+    means the tunnel bandwidth cap (the whole point of SCR-1's 480p rule) is
+    enforced by us instead of negotiated with someone else's server.
+
+    Output is fragmented matroska so it streams without a seekable output —
+    mpv plays it straight from the pipe.
+    """
     video_id = request.match_info["video_id"]
-    path = await jellyfin.stream_path(video_id)
+    src = jellyfin.PLEX_URL + await jellyfin.part_path(video_id)
+    argv = [
+        FFMPEG, "-hide_banner", "-loglevel", "error",
+        "-i", src,
+        "-vf", f"scale=-2:{MEDIA_MAX_HEIGHT}",
+        "-c:v", "libx264", "-preset", "veryfast",
+        "-b:v", f"{MEDIA_BITRATE_K}k", "-maxrate", f"{MEDIA_BITRATE_K}k",
+        "-bufsize", f"{MEDIA_BITRATE_K * 2}k",
+        "-c:a", "aac", "-b:a", "96k",
+        "-f", "matroska",
+        "-live", "1",
+        "pipe:1",
+    ]
+    proc = await asyncio.create_subprocess_exec(
+        *argv, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL)
     resp = web.StreamResponse()
-    # total=None is load-bearing: the default 300s total timeout would kill
-    # any stream longer than 5 minutes mid-play (Plex transcodes are
-    # throttled to near-realtime)
-    tmo = aiohttp.ClientTimeout(total=None, sock_connect=30, sock_read=120)
-    fwd_headers = {}
-    if "Range" in request.headers:
-        fwd_headers["Range"] = request.headers["Range"]
-    async with aiohttp.ClientSession(timeout=tmo) as sess:
-        async with sess.get(jellyfin.JF_URL + path, headers=fwd_headers) as up:
-            resp.set_status(up.status)
-            if "Content-Type" in up.headers:
-                resp.headers["Content-Type"] = up.headers["Content-Type"]
-            await resp.prepare(request)
-            async for chunk in up.content.iter_chunked(64 * 1024):
-                await resp.write(chunk)
+    resp.headers["Content-Type"] = "video/x-matroska"
+    await resp.prepare(request)
+    try:
+        while True:
+            chunk = await proc.stdout.read(64 * 1024)
+            if not chunk:
+                break
+            await resp.write(chunk)
+    except (ConnectionResetError, asyncio.CancelledError):
+        pass          # cabinet hung up (playlist advanced) — normal
+    finally:
+        # never leak an ffmpeg: the screensaver advances constantly
+        if proc.returncode is None:
+            proc.kill()
+            await proc.wait()
     await resp.write_eof()
     return resp
 
@@ -626,13 +700,25 @@ async def screensaver_set(request):
     # reject values nothing implements: committing `fallback: dimclock`
     # would look like it worked and silently do nothing at idle
     for k, allowed in (("mode", ("shuffle_episodes", "continue_series")),
-                       ("fallback", ("local_clips", "dim_clock", "off"))):
+                       ("fallback", ("local_clips", "dim_clock", "off")),
+                       ("aspect", screensaver_aspect_modes),
+                       ("shuffle", shuffle.POLICIES)):
         if k in body and body[k] not in allowed:
             return web.json_response(
                 {"error": f"{k} must be one of {', '.join(allowed)}"},
                 status=400)
+    for k in ("skip_intro_s", "skip_outro_s"):
+        if k in body:
+            try:
+                if int(body[k]) < 0:
+                    raise ValueError
+            except (TypeError, ValueError):
+                return web.json_response(
+                    {"error": f"{k} must be a non-negative integer"},
+                    status=400)
     changes = []
-    for k in ("brightness", "idle_seconds", "mode", "fallback"):
+    for k in ("brightness", "idle_seconds", "mode", "fallback", "aspect",
+              "shuffle", "movies_as_series", "skip_intro_s", "skip_outro_s"):
         if k in body:
             cfg[k] = body[k]
             changes.append(f"{k}={body[k]}")
@@ -903,8 +989,72 @@ def load_stream_apps():
     ]
 
 
+STREAMING_REL = "library/streaming.yaml"
+STREAM_DEFAULTS = {"resolution": "1920x1080", "fps": 60, "bitrate_kbps": 20000}
+
+
+def load_streaming_cfg():
+    d = _read_yaml(STREAMING_REL)
+    d.setdefault("defaults", dict(STREAM_DEFAULTS))
+    d.setdefault("entries", load_stream_apps())
+    return d
+
+
 async def stream_apps(request):
-    return web.json_response({"apps": load_stream_apps()})
+    """Apps with their EFFECTIVE quality (defaults merged with overrides),
+    so the UI shows what will actually be used rather than what was typed."""
+    cfg = load_streaming_cfg()
+    out = []
+    for e in cfg["entries"]:
+        q = dict(cfg.get("defaults") or {})
+        q.update(e.get("quality") or {})
+        out.append({**e, "quality": q})
+    return web.json_response({"apps": out, "defaults": cfg.get("defaults")})
+
+
+async def stream_set_quality(request):
+    body = await request.json()
+    name = body.get("app")
+    cfg = load_streaming_cfg()
+    fields = {}
+    if "resolution" in body:
+        r = str(body["resolution"])
+        if not re.fullmatch(r"\d{3,4}x\d{3,4}", r):
+            return web.json_response(
+                {"error": "resolution must look like 1920x1080"}, status=400)
+        fields["resolution"] = r
+    for k in ("fps", "bitrate_kbps"):
+        if k in body:
+            try:
+                v = int(body[k])
+                if v <= 0:
+                    raise ValueError
+            except (TypeError, ValueError):
+                return web.json_response(
+                    {"error": f"{k} must be a positive integer"}, status=400)
+            fields[k] = v
+    if not fields:
+        return web.json_response({"error": "nothing to change"}, status=400)
+
+    if not name or name == "defaults":
+        cfg.setdefault("defaults", {}).update(fields)
+        label = "defaults"
+    else:
+        for e in cfg["entries"]:
+            if name.lower() in (str(e.get("name", "")).lower(),
+                                str(e.get("target", "")).lower()):
+                e.setdefault("quality", {}).update(fields)
+                label = e.get("name", name)
+                break
+        else:
+            return web.json_response({"error": f"no stream app {name!r}"},
+                                     status=404)
+    _write_yaml(STREAMING_REL, cfg)
+    git_commit("arcadectl: stream set-quality " + label + " " +
+               " ".join(f"{k}={v}" for k, v in fields.items()))
+    push_state_soon()
+    hub.log_event(f"stream quality {label}: {fields}")
+    return web.json_response(cfg)
 
 
 async def stream_launch(request):
@@ -1020,6 +1170,8 @@ app.add_routes([
     web.post("/cab/exec", cab_exec),
     web.get("/cab/screenshot", cab_screenshot),
     web.post("/cab/input", cab_input),
+    web.get("/cab/health", cab_health),
+    web.post("/cab/clear-cache", cab_clear_cache),
     web.post("/cab/reboot", cab_reboot),
     web.post("/cab/restart-frontend", cab_restart_frontend),
     web.post("/cab/remote-view", cab_remote_view),
@@ -1033,6 +1185,7 @@ app.add_routes([
     web.get("/games/list", games_list),
     web.post("/games/kill", games_kill),
     web.get("/stream/apps", stream_apps),
+    web.post("/stream/set-quality", stream_set_quality),
     web.post("/stream/launch", stream_launch),
     web.get("/cab/logs", cab_logs),
     web.get("/controls/diff", controls_diff),

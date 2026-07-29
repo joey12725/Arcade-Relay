@@ -27,6 +27,10 @@ import xml.etree.ElementTree as ET
 PLEX_URL = os.environ.get("PLEX_URL", "http://plex:32400")
 PLEX_TOKEN = os.environ.get("PLEX_TOKEN") or None
 PLEX_MEDIA_DIR = os.environ.get("PLEX_MEDIA_DIR", "/media")
+# On an unclaimed/local server, tell Plex to accept our subnet without a
+# token. Set PLEX_ALLOW_LAN=0 if your Plex is claimed and you use PLEX_TOKEN.
+ALLOW_LAN = os.environ.get("PLEX_ALLOW_LAN", "1") != "0"
+ALLOWED_NETWORKS = os.environ.get("PLEX_ALLOWED_NETWORKS", "0.0.0.0/0")
 MAX_HEIGHT = int(os.environ.get("SCREENSAVER_MAX_HEIGHT", "480"))
 MAX_WIDTH = int(os.environ.get("SCREENSAVER_MAX_WIDTH", "854"))
 VIDEO_BITRATE = int(os.environ.get("SCREENSAVER_VIDEO_BITRATE", "1500000"))
@@ -81,6 +85,16 @@ def _sections():
 
 def _bootstrap_sync():
     """Create Shows/Movies sections if absent. Safe to re-run."""
+    # Let clients on other subnets (arcaded is not on Plex's own network in
+    # the sim, and may not be in prod either) use the API without a token.
+    # Set through Plex's own prefs API — hand-editing Preferences.xml
+    # corrupts it and Plex then refuses to start.
+    if not PLEX_TOKEN and ALLOW_LAN:
+        try:
+            _req(_url("/:/prefs", allowedNetworks=ALLOWED_NETWORKS),
+                 method="PUT")
+        except urllib.error.HTTPError:
+            pass
     have = _sections()
     wanted = [
         ("show", "Shows", "tv.plex.agents.series", "Plex TV Series", "Shows"),
@@ -189,13 +203,47 @@ async def image(item_id, max_height=180):
     return await asyncio.to_thread(_fetch)
 
 
-async def stream_path(video_id):
-    """480p-capped HLS transcode path (SCR-1).
+def _part_path_sync(video_id):
+    """The on-disk file behind a video, as a Plex URL path.
 
-    Plex's transcoder takes the cap directly as query params, so unlike the
-    Jellyfin adapter there is no PlaybackInfo negotiation and no per-video
-    session cache to leak.
+    Part ids are per-file and change on rescan, so they must be resolved
+    from metadata every time rather than cached or guessed.
     """
+    meta = _req(_url(f"/library/metadata/{video_id}"))
+    for video in (meta or []):
+        for media in video:
+            if media.tag != "Media":
+                continue
+            for part in media:
+                if part.tag == "Part" and part.get("key"):
+                    return part.get("key")
+    return None
+
+
+async def part_path(video_id):
+    """Direct-play path for a video (no Plex transcode involved).
+
+    We deliberately do NOT use /video/:/transcode/universal/*: it requires a
+    per-session `decision` handshake, and even with that it fails on a
+    server without internet egress because Plex downloads codecs from
+    codecs.plex.tv on first transcode. arcaded runs its own ffmpeg instead
+    (see media_proxy), which both removes that dependency and puts the
+    tunnel bandwidth cap under our control.
+    """
+    await ensure_setup()
+    p = await asyncio.to_thread(_part_path_sync, video_id)
+    if not p:
+        raise RuntimeError(f"no playable part for video {video_id}")
+    return _url(p)
+
+
+async def stream_path(video_id):
+    """Back-compat alias: callers ask for a path, we hand back the part."""
+    return await part_path(video_id)
+
+
+async def _unused_transcode_path(video_id):
+    """Kept for reference: the Plex-side transcode we cannot rely on."""
     await ensure_setup()
     # A distinct session per video: reusing one session id makes Plex tear
     # down the previous transcode when the playlist advances.
