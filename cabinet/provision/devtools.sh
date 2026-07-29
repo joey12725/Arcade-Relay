@@ -57,27 +57,94 @@ if command -v npm >/dev/null; then
     as_user npm config set prefix "$HOME_DIR/.npm-global" || note_fail "npm prefix"
     if ! grep -q ".npm-global/bin" "$HOME_DIR/.profile" 2>/dev/null; then
         # shellcheck disable=SC2016  # $HOME must stay literal in .profile
-        echo 'export PATH="$HOME/.npm-global/bin:$PATH"' >> "$HOME_DIR/.profile"
+        echo 'export PATH="$HOME/.local/bin:$HOME/.npm-global/bin:$PATH"' \
+            >> "$HOME_DIR/.profile"
         chown "$ARCADE_USER:$ARCADE_USER" "$HOME_DIR/.profile"
     fi
 fi
 
-# Agent CLIs. Package names are data so this list is trivial to amend —
-# add a line, re-run this script.
-step "agent CLIs"
-NPM_TOOLS=(
-    "@anthropic-ai/claude-code"     # Claude Code
-    "@openai/codex"                 # Codex CLI
-)
-for pkg in "${NPM_TOOLS[@]}"; do
-    if command -v npm >/dev/null; then
-        echo "-- $pkg"
-        as_user env PATH="$HOME_DIR/.npm-global/bin:$PATH" \
-            npm install -g "$pkg" || note_fail "$pkg"
+# T3 Code requires node ^22.16, ^23.11, or >=24.10 (docs/t3-setup.md §3).
+# Assert it rather than assume: a too-old node fails at T3 pairing time,
+# which is a miserable place to discover it.
+if command -v node >/dev/null; then
+    NODE_V=$(node -v | sed 's/^v//')
+    # oldest-first sort: if 24.10.0 sorts first, node is >= the minimum
+    OLDEST=$(printf '%s\n24.10.0\n' "$NODE_V" | sort -V | head -1)
+    if [ "$OLDEST" = "24.10.0" ]; then
+        echo "node $NODE_V OK for T3 (needs >=24.10)"
     else
-        note_fail "$pkg (no npm)"
+        note_fail "node $NODE_V is below T3's 24.10 minimum"
     fi
-done
+fi
+
+step "Claude Code (native Linux build)"
+# The native installer is the current supported route (docs/t3-setup.md §4);
+# the npm package is not the same build.
+if [ -x "$HOME_DIR/.local/bin/claude" ] || command -v claude >/dev/null; then
+    echo "claude already installed"
+elif curl -fsSL https://claude.ai/install.sh -o /tmp/claude-install.sh; then
+    as_user bash /tmp/claude-install.sh || note_fail "claude code"
+else
+    note_fail "claude code (installer unreachable)"
+fi
+
+step "Codex CLI"
+if [ -x "$HOME_DIR/.npm-global/bin/codex" ] || command -v codex >/dev/null; then
+    echo "codex already installed"
+elif command -v npm >/dev/null; then
+    as_user env PATH="$HOME_DIR/.npm-global/bin:$PATH" \
+        npm install -g @openai/codex || note_fail "codex"
+else
+    note_fail "codex (no npm)"
+fi
+
+step "T3 Code (remote dev server)"
+# T3 is run via `npx t3@latest` rather than installed, so the service
+# always resolves the current release (docs/t3-setup.md §13). We install
+# the systemd USER unit here; `tailscale up` and T3 pairing are the two
+# interactive steps that must happen on the cabinet (see HARDWARE-TODO).
+if command -v npx >/dev/null; then
+    install -d -o "$ARCADE_USER" -g "$ARCADE_USER" \
+        "$HOME_DIR/.config/systemd/user" "$HOME_DIR/dev"
+    NPX_PATH=$(command -v npx)
+    cat > "$HOME_DIR/.config/systemd/user/t3-code.service" <<EOF
+[Unit]
+Description=T3 Code remote development server
+After=network-online.target tailscaled.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=%h/dev
+ExecStart=${NPX_PATH} --yes t3@latest serve --tailscale-serve
+Restart=on-failure
+RestartSec=5
+Environment=PATH=%h/.local/bin:%h/.npm-global/bin:/usr/local/bin:/usr/bin:/bin
+
+[Install]
+WantedBy=default.target
+EOF
+    chown "$ARCADE_USER:$ARCADE_USER" \
+        "$HOME_DIR/.config/systemd/user/t3-code.service"
+    # enable without starting: T3 needs Tailscale up + pairing first, and a
+    # crash-looping unit before that is just noise
+    install -d -o "$ARCADE_USER" -g "$ARCADE_USER" \
+        "$HOME_DIR/.config/systemd/user/default.target.wants"
+    ln -sf ../t3-code.service \
+        "$HOME_DIR/.config/systemd/user/default.target.wants/t3-code.service"
+    chown -h "$ARCADE_USER:$ARCADE_USER" \
+        "$HOME_DIR/.config/systemd/user/default.target.wants/t3-code.service"
+    echo "t3-code.service installed (starts once tailscale is up)"
+else
+    note_fail "t3-code service (no npx)"
+fi
+
+step "keep the cabinet awake (T3 needs it reachable)"
+# docs/t3-setup.md §12 — the DISPLAY may blank; the machine must not sleep.
+systemctl mask sleep.target suspend.target hibernate.target \
+    hybrid-sleep.target >/dev/null 2>&1 \
+    && echo "sleep/suspend/hibernate masked" \
+    || echo "could not mask sleep targets (no systemd here?)"
 
 step "Tailscale"
 if command -v tailscale >/dev/null; then
@@ -90,15 +157,38 @@ fi
 # NB: `tailscale up` is interactive (browser auth) — do it once via remote
 # view, then set LIFELINE_TRANSPORT_CMD="tailscale up" in cabd.service so
 # lifeline can bring the fallback transport up by itself.
+# T3 also needs the arcade user to hold tailscale operator rights:
+#   sudo tailscale set --operator=arcade
+if command -v tailscale >/dev/null; then
+    tailscale set --operator="$ARCADE_USER" >/dev/null 2>&1 \
+        && echo "tailscale operator = $ARCADE_USER" \
+        || echo "set tailscale operator after 'tailscale up'"
+fi
+
+# linger so the T3 user service (and cabd) run with nobody logged in
+loginctl enable-linger "$ARCADE_USER" >/dev/null 2>&1 || true
 
 step "summary"
-for t in git node npm claude codex tailscale rg jq tmux; do
-    if command -v "$t" >/dev/null 2>&1 || \
-       [ -x "$HOME_DIR/.npm-global/bin/$t" ]; then
-        v=$({ command -v "$t" >/dev/null 2>&1 && "$t" --version 2>/dev/null; } | head -1)
+# Tools land in three places: system PATH, the user's npm prefix, and
+# ~/.local/bin (the native Claude installer). Check all three, and treat a
+# tool that is missing after its install step as a failure.
+find_tool() {
+    for c in "$HOME_DIR/.local/bin/$1" "$HOME_DIR/.npm-global/bin/$1"; do
+        [ -x "$c" ] && { echo "$c"; return 0; }
+    done
+    command -v "$1" 2>/dev/null
+}
+for t in git node npm npx claude codex tailscale rg jq tmux; do
+    bin=$(find_tool "$t")
+    if [ -n "$bin" ]; then
+        v=$("$bin" --version 2>/dev/null | head -1)
         printf '  %-12s %s\n' "$t" "${v:-installed}"
     else
         printf '  %-12s MISSING\n' "$t"
+        case "$t" in
+            claude|codex|node|npx|tailscale)
+                note_fail "$t missing after install" ;;
+        esac
     fi
 done
 

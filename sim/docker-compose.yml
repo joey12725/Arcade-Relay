@@ -61,10 +61,17 @@ services:
       - ./.data/plex/transcode:/transcode
       - ./media:/media:ro
     healthcheck:
-      test: ["CMD-SHELL", "curl -fsS http://localhost:32400/identity | grep -q machineIdentifier"]
-      interval: 10s
+      # /identity alone is NOT readiness: it returns 200 ~7s before PMS will
+      # accept POST /library/sections, which until then fails 400 "the server
+      # is still starting up. Please retry later" -- that raced the server's
+      # bootstrap and left the sim with an empty library. The second probe is
+      # a deliberately INVALID section create (type=__probe__): it can never
+      # create anything, but PMS emits the "still starting up" text before it
+      # validates params, so its absence is an exact ready signal.
+      test: ["CMD-SHELL", "curl -fsS http://localhost:32400/identity | grep -q machineIdentifier && ! curl -sS -X POST 'http://localhost:32400/library/sections?name=_probe&type=__probe__&location=/tmp' | grep -q 'still starting up'"]
+      interval: 5s
       timeout: 5s
-      retries: 30
+      retries: 40
       start_period: 40s
 
   cabinet:

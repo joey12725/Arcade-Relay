@@ -223,3 +223,22 @@ overrides live in `state/controllers/games.yaml` and are merged over the
 system layer into the remap file rendered before each launch. The web UI's
 remapper does this interactively: pick scope, press the physical button, click
 the logical target.
+
+---
+
+*Appendix: agentic development on the cabinet.* `cabinet/provision/devtools.sh`
+(run automatically by install.sh) installs git + build tools, Node 24, Claude
+Code (native build), Codex CLI, Tailscale, ripgrep/jq/tmux, writes the
+`t3-code.service` user unit, enables lingering, and masks sleep/suspend so the
+cabinet stays reachable. It never fails cabinet provisioning: any tool that
+can't install is reported and skipped.
+
+The interactive half — `tailscale up`, `claude auth login`,
+`codex login --device-auth`, and T3 pairing — must happen once on the cabinet.
+`docs/t3-setup.md` is the full guide; HARDWARE-TODO.md has the ordered
+checklist. Two things that bite: the agents must be authenticated as the
+**same Linux user** that runs T3, and T3 needs Node **≥24.10** (devtools
+asserts this and fails loudly if the installed Node is older).
+
+Keep T3 on Tailscale — do not port-forward 3773. Keep ROMs/emulator config
+and dev repositories in separate directories (`/roms` vs `~/dev`).

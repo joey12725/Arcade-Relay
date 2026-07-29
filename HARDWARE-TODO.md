@@ -64,5 +64,21 @@ Things that can only be verified on real hardware. Not faked green in the sim.
   `tailscale up` (browser auth, do it via remote view), then set
   LIFELINE_TRANSPORT_CMD="tailscale up" in cabd.service so lifeline can
   bring the fallback transport up by itself.
-- [ ] "T3 Code" was requested for the cabinet toolchain but is ambiguous —
-  devtools.sh has a NPM_TOOLS array; add the package name there and re-run.
+- [ ] T3 Code interactive bring-up (docs/t3-setup.md is the owner's guide;
+  devtools.sh does everything non-interactive). On the cabinet, as the
+  arcade user, in this order:
+    1. `sudo tailscale up` (browser auth on any device on the tailnet)
+    2. `sudo tailscale set --operator=arcade` if T3 reports it lacks
+       permission to configure Tailscale Serve
+    3. `claude auth login` and `codex login --device-auth` — MUST be the
+       same Linux user that runs T3, or the provider picker comes up empty
+    4. `npx --yes t3@latest serve --tailscale-serve` once interactively to
+       get the pairing URL/QR, pair the Mac/Windows/phone, then
+       `systemctl --user start t3-code` for the persistent service
+    5. `npx --yes t3@latest project` from the cabinet to add repos under
+       ~/dev (remote project creation in the GUI is limited)
+  Verify both providers appear in the T3 picker; if one is missing it is
+  almost always a PATH/user mismatch (docs/t3-setup.md §10 diagnostic).
+- [ ] Confirm sleep really is masked on the real box (`systemctl status
+  sleep.target`) — devtools masks it, but a desktop environment can
+  re-enable inhibitors.
