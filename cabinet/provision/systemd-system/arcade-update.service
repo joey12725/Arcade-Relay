@@ -1,0 +1,14 @@
+# Pull the latest cabinet code from GitHub and redeploy (see arcade-update.sh).
+# System unit — it re-runs install.sh, which needs root.
+[Unit]
+Description=Update arcade cabinet code from GitHub
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+EnvironmentFile=-/etc/arcade/provision.env
+ExecStart=/opt/arcade/repo/cabinet/provision/arcade-update.sh
+# A failed update must never wedge the arcade; the timer just tries again.
+SuccessExitStatus=0 1
+TimeoutStartSec=30min

@@ -61,6 +61,39 @@ for unit in cabd pegasus steam; do
 done
 loginctl enable-linger "$ARCADE_USER"
 
+# --- unattended code updates from GitHub ---
+# Only wired up when this checkout is the cabinet's own repo at
+# /opt/arcade/repo (the image build puts it there); provisioning from a
+# throwaway clone must not leave a timer pointing at a path that vanishes.
+if [ "$SRC_DIR" = /opt/arcade/repo/cabinet ]; then
+    install -d /etc/arcade
+    # install.sh's own inputs, so the timer can re-provision unattended.
+    # The branch to track is sticky: read back from the existing file when it
+    # is not being set explicitly, so a re-provision never loses it.
+    if [ -z "${ARCADE_UPDATE_BRANCH:-}" ] && [ -r /etc/arcade/provision.env ]; then
+        ARCADE_UPDATE_BRANCH=$(sed -n 's/^ARCADE_UPDATE_BRANCH=//p' \
+            /etc/arcade/provision.env)
+    fi
+    cat > /etc/arcade/provision.env <<EOF
+SERVER_HOST=$SERVER_HOST
+ARCADE_USER=$ARCADE_USER
+ARCADE_UPDATE_BRANCH=${ARCADE_UPDATE_BRANCH:-}
+EOF
+    chmod 0644 /etc/arcade/provision.env
+    for unit in arcade-update.service arcade-update.timer; do
+        install -m 0644 "$SRC_DIR/provision/systemd-system/$unit" \
+            "/etc/systemd/system/$unit"
+    done
+    systemctl daemon-reload 2>/dev/null || true
+    # `systemctl enable` works offline (it only writes symlinks), but fall
+    # back to writing the symlink by hand rather than fail provisioning.
+    if ! systemctl enable arcade-update.timer 2>/dev/null; then
+        install -d /etc/systemd/system/timers.target.wants
+        ln -sf ../arcade-update.timer \
+            /etc/systemd/system/timers.target.wants/arcade-update.timer
+    fi
+fi
+
 # --- stable controller identities across reboots (spec §5.5) ---
 install -D -m 0644 "$SRC_DIR/provision/99-arcade-controllers.rules" \
     /etc/udev/rules.d/99-arcade-controllers.rules

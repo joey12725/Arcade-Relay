@@ -1,0 +1,14 @@
+# Check GitHub for new cabinet code every 15 minutes, and once shortly after
+# boot. Persistent=true so a cabinet that was powered off catches up on the
+# next boot instead of waiting for the next tick.
+[Unit]
+Description=Periodic arcade cabinet code update
+
+[Timer]
+OnBootSec=3min
+OnUnitActiveSec=15min
+RandomizedDelaySec=2min
+Persistent=true
+
+[Install]
+WantedBy=timers.target

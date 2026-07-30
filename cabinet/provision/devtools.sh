@@ -101,8 +101,15 @@ fi
 step "T3 Code (remote dev server)"
 # T3 is run via `npx t3@latest` rather than installed, so the service
 # always resolves the current release (docs/t3-setup.md §13). We install
-# the systemd USER unit here; `tailscale up` and T3 pairing are the two
-# interactive steps that must happen on the cabinet (see HARDWARE-TODO).
+# the systemd USER unit here.
+#
+# Remote access is T3 Connect, not Tailscale Serve: T3 Connect carries its
+# own relay, so the cabinet needs no tailnet membership and no open port to
+# be reachable from the laptop or a phone. The one interactive step is
+#   runuser -u arcade -- npx --yes t3@latest connect link --headless
+# which prints an out-of-band OAuth URL to open on any device; the grant is
+# persisted under the arcade user's T3 data dir, so it survives reboots and
+# the service picks it up on next start.
 if command -v npx >/dev/null; then
     install -d -o "$ARCADE_USER" -g "$ARCADE_USER" \
         "$HOME_DIR/.config/systemd/user" "$HOME_DIR/dev"
@@ -110,14 +117,14 @@ if command -v npx >/dev/null; then
     cat > "$HOME_DIR/.config/systemd/user/t3-code.service" <<EOF
 [Unit]
 Description=T3 Code remote development server
-After=network-online.target tailscaled.service
+After=network-online.target
 Wants=network-online.target
 
 [Service]
 Type=simple
 WorkingDirectory=%h/dev
-ExecStart=${NPX_PATH} --yes t3@latest serve --tailscale-serve
-Restart=on-failure
+ExecStart=${NPX_PATH} --yes t3@latest serve --no-browser
+Restart=always
 RestartSec=5
 Environment=PATH=%h/.local/bin:%h/.npm-global/bin:/usr/local/bin:/usr/bin:/bin
 
@@ -126,7 +133,7 @@ WantedBy=default.target
 EOF
     chown "$ARCADE_USER:$ARCADE_USER" \
         "$HOME_DIR/.config/systemd/user/t3-code.service"
-    # enable without starting: T3 needs Tailscale up + pairing first, and a
+    # enable without starting: T3 needs `connect link` run once first, and a
     # crash-looping unit before that is just noise
     install -d -o "$ARCADE_USER" -g "$ARCADE_USER" \
         "$HOME_DIR/.config/systemd/user/default.target.wants"
