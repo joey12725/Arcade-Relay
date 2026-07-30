@@ -19,6 +19,8 @@ apt-get update
 apt-get install -y --no-install-recommends \
     xorg openbox xdotool wmctrl x11-utils x11vnc imagemagick \
     mpv retroarch libretro-core-info \
+    libgstreamer1.0-0 libgstreamer-plugins-base1.0-0 libgstreamer-gl1.0-0 \
+    gstreamer1.0-plugins-good gstreamer1.0-libav \
     pipewire pipewire-pulse wireplumber pulseaudio-utils \
     python3 python3-aiohttp python3-evdev python3-pil python3-yaml \
     udev curl ca-certificates procps
