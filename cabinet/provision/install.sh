@@ -48,7 +48,7 @@ install -m 0755 "$SRC_DIR/provision/openbox-autostart" \
 install -d /opt/arcade
 rm -rf /opt/arcade/cabinet
 cp -r "$SRC_DIR" /opt/arcade/cabinet
-install -d /roms /saves /var/cache/arcade
+install -d /roms /saves /var/cache/arcade /var/cache/arcade-clips
 
 # --- systemd user units; linger so they run from boot, not first login ---
 install -d "$HOME_DIR/.config/systemd/user/default.target.wants"
@@ -106,7 +106,7 @@ runuser -u "$ARCADE_USER" -- \
     systemctl --user daemon-reload 2>/dev/null || true
 
 chown -R "$ARCADE_USER:$ARCADE_USER" "$HOME_DIR" /opt/arcade /roms /saves \
-    /var/cache/arcade
+    /var/cache/arcade /var/cache/arcade-clips
 
 # --- agentic development toolchain (optional; never fails the arcade) ---
 if [ "${SKIP_DEVTOOLS:-0}" != "1" ]; then
