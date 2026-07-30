@@ -15,6 +15,7 @@ import asyncio
 import json
 import os
 import random
+import socket
 import subprocess
 import sys
 import time
@@ -27,6 +28,7 @@ import inputs  # noqa: E402
 import pegasus_gen  # noqa: E402
 import launcher  # noqa: E402
 import lifeline  # noqa: E402
+import metrics  # noqa: E402
 import renderer  # noqa: E402
 import screensaver  # noqa: E402
 
@@ -86,6 +88,8 @@ async def fifo_reader():
                     if len(parts) == 2 and parts[1] in ("down", "up"):
                         if combo_engine is not None:
                             combo_engine.key_event(parts[0], parts[1] == "down")
+                        if binding_engine is not None:
+                            binding_engine.key_event(parts[0], parts[1] == "down")
                         # §5.11: on the lifeline screen, a maps to
                         # "restart networking" — the one on-cabinet repair
                         # action that needs no keyboard and no server.
@@ -98,6 +102,8 @@ async def fifo_reader():
                     asyncio.create_task(game_kill())
         if combo_engine is not None:
             combo_engine.poll()
+        if binding_engine is not None:
+            binding_engine.poll()
         await asyncio.sleep(0.05)
 
 
@@ -144,13 +150,35 @@ def log(*a):
 
 # ---------------------------------------------------------------- games
 
-game = {"session": None, "rom": None}
+game = {"session": None, "rom": None, "system": None,
+        # elapsed play time: monotonic drives the counter (immune to NTP
+        # steps), epoch is what the server shows and hands to Discord/HA
+        "started_mono": None, "started_at": None}
 # ONE lock for "who owns the screen": games, screensaver, dim clock and
 # lifeline all contend for the same display. Separate locks let an in-flight
 # screensaver start land on top of a lifeline that had just come up.
 game_lock = asyncio.Lock()
 ss = {"on": False, "suppress_until": 0.0, "starting": False}
 ll = {"on": False, "last_sync": None, "recovery": {}}
+
+
+def _mark_started(system):
+    game["system"] = system
+    game["started_mono"] = time.monotonic()
+    game["started_at"] = time.time()
+
+
+def _mark_stopped():
+    game["system"] = None
+    game["started_mono"] = None
+    game["started_at"] = None
+
+
+def elapsed_s():
+    """Seconds the current game has been running, or None."""
+    if game["started_mono"] is None:
+        return None
+    return round(time.monotonic() - game["started_mono"], 1)
 
 
 async def lifeline_on():
@@ -287,7 +315,99 @@ async def input_text(text):
     return {"typed": len(text)}
 
 
+def _on_evdev_key(button, is_down):
+    """Real-hardware key events fan out to both engines: cabinet hotkeys and
+    user combo/hold bindings are detected independently and can overlap."""
+    if combo_engine is not None:
+        combo_engine.key_event(button, is_down)
+    if binding_engine is not None:
+        binding_engine.key_event(button, is_down)
+
+
 combo_engine = None   # built in main() once state (hotkeys) is loaded
+binding_engine = None  # user combo/hold bindings from controllers/*
+virtual_pad = inputs.VirtualPad()
+
+
+async def on_binding(target, kind):
+    """A user combo/hold binding fired."""
+    log(f"binding fired: {target} ({kind})")
+    if kind == "action":
+        await on_action(target)
+        return
+    # A pad button has to reach the emulator as a real input event, which
+    # means uinput. Log the reason when we cannot, so a binding that quietly
+    # does nothing on the cabinet is diagnosable from the journal.
+    if not virtual_pad.available() and not await asyncio.to_thread(virtual_pad.open):
+        log(f"binding {target}: virtual pad unavailable ({virtual_pad.why()})")
+        return
+    await asyncio.to_thread(virtual_pad.tap, target)
+
+
+async def on_action(name):
+    """Cabinet actions reachable from a binding or synthetic input."""
+    if name in LOGICAL_COMBOS:
+        await on_combo(name)
+        return
+    if name == "quit":
+        await game_kill()
+        return
+    cmd = RETRO_COMMANDS.get(name)
+    if cmd is None:
+        log(f"unknown action {name!r}")
+        return
+    await retro_command(cmd)
+
+
+# RetroArch network command interface (cabinet.yaml enables it and pins the
+# port); these are the actions it can perform on a running game.
+RETRO_COMMANDS = {
+    "save_state": "SAVE_STATE", "load_state": "LOAD_STATE",
+    "pause": "PAUSE_TOGGLE", "reset": "RESET",
+    "fast_forward": "FAST_FORWARD", "rewind": "REWIND",
+    "screenshot": "SCREENSHOT",
+}
+
+
+async def retro_command(cmd):
+    """Fire-and-forget UDP to RetroArch's network command port."""
+    ra = (state["bundle"].get("cabinet.yaml") or {}).get("retroarch") or {}
+    port = int(ra.get("network_cmd_port", 55355))
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.sendto(cmd.encode(), ("127.0.0.1", port))
+        s.close()
+        return True
+    except OSError as e:
+        log(f"retroarch command {cmd} failed: {e!r}")
+        return False
+
+
+def collect_bindings(system=None, rom_path=None):
+    """Merge the three mapping layers' `bindings:` lists (spec §5.7 order:
+    global, then system, then game — later layers append, and a later binding
+    on the same expression replaces an earlier one)."""
+    bundle = state["bundle"]
+    layers = [(bundle.get("controllers/global.yaml") or {}).get("bindings") or []]
+    if system:
+        layers.append((bundle.get(f"controllers/systems/{system}.yaml")
+                       or {}).get("bindings") or [])
+        key = renderer.game_key(system, rom_path)
+        if key:
+            games = (bundle.get("controllers/games.yaml") or {}).get("games") or {}
+            layers.append((games.get(key) or {}).get("bindings") or [])
+    merged = {}
+    for layer in layers:
+        for entry in layer:
+            if not isinstance(entry, dict):
+                continue
+            buttons = entry.get("buttons")
+            if isinstance(buttons, str):
+                buttons = buttons.split("+")
+            key = (frozenset(str(b).strip().lower() for b in (buttons or [])),
+                   int(entry.get("hold_ms", 0) or 0))
+            merged[key] = entry
+    return list(merged.values())
 
 
 def build_combo_engine():
@@ -299,6 +419,21 @@ def build_combo_engine():
     }
     combo_engine = inputs.ComboEngine(
         hotkeys, lambda name: asyncio.create_task(on_combo(name)))
+    build_binding_engine()
+
+
+def build_binding_engine(system=None, rom_path=None):
+    """Rebuilt on state.sync and on every launch — the per-system and
+    per-game layers only make sense relative to what is running."""
+    global binding_engine
+    entries = collect_bindings(system, rom_path)
+    binding_engine = inputs.BindingEngine(
+        entries,
+        lambda target, kind: asyncio.create_task(on_binding(target, kind)))
+    if binding_engine.errors:
+        log(f"bindings: {len(binding_engine.errors)} bad entr(ies) skipped: "
+            + "; ".join(binding_engine.errors[:3]))
+    return binding_engine
 CLIPS_DIR = os.environ.get("CABD_CLIPS_DIR", "/var/cache/arcade-clips")
 
 
@@ -538,6 +673,7 @@ async def game_launch(system, path, args=()):
             sess = await asyncio.to_thread(_stream_session, path)
             game["session"] = sess
             game["rom"] = f"stream/{path}"
+            _mark_started("stream")
             log("stream launched:", game["rom"])
             return {"running": game["rom"]}
         if system == "steam":
@@ -553,6 +689,7 @@ async def game_launch(system, path, args=()):
                 False, 20)
             game["session"] = sess
             game["rom"] = f"steam/{path}"
+            _mark_started("steam")
             log("steam launched:", game["rom"])
             return {"running": game["rom"]}
         # CTL-4: re-render configs from the state cache before EVERY launch
@@ -574,6 +711,10 @@ async def game_launch(system, path, args=()):
             sess = await asyncio.to_thread(launcher.GameSession, path, tuple(args))
         game["session"] = sess
         game["rom"] = f"{system}/{os.path.basename(path)}"
+        _mark_started(system)
+        # per-system / per-game binding layers only mean something relative
+        # to what is running, so the engine is rebuilt per launch
+        build_binding_engine(system, path)
         log("game launched:", game["rom"])
         return {"running": game["rom"]}
 
@@ -585,6 +726,8 @@ async def game_kill():
         await asyncio.to_thread(game["session"].kill)
         game["session"] = None
         game["rom"] = None
+        _mark_stopped()
+        build_binding_engine()      # back to the global layer only
         log("game killed, frontend refocused")
         return {"running": None}
 
@@ -800,6 +943,24 @@ def _human(n):
         n /= 1024.0
 
 
+sampler = metrics.Sampler()
+
+
+async def metrics_loop():
+    """1 Hz sampling for the health screen's gauges and percentiles.
+
+    Runs in a thread: every reader is a small synchronous sysfs read, and a
+    stalled one (a wedged hwmon node) must not block the event loop that also
+    carries heartbeats.
+    """
+    while True:
+        try:
+            await asyncio.to_thread(sampler.sample)
+        except Exception as e:  # noqa: BLE001 — never let telemetry kill cabd
+            log(f"metrics sample failed: {e!r}")
+        await asyncio.sleep(metrics.INTERVAL_S)
+
+
 def health_report():
     """Disk / uptime / load / temp / versions — the things that quietly go
     wrong on a cabinet nobody logs into (ROM libraries fill drives)."""
@@ -859,6 +1020,7 @@ def health_report():
     out["versions"] = vers
     out["ip"] = lifeline.checks(False, None).get("ip")
     out["ssh_user"] = os.environ.get("CABD_SSH_USER", "arcade")
+    out["metrics"] = sampler.summary()
     return out
 
 
@@ -1065,6 +1227,8 @@ async def handle_req(ws, data):
         elif method == "input.monitor":
             secs = min(float(params.get("seconds", 2)), 30)
             result = {"events": await monitor_events(secs)}
+        elif method == "input.devices":
+            result = {"devices": await asyncio.to_thread(inputs.list_devices)}
         elif method == "screensaver.on":
             result = await screensaver_on(params.get("playlist", []),
                                           params.get("brightness", 80))
@@ -1188,6 +1352,9 @@ async def heartbeat_loop(ws):
     while True:
         await ws.send_json({"kind": "event", "event": "heartbeat", "interval": HB,
                             "state": {"running": game["rom"],
+                                      "system": game["system"],
+                                      "started_at": game["started_at"],
+                                      "elapsed_s": elapsed_s(),
                                       "screensaver": ss["on"],
                                       "lifeline": ll["on"]}})
         next_t += HB
@@ -1248,11 +1415,12 @@ async def main():
     asyncio.create_task(idle_loop())
     asyncio.create_task(clips_sync_loop())
     asyncio.create_task(saves_backup_loop())
+    asyncio.create_task(metrics_loop())
     asyncio.create_task(lifeline_loop(ws_state))
 
     # real hardware: evdev devices feed the same combo engine (A-17)
     evsrc = inputs.EvdevSource(
-        on_key=lambda b, down: combo_engine and combo_engine.key_event(b, down),
+        on_key=_on_evdev_key,
         on_activity=lambda: activity.__setitem__("last", time.monotonic()))
     if evsrc.open_devices():
         asyncio.create_task(evsrc.run())

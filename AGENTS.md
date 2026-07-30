@@ -25,8 +25,12 @@ arcadectl volume get | set --master 70 | set --class trailers --mute
 arcadectl screensaver status|on|off | set --brightness 60 --idle 300
 arcadectl screensaver sources | enable-source <id> | disable-source <id>
 arcadectl screensaver disable --for 2h
+arcadectl screensaver remove-source <id>  # off the rotation board entirely
 arcadectl controls map --scope system:snes --set a=b | save-preset <n> | load-preset <n>
+arcadectl controls bindings --scope global | unbind --scope global <btn>
+arcadectl controls scopes | devices       # what can be bound, and on what
 arcadectl controls monitor --for 5        # live button presses
+arcadectl art status | warm | push        # box art (libretro-thumbnails)
 arcadectl roms search <q> | request <q> | status
 arcadectl state log | rollback <sha> | push | bundle
 arcadectl favorites add|remove|list <system>/<rom>
@@ -42,6 +46,13 @@ Exit codes: 0 ok · 1 remote command failed · 2 usage · 3 server unreachable �
   audio, controllers, roms, games, diagnostics). Read the one you need.
 - `state/` — the source of truth the server renders from (audio.yaml,
   screensaver.yaml, controllers/, library/).
+- `assets/` — Y2K asset pack (skins, sprites, tagged GIF library). Served at
+  `/assets`; the Pegasus theme wants a copy inside its own directory.
+  Regenerate the GIF index with `python3 assets/build-gif-index.py`.
+- `themes/pegasus-y2k/` — the cabinet home screen. `pegasus-redblue` is the
+  plain fallback.
 - Web UI (secondary to this CLI): `http://<server>:8000/ui`.
+- `docs/UI-BACKEND-GAPS.md` — what the UI shows that the server cannot do
+  yet, and what each one would take. Read before "fixing" an inert control.
 
 No MCP. No prompts. Everything returns JSON with `--json`.

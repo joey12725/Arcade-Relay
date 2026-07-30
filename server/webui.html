@@ -3,398 +3,1949 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Arcade Control</title>
+<title>ARCADE CONTROL PLANE</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Bungee&family=Titan+One&display=swap" rel="stylesheet">
 <style>
-  :root { --red: #e23b3b; --blue: #2b4fd8; --bg: #10121a; --card: #1a1e2c; --fg: #eef0f8; }
-  * { box-sizing: border-box; }
-  .thumb { height: 34px; border-radius: 3px; vertical-align: middle;
-           margin: 0 6px; }
-  body { margin: 0; font-family: system-ui, sans-serif; background: var(--bg); color: var(--fg); }
-  header { background: linear-gradient(90deg, var(--red), var(--blue)); padding: 14px 22px;
-           font-size: 22px; font-weight: 800; letter-spacing: 1px; }
-  main { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
-         gap: 16px; padding: 16px; max-width: 1300px; margin: auto; }
-  .card { background: var(--card); border-radius: 12px; padding: 16px;
-          border-top: 4px solid var(--blue); }
-  .card.red { border-top-color: var(--red); }
-  h2 { margin: 0 0 12px; font-size: 15px; text-transform: uppercase; letter-spacing: 1.5px; }
-  .pill { display: inline-block; padding: 3px 12px; border-radius: 999px; font-weight: 700; }
-  .on  { background: var(--blue); } .off { background: var(--red); }
-  button { background: var(--blue); color: #fff; border: 0; border-radius: 8px;
-           padding: 8px 14px; margin: 3px; font-weight: 700; cursor: pointer; }
-  button.red { background: var(--red); }
-  input[type=range] { width: 160px; vertical-align: middle; accent-color: var(--red); }
-  label { display: inline-block; min-width: 100px; }
-  ul { list-style: none; padding: 0; margin: 0; } li { padding: 4px 0; }
-  img#shot { width: 100%; border-radius: 8px; background: #000; min-height: 120px; }
-  select, input[type=text] { background: #0d0f16; color: var(--fg); border: 1px solid #333;
-           border-radius: 6px; padding: 7px; }
-  .row { margin: 6px 0; }
-  small { opacity: .65; }
+/* ------------------------------------------------------------------ tokens
+   Y2K control plane. Fonts load from Google but every stack falls back to a
+   system face: this server usually sits on a LAN with no egress, and a
+   missing webfont must degrade to "chunky sans", not to serif soup. */
+:root {
+  --hot:#ff2d8f; --blue:#0b3fd1; --lime:#1fa83c; --purp:#7b2dff;
+  --red:#ee0a4b; --yel:#e8a800; --aqua:#00a48f; --ink:#1b0b2e;
+  --grey:#9d86b3; --greyink:#4a3560;
+  --disp:'Titan One', 'Arial Black', Impact, sans-serif;
+  --cap:'Bungee', 'Arial Black', Verdana, sans-serif;
+  --body:Verdana, Tahoma, Geneva, sans-serif;
+}
+* { box-sizing:border-box; }
+html, body { margin:0; padding:0; }
+body {
+  font-family:var(--body); color:var(--ink); padding-bottom:210px; background:#fff;
+  background-image:
+    radial-gradient(circle at 12px 12px, rgba(11,63,209,.15) 4px, transparent 5px),
+    radial-gradient(circle at 44px 40px, rgba(255,212,0,.35) 5px, transparent 6px);
+  background-size:64px 64px;
+}
+a { color:#c8007a; font-weight:bold; } a:hover { color:var(--blue); }
+code { font-family:ui-monospace, Menlo, Consolas, monospace; }
+table { border-collapse:collapse; width:100%; }
+
+@keyframes marq   { from{transform:translateX(0)} to{transform:translateX(-50%)} }
+@keyframes blink  { 0%,49%{opacity:1} 50%,100%{opacity:.2} }
+@keyframes pulse  { 0%,100%{transform:scale(1)} 50%{transform:scale(1.07)} }
+@keyframes stripe { from{background-position:0 0} to{background-position:40px 0} }
+@keyframes bob    { 0%,100%{transform:translateY(0) rotate(-1.5deg)} 50%{transform:translateY(-7px) rotate(1.5deg)} }
+@keyframes flyby  { from{transform:translateX(-320px)} to{transform:translateX(105vw)} }
+@keyframes sparkfly {
+  from { transform:translate(0,0) scale(.35) rotate(0deg); opacity:1 }
+  to   { transform:translate(var(--dx),var(--dy)) scale(1.25) rotate(200deg); opacity:0 }
+}
+/* One class kills every animation. Set from the header toggle, and seeded
+   from prefers-reduced-motion at boot. */
+body.nomotion *, body.nomotion *::before, body.nomotion *::after {
+  animation:none !important; transition:none !important;
+}
+
+/* ------------------------------------------------------------------ header */
+.top { background:linear-gradient(180deg,#fff,#fff0b8 45%,#ffd400 100%);
+       border-bottom:6px solid var(--ink); box-shadow:0 5px 0 rgba(11,63,209,.35); }
+.top .bar { max-width:1400px; margin:0 auto; padding:12px 18px 0;
+            display:flex; align-items:flex-end; gap:14px; flex-wrap:wrap; }
+.top .flame { width:74px; height:74px; object-fit:contain; flex-shrink:0; }
+.top .myspace { width:168px; height:84px; object-fit:contain; flex-shrink:0;
+                animation:bob 4s ease-in-out infinite; }
+.wordmark {
+  /* fluid so it stays on one line down to a laptop width — the header also
+     carries two GIFs and four pills, so a fixed 42px wraps early */
+  font-family:var(--disp); font-size:clamp(20px, 2.1vw, 42px);
+  line-height:1; white-space:nowrap; color:var(--blue);
+  background:linear-gradient(#fff,#eaf0ff 38%,var(--blue) 50%,var(--hot) 62%,#fff);
+  -webkit-background-clip:text; background-clip:text; -webkit-text-fill-color:transparent;
+  filter:drop-shadow(3px 3px 0 var(--ink)) drop-shadow(0 5px 4px rgba(0,0,0,.25));
+}
+.sub { font-size:11px; font-weight:bold; letter-spacing:.18em;
+       text-transform:uppercase; color:var(--blue); margin-top:4px; }
+.pills { display:flex; align-items:center; gap:8px; flex-wrap:wrap; padding-bottom:10px; }
+.tabs { max-width:1400px; margin:0 auto; padding:10px 18px 0;
+        display:flex; gap:5px; flex-wrap:wrap; align-items:flex-end; }
+.tab { font-family:var(--cap); font-size:12px; letter-spacing:.03em;
+       padding:9px 14px 11px; border:4px solid var(--ink); border-bottom:none;
+       border-top-left-radius:14px; border-top-right-radius:14px;
+       background:linear-gradient(180deg,#fff,#ffd0e8 55%,#ff8fc4);
+       color:#8a0052; cursor:pointer; text-shadow:0 1px 0 rgba(255,255,255,.8);
+       box-shadow:none; transition:all 170ms cubic-bezier(.34,1.56,.64,1); }
+.tab.on { padding:12px 16px 14px; transform:translateY(4px); color:#5a3200;
+          background:linear-gradient(180deg,#fff,#ffd400 50%,#ffb300); }
+.rainbow { height:8px; background:repeating-linear-gradient(90deg,
+  var(--hot) 0 16px,#ffd400 16px 32px,var(--blue) 32px 48px,#35c04a 48px 64px); }
+.marquee-bar { background:linear-gradient(180deg,#2a0b3f,#10021d); color:#ffd400;
+  font-size:13px; font-weight:bold; letter-spacing:.08em; overflow:hidden;
+  white-space:nowrap; padding:7px 0; border-bottom:4px solid #ffd400; }
+.marquee-bar > div { display:inline-flex; white-space:nowrap; animation:marq 30s linear infinite; }
+.marquee-bar span { padding-right:70px; }
+
+main { max-width:1400px; margin:0 auto; padding:18px; }
+
+/* ------------------------------------------------------------------ panels */
+.panel { border:5px solid var(--blue); border-radius:12px; background:#fff;
+  box-shadow:5px 5px 0 rgba(27,11,46,.22), inset 0 0 0 2px #fff; overflow:hidden; }
+.panel > .cap { font-family:var(--cap); font-size:13px; letter-spacing:.07em;
+  color:#fff; padding:9px 12px; text-shadow:0 2px 0 rgba(0,0,0,.4);
+  border-bottom:4px solid rgba(27,11,46,.35);
+  background:linear-gradient(180deg,rgba(255,255,255,.55),rgba(255,255,255,0) 55%), var(--blue); }
+.panel > .body { padding:12px 14px; }
+.p-hot{border-color:var(--hot)}    .p-hot   > .cap{background-color:var(--hot)}
+.p-blue{border-color:var(--blue)}  .p-blue  > .cap{background-color:var(--blue)}
+.p-lime{border-color:var(--lime)}  .p-lime  > .cap{background-color:var(--lime)}
+.p-purp{border-color:var(--purp)}  .p-purp  > .cap{background-color:var(--purp)}
+.p-red{border-color:var(--red)}    .p-red   > .cap{background-color:var(--red)}
+.p-yel{border-color:var(--yel)}    .p-yel   > .cap{background-color:var(--yel)}
+.p-aqua{border-color:var(--aqua)}  .p-aqua  > .cap{background-color:var(--aqua)}
+
+.grid { display:grid; gap:14px; align-items:start; }
+.col  { display:flex; flex-direction:column; gap:14px; }
+.g-dash   { grid-template-columns:2.1fr 1.15fr; }
+.g-half   { grid-template-columns:1fr 1fr; }
+.g-health { grid-template-columns:1.2fr 1fr; }
+.g-remap  { grid-template-columns:1fr 1.3fr; }
+@media (max-width:1100px) { .grid { grid-template-columns:1fr !important; } }
+
+/* ----------------------------------------------------------------- buttons */
+button { font-family:var(--cap); font-size:13px; letter-spacing:.04em; color:#fff;
+  padding:10px 15px; border-radius:10px; border:3px solid #fff; cursor:pointer;
+  text-shadow:0 2px 0 rgba(0,0,0,.4); white-space:nowrap;
+  transition:transform 120ms cubic-bezier(.34,1.6,.64,1);
+  background:linear-gradient(180deg,rgba(255,255,255,.85),rgba(255,255,255,.05) 46%,rgba(0,0,0,.2)),
+             linear-gradient(180deg,#5c8bff,var(--blue));
+  box-shadow:0 4px 0 #062a8a, 0 0 0 2px #062a8a; }
+button:hover:not(:disabled) { transform:translateY(-2px); }
+button:active:not(:disabled) { transform:translateY(2px); }
+button:disabled { opacity:.45; cursor:not-allowed; }
+button.sm { font-size:11px; padding:7px 10px; }
+button.xs { font-size:9.5px; padding:5px 7px; }
+button.grey { background:linear-gradient(180deg,rgba(255,255,255,.85),rgba(255,255,255,.05) 46%,rgba(0,0,0,.2)),
+              linear-gradient(180deg,#e6d8ee,var(--grey)); box-shadow:0 4px 0 var(--greyink), 0 0 0 2px var(--greyink); }
+button.danger { background:linear-gradient(180deg,rgba(255,255,255,.85),rgba(255,255,255,.05) 46%,rgba(0,0,0,.2)),
+                linear-gradient(180deg,#ff8fb4,var(--red)); box-shadow:0 4px 0 #8a0035, 0 0 0 2px #8a0035; }
+button.lime { background:linear-gradient(180deg,rgba(255,255,255,.85),rgba(255,255,255,.05) 46%,rgba(0,0,0,.2)),
+              linear-gradient(180deg,#8fe36a,var(--lime)); box-shadow:0 4px 0 #065c22, 0 0 0 2px #065c22; }
+button.gold { color:#4a3300; background:linear-gradient(180deg,rgba(255,255,255,.85),rgba(255,255,255,.05) 46%,rgba(0,0,0,.2)),
+              linear-gradient(180deg,#ffe07a,var(--yel)); box-shadow:0 4px 0 #8a6400, 0 0 0 2px #8a6400; }
+button.mini { font-family:var(--body); font-size:10px; font-weight:bold; padding:7px 10px;
+  border-radius:8px; border:3px solid var(--ink); color:#8a0052; text-shadow:none;
+  background:linear-gradient(#fff,#ffd0e8); box-shadow:none; }
+
+/* ------------------------------------------------------------------ inputs */
+input[type=text], input[type=number], input[type=search], select {
+  font-family:var(--body); font-size:12px; font-weight:bold; padding:6px 8px;
+  border:3px solid var(--ink); border-radius:5px; background:#fff; color:var(--ink); }
+input:disabled, select:disabled { opacity:.5; }
+input[type=range] { -webkit-appearance:none; appearance:none; height:24px; background:transparent; }
+input[type=range]::-webkit-slider-runnable-track { height:16px; border-radius:9px;
+  border:3px solid var(--ink); background:linear-gradient(180deg,#fff,#ffd9ee 55%,#ff8fc4);
+  box-shadow:inset 0 2px 4px rgba(0,0,0,.3); }
+input[type=range]::-webkit-slider-thumb { -webkit-appearance:none; width:26px; height:26px;
+  margin-top:-8px; border-radius:50%; border:3px solid #fff;
+  background:radial-gradient(circle at 34% 28%,#fffbe0,#ffd400 50%,#e07800);
+  box-shadow:0 0 0 3px var(--ink), 0 3px 5px rgba(0,0,0,.4); cursor:pointer; }
+input[type=range]::-moz-range-track { height:16px; border-radius:9px;
+  border:3px solid var(--ink); background:linear-gradient(180deg,#fff,#ffd9ee 55%,#ff8fc4); }
+input[type=range]::-moz-range-thumb { width:22px; height:22px; border-radius:50%;
+  border:3px solid #fff; background:radial-gradient(circle at 34% 28%,#fffbe0,#ffd400 50%,#e07800);
+  box-shadow:0 0 0 3px var(--ink); cursor:pointer; }
+label.field { font-size:11px; font-weight:bold; display:inline-block; }
+label.field > select, label.field > input { margin-top:4px; display:block; }
+
+/* -------------------------------------------------------------------- bits */
+.badge { font-family:var(--body); font-size:10px; font-weight:bold; letter-spacing:.06em;
+  padding:3px 8px; border-radius:20px; color:#fff; border:2px solid #fff;
+  box-shadow:0 0 0 2px var(--ink); white-space:nowrap; display:inline-block; }
+.pill { font-size:11px; padding:6px 10px; }
+.chip { font-size:10.5px; font-weight:bold; letter-spacing:.06em; padding:4px 9px;
+  border-radius:20px; background:#fff0f8; border:3px solid var(--hot); color:#8a0052; }
+.state { font-family:var(--body); font-size:11px; font-weight:bold; padding:6px 11px;
+  border-radius:20px; white-space:nowrap; display:inline-block;
+  border:3px solid #6a4a8a; background:#f6f0ff; color:#3a1a6a; }
+.state.ok   { border-color:#0a7a2f; background:#e3ffe8; color:#065c22; }
+.state.err  { border-color:#c1004a; background:#ffe4ee; color:#8a0035; }
+.state.pend { border-color:#b07800; background:#fff8db; color:#6b4700; }
+th { font-family:var(--body); font-size:10px; font-weight:bold; letter-spacing:.1em;
+  text-align:left; padding:7px 8px; color:#fff; border:1px solid var(--ink);
+  background:linear-gradient(180deg,#2f6bff,#0b2fa8); white-space:nowrap; }
+td { padding:6px 8px; border-bottom:2px solid #ffe08a; border-right:1px solid #f2e6c8;
+  font-size:12px; vertical-align:middle; }
+tbody tr:nth-child(even) { background:#fffbe8; }
+.meter { height:26px; border:4px solid var(--ink); border-radius:8px; background:#fff;
+  overflow:hidden; box-shadow:inset 0 2px 4px rgba(0,0,0,.25); }
+.meter > i { display:block; height:100%; transition:width 300ms ease;
+  background:repeating-linear-gradient(90deg,#5c8bff 0 10px,var(--blue) 10px 20px);
+  animation:stripe 1.2s linear infinite; }
+.meter > i.hot { background:repeating-linear-gradient(90deg,#ff9ec0 0 10px,var(--red) 10px 20px); }
+.kv { display:flex; justify-content:space-between; gap:10px; font-size:12px;
+  font-weight:bold; border-bottom:2px dotted #e0cff0; padding:5px 0; }
+.stat { font-size:9px; font-weight:bold; letter-spacing:.12em; text-align:center;
+  padding:8px 12px; border-radius:12px; border:4px solid var(--blue);
+  background:#eef3ff; color:#062a8a; }
+.stat b { font-size:26px; font-family:var(--cap); display:block; }
+.stat.pink { border-color:var(--hot); background:#fff0f8; color:#8a0052; }
+.note { font-size:11px; font-weight:bold; line-height:1.6; }
+.row { display:flex; gap:10px; flex-wrap:wrap; align-items:center; }
+.rowe { display:flex; gap:10px; flex-wrap:wrap; align-items:flex-end; }
+.art { border-radius:6px; border:3px solid #fff; box-shadow:0 0 0 2px var(--ink);
+  object-fit:cover; background:linear-gradient(150deg,var(--purp),#7cff5a); }
+.art.ph { display:grid; place-items:center; font-family:ui-monospace,monospace;
+  font-size:9px; color:#fff; text-align:center; padding:4px; overflow:hidden; }
+.thumb { width:40px; height:30px; object-fit:cover; border-radius:5px;
+  border:2px solid #fff; box-shadow:0 0 0 2px var(--ink); flex-shrink:0; }
+
+/* A control the server genuinely cannot perform yet: stated plainly with the
+   reason, rather than shipped as a button that silently does nothing. */
+.gap { border:3px dashed var(--yel); background:#fffbe4; border-radius:9px;
+  padding:8px 10px; font-size:11px; font-weight:bold; line-height:1.55; color:#6b4700;
+  margin-top:12px; }
+.gap b { font-family:var(--cap); font-size:11px; color:#8a6400; }
+
+/* ---------------------------------------------------------------- overlays */
+.shrine { position:fixed; bottom:10px; z-index:80; width:176px; border-radius:6px;
+  background:var(--ink); overflow:hidden; }
+.shrine.l { left:10px; border:5px ridge var(--hot); box-shadow:5px 5px 0 rgba(27,11,46,.35); }
+.shrine.r { right:10px; border:5px ridge var(--blue); box-shadow:-5px 5px 0 rgba(27,11,46,.35); }
+.shrine .t { font-family:var(--cap); font-size:10px; padding:3px 6px; letter-spacing:.06em; }
+.shrine.l .t { color:var(--ink); background:linear-gradient(180deg,#fff,#ffd400); }
+.shrine.r .t { color:#fff; background:linear-gradient(180deg,#5c8bff,var(--blue)); }
+.shrine img { display:block; width:100%; }
+.shrine .f { font-size:9px; font-weight:bold; color:#ffd400; background:var(--ink);
+  padding:3px 6px; text-align:center; }
+@media (max-width:1500px) { .shrine { display:none; } }
+#toasts { position:fixed; right:196px; bottom:16px; z-index:95;
+  display:flex; flex-direction:column; gap:8px; align-items:flex-end; }
+.toast { font-size:12px; font-weight:bold; padding:10px 14px; border-radius:10px;
+  border:4px solid #fff; box-shadow:0 6px 0 rgba(27,11,46,.35); color:#fff;
+  max-width:420px; background:var(--blue); }
+.toast.ok { background:var(--lime); } .toast.err { background:var(--red); }
+.toast.warn { background:var(--yel); color:#3a2400; }
+#modal { position:fixed; inset:0; z-index:90; background:rgba(27,11,46,.6);
+  display:grid; place-items:center; padding:20px; }
+#modal .box { width:480px; max-width:100%; border:6px solid var(--red); border-radius:14px;
+  background:#fff; box-shadow:0 18px 40px rgba(0,0,0,.45); overflow:hidden; }
+#modal .hdr { font-family:var(--cap); font-size:13px; color:#fff; padding:9px 12px;
+  background:linear-gradient(180deg,rgba(255,255,255,.55),rgba(255,255,255,0) 55%), var(--red);
+  text-shadow:0 2px 0 rgba(0,0,0,.4); border-bottom:4px solid rgba(27,11,46,.35); }
+#modal .txt { padding:16px; font-size:13px; font-weight:bold; line-height:1.6; }
+#modal .act { padding:0 16px 16px; display:flex; gap:8px; justify-content:flex-end; }
+#sparks { position:fixed; inset:0; z-index:99; pointer-events:none; overflow:hidden; }
+#sparks i { position:fixed; display:block; background-size:contain;
+  background-repeat:no-repeat; animation:sparkfly 700ms ease-out forwards; }
+#party { position:fixed; inset:0; z-index:97; pointer-events:none; overflow:hidden; }
+#party .nyan { position:fixed; top:42%; left:0; width:300px; height:150px;
+  background-size:contain; background-repeat:no-repeat; animation:flyby 3.2s linear infinite; }
+#party .ban { position:fixed; left:0; right:0; top:30%; text-align:center;
+  font-family:var(--disp); font-size:52px; color:#ffd400;
+  text-shadow:5px 5px 0 var(--hot),0 0 30px rgba(0,0,0,.4); animation:pulse .6s ease-in-out infinite; }
+.hide { display:none !important; }
 </style>
 </head>
 <body>
-<header>ARCADE CONTROL</header>
+<div class="top">
+  <div class="bar">
+    <img class="flame" src="/assets/deco/flame.gif" alt="">
+    <div style="flex:1; min-width:280px;">
+      <div class="wordmark">ARCADE CONTROL PLANE</div>
+      <div class="sub" id="subline">cab-01 &middot; welcome back player one</div>
+    </div>
+    <img class="myspace" src="/assets/deco/myspace.gif" alt="hit me up on myspace">
+    <div class="pills">
+      <span class="badge pill" id="pillOnline">&#9679; CONNECTING</span>
+      <span class="badge pill" id="pillOps">&#10003; NO PENDING OPS</span>
+      <span class="badge pill" id="pillXfer">&#8645; NO ROM JOBS</span>
+      <button class="mini" id="btnMotion">REDUCE MOTION</button>
+    </div>
+  </div>
+  <div class="tabs" id="tabs"></div>
+  <div class="rainbow"></div>
+</div>
+<div class="marquee-bar"><div><span id="mq1"></span><span id="mq2"></span></div></div>
+
 <main>
-  <div class="card red">
-    <h2>Cabinet</h2>
-    <div class="row">Status: <span id="online" class="pill off">…</span></div>
-    <div class="row">Running: <b id="running">…</b></div>
-    <div class="row">Screensaver: <span id="ssState">…</span></div>
-    <div class="row">
-      <button onclick="api('POST','/games/kill').then(refresh)" class="red">Kill game</button>
-      <button onclick="api('POST','/screensaver/on').then(refresh)">Screensaver on</button>
-      <button onclick="api('POST','/screensaver/off').then(refresh)" class="red">Off</button>
-    </div>
-    <img id="shot" alt="cabinet screen">
-    <div class="row"><button onclick="shot()">Refresh screenshot</button></div>
+  <div id="offlineBanner" class="hide" style="margin-bottom:14px; border:5px solid var(--red);
+       background:#fff0f5; padding:10px 14px; border-radius:10px; display:flex; gap:10px;
+       align-items:center; flex-wrap:wrap; box-shadow:4px 4px 0 rgba(27,11,46,.2);">
+    <b style="font-family:var(--cap); font-size:14px; color:#c1004a;">CABINET OFFLINE</b>
+    <span class="note" id="offlineText"></span>
   </div>
-
-  <div class="card">
-    <h2>Audio</h2>
-    <div class="row"><label>Master</label>
-      <input type="range" id="master" min="0" max="100"
-             onchange="api('POST','/volume/set',{master:+this.value}).then(refresh)">
-      <span id="masterVal"></span></div>
-    <div id="classes"></div>
-  </div>
-
-  <div class="card">
-    <h2>Screensaver</h2>
-    <div class="row"><label>Brightness</label>
-      <input type="range" id="bright" min="0" max="100"
-             onchange="api('POST','/screensaver/set',{brightness:+this.value}).then(refresh)">
-      <span id="brightVal"></span></div>
-    <div class="row"><label>Idle (s)</label>
-      <input type="text" id="idle" size="6">
-      <button onclick="api('POST','/screensaver/set',{idle_seconds:+document.getElementById('idle').value}).then(refresh)">Set</button></div>
-    <div class="row"><label>Aspect</label>
-      <select id="aspect" onchange="api('POST','/screensaver/set',{aspect:this.value}).then(refresh)">
-        <option value="crop">crop (fill 4:3, lose sides)</option>
-        <option value="bars">bars (whole frame, letterbox)</option>
-        <option value="stretch">stretch (fill, distorted)</option>
-      </select></div>
-    <div class="row"><label>Shuffle</label>
-      <select id="shuffle" onchange="api('POST','/screensaver/set',{shuffle:this.value}).then(refresh)">
-        <option value="in_order">in order</option>
-        <option value="random_episode">random episode (any series)</option>
-        <option value="even_series">even chance per series</option>
-        <option value="round_robin">round robin (all series before repeat)</option>
-        <option value="decay">avoid recently played series</option>
-      </select></div>
-    <div class="row"><label>Movies</label>
-      <label><input type="checkbox" id="moviesAsSeries"
-        onchange="api('POST','/screensaver/set',{movies_as_series:this.checked}).then(refresh)">
-        each movie counts as its own series</label></div>
-    <div class="row"><label>Skip (s)</label>
-      <input type="text" id="skipIntro" size="4" placeholder="intro">
-      <input type="text" id="skipOutro" size="4" placeholder="outro">
-      <button onclick="api('POST','/screensaver/set',{skip_intro_s:+val('skipIntro')||0,skip_outro_s:+val('skipOutro')||0}).then(refresh)">Set</button></div>
-    <h2 style="margin-top:14px">Sources</h2>
-    <div class="row">
-      <input type="text" id="srcFilter" size="14" placeholder="filter shows/movies"
-             oninput="renderSources()">
-      <button onclick="setAllSources(true)">Enable all</button>
-      <button class="red" onclick="setAllSources(false)">Disable all</button>
-    </div>
-    <ul id="sources"></ul>
-  </div>
-
-  <div class="card">
-    <h2>Streaming quality</h2>
-    <div class="row"><small>LAN streams — independent of the screensaver's
-      480p tunnel cap.</small></div>
-    <div id="streamApps"></div>
-  </div>
-
-  <div class="card red">
-    <h2>Cabinet health</h2>
-    <div id="health"><small>loading…</small></div>
-    <div class="row">
-      <button onclick="clearCache()">Clear cache</button>
-      <span id="cacheMsg"></span>
-    </div>
-    <div class="row">
-      <a id="sshLink" href="#" class="btn">Open SSH</a>
-      <button onclick="copySsh()">Copy ssh command</button>
-      <small id="sshHint"></small>
-    </div>
-  </div>
-
-  <div class="card red">
-    <h2>Controller remapper</h2>
-    <!-- CTL-3 flagship flow: pick scope -> press the physical button (cabd
-         relays live evdev events) -> click the logical target. -->
-    <div class="row">
-      <select id="scope" onchange="showCurrentMap()"></select>
-      <button id="captureBtn" onclick="capture()">1. Press a button…</button>
-      <b id="captured">—</b>
-    </div>
-    <div class="row" id="targets"></div>
-    <div class="row"><small id="mapStatus">Pick a scope, capture a physical
-      button, then click the logical target it should become.</small></div>
-    <div class="row">
-      <input type="text" id="preset" placeholder="preset name" size="10">
-      <button onclick="api('POST','/controls/save-preset',{name:val('preset')}).then(refresh)">Save</button>
-      <button onclick="api('POST','/controls/load-preset',{name:val('preset')}).then(refresh)">Load</button>
-    </div>
-    <div class="row"><small>Presets: <span id="presets"></span></small></div>
-    <div class="row"><small>Current map: <span id="curmap"></span></small></div>
-  </div>
-
-  <div class="card">
-    <h2>Library</h2>
-    <div class="row">
-      <select id="libSystem" onchange="loadLibrary()"></select>
-      <label><input type="checkbox" id="libFavs" onchange="loadLibrary()"> favorites only</label>
-    </div>
-    <ul id="library"></ul>
-  </div>
-
-  <div class="card">
-    <h2>ROM queue</h2>
-    <div class="row">
-      <input type="text" id="romq" placeholder="e.g. metal slug 3" size="18">
-      <button onclick="api('POST','/roms/request',{query:val('romq')}).then(refresh)">Request</button>
-    </div>
-    <ul id="queue"></ul>
-  </div>
+  <div id="view"></div>
 </main>
+
+<div class="shrine l">
+  <div class="t">WEBMASTER'S SHRINE</div>
+  <img src="/assets/deco/glittergirl.gif" alt="glitter">
+</div>
+<div class="shrine r">
+  <div class="t">CAB-01 APPROVES</div>
+  <img src="/assets/deco/duo.gif" alt="anime">
+  <div class="f">BEST VIEWED IN NETSCAPE 4</div>
+</div>
+<div id="toasts"></div>
+<div id="sparks"></div>
+<div id="party" class="hide">
+  <div class="nyan"></div>
+  <div class="ban">&#8593;&#8593;&#8595;&#8595;&#8592;&#8594;&#8592;&#8594; B A</div>
+</div>
+<div id="modal" class="hide"><div class="box">
+  <div class="hdr">ARE U SURE??</div>
+  <div class="txt" id="modalText"></div>
+  <div class="act">
+    <button class="grey" id="modalNo">NEVERMIND</button>
+    <button class="danger" id="modalYes">YES, DO IT</button>
+  </div>
+</div></div>
+
 <script>
-const val = id => document.getElementById(id).value;
+"use strict";
+/* =====================================================================
+   ARCADE CONTROL PLANE — vanilla ES2020, no build step. arcaded serves
+   this file straight off disk (web.FileResponse) and the server image
+   has no Node in it, so there is deliberately nothing to compile.
+   ===================================================================== */
+
+const TABS = [
+  ["dash",   "DASHBOARD"],
+  ["audio",  "AUDIO"],
+  ["saver",  "SCREENSAVER"],
+  ["stream", "STREAMING"],
+  ["health", "CABINET HEALTH"],
+  ["remap",  "CONTROLLER REMAPPER"],
+  ["lib",    "GAME LIBRARY"],
+  ["rom",    "ROM QUEUE"],
+  ["integ",  "BROADCAST"],
+];
+const TAB_KEYS = TABS.map(([k]) => k);
+
+const S = {
+  page: TAB_KEYS.includes(location.hash.slice(1)) ? location.hash.slice(1) : "dash",
+  motion: !matchMedia("(prefers-reduced-motion: reduce)").matches,
+  online: false, lastSeen: null, pending: 0,
+  ov: null, alerts: [], health: null,
+  audio: null, audioDirty: false, audioState: "",
+  saver: null, saverDirty: false, saverState: "",
+  sources: null, srcLoading: false, srcQuery: "", poolFilter: "",
+  stream: null,
+  remap: { scope: "global", scopes: ["global"], devices: null, bindings: {},
+           combos: [], targets: {}, combo: [], hold: 0,
+           presets: [], presetName: "", capture: null, stage: "idle",
+           msg: "Press CAPTURE, then a button on the cabinet panel." },
+  lib: { sys: "All", q: "", favOnly: false },
+  rom: { query: "", system: "" }, romBackend: null,
+  integ: null, integDirty: false, integState: "",
+  konami: 0,
+};
+
+const LOGICAL = ["a", "b", "x", "y", "l", "r", "start", "select",
+                 "up", "down", "left", "right"];
+const HOLDS = [0, 500, 1000, 2000];
+
+/* --------------------------------------------------------------- plumbing */
 async function api(method, path, body) {
-  const r = await fetch(path, {method, headers: {'Content-Type': 'application/json'},
-                               body: body ? JSON.stringify(body) : undefined});
-  return r.ok ? r.json().catch(() => ({})) : Promise.reject(r.status);
+  const opt = { method, headers: {} };
+  if (body !== undefined) {
+    opt.headers["Content-Type"] = "application/json";
+    opt.body = JSON.stringify(body);
+  }
+  const r = await fetch(path, opt);
+  const text = await r.text();
+  let data = null;
+  try { data = text ? JSON.parse(text) : null; } catch (_) { data = { raw: text }; }
+  if (!r.ok) {
+    const msg = (data && (data.error || data.raw)) || r.statusText || ("HTTP " + r.status);
+    const err = new Error(String(msg).slice(0, 300));
+    err.status = r.status;
+    throw err;
+  }
+  return data;
 }
-async function refresh() {
-  const st = await api('GET', '/status');
-  const on = document.getElementById('online');
-  on.textContent = st.online ? 'ONLINE' : 'OFFLINE';
-  on.className = 'pill ' + (st.online ? 'on' : 'off');
-  document.getElementById('running').textContent = st.cabinet_state.running || 'nothing';
-  document.getElementById('ssState').textContent = st.cabinet_state.screensaver ? 'on' : 'off';
 
-  const vol = await api('GET', '/volume');
-  document.getElementById('master').value = vol.master ?? 70;
-  document.getElementById('masterVal').textContent = (vol.master ?? 70) + '%';
-  document.getElementById('classes').innerHTML = Object.entries(vol.classes || {}).map(([c, v]) =>
-    `<div class="row"><label>${c}</label>
-     <button onclick="api('POST','/volume/set',{class:'${c}',muted:${!v.muted}}).then(refresh)"
-             class="${v.muted ? 'red' : ''}">${v.muted ? 'muted' : 'audible'}</button>
-     <small>${v.volume}%</small></div>`).join('');
+/** Run a mutating call with a pending pill, a toast either way, and a
+ *  refresh afterwards. Every write goes through here so a failure is never
+ *  silent — a control that appears to do nothing is the single most
+ *  confusing failure mode this thing has. Pass okMsg = null to toast
+ *  yourself; rejections are re-thrown for callers that care. */
+async function op(label, fn, okMsg) {
+  S.pending++; paintChrome();
+  try {
+    const res = await fn();
+    if (okMsg !== null) toast(okMsg || ("✔ " + label), "ok");
+    return res;
+  } catch (e) {
+    toast("✖ " + label + ": " + e.message, "err");
+    throw e;
+  } finally {
+    S.pending--;
+    await refresh();
+  }
+}
 
-  const ss = await api('GET', '/screensaver');
-  document.getElementById('bright').value = ss.brightness;
-  document.getElementById('brightVal').textContent = ss.brightness + '%';
-  document.getElementById('idle').value = ss.idle_seconds;
+function toast(msg, kind) {
+  const el = document.createElement("div");
+  el.className = "toast " + (kind || "");
+  el.textContent = msg;
+  document.getElementById("toasts").appendChild(el);
+  setTimeout(() => el.remove(), 5200);
+}
 
-  api('GET', '/screensaver/sources').then(srcs => {
-    window._sources = srcs;
-    renderSources();
-  }).catch(() => {});
+let confirmResolve = null;
+function ask(text) {
+  document.getElementById("modalText").textContent = text;
+  document.getElementById("modal").classList.remove("hide");
+  return new Promise((res) => { confirmResolve = res; });
+}
+function closeModal(v) {
+  document.getElementById("modal").classList.add("hide");
+  if (confirmResolve) { confirmResolve(v); confirmResolve = null; }
+}
+document.getElementById("modalNo").onclick = () => closeModal(false);
+document.getElementById("modalYes").onclick = () => closeModal(true);
 
-  api('GET', '/screensaver').then(ss2 => {
-    for (const [id, key] of [['aspect','aspect'], ['shuffle','shuffle']]) {
-      const el = document.getElementById(id);
-      if (el && ss2[key]) el.value = ss2[key];
-    }
-    const mv = document.getElementById('moviesAsSeries');
-    if (mv) mv.checked = ss2.movies_as_series !== false;
-    const si = document.getElementById('skipIntro');
-    const so = document.getElementById('skipOutro');
-    if (si && document.activeElement !== si) si.value = ss2.skip_intro_s ?? 0;
-    if (so && document.activeElement !== so) so.value = ss2.skip_outro_s ?? 0;
-  }).catch(() => {});
+function sparkle(el, frac) {
+  if (!S.motion || !el) return;
+  const r = el.getBoundingClientRect();
+  const x = r.left + 13 + (r.width - 26) * frac, y = r.top + r.height / 2;
+  const host = document.getElementById("sparks");
+  for (let i = 0; i < 7; i++) {
+    const a = Math.random() * Math.PI * 2, d = 30 + Math.random() * 55;
+    const sz = 14 + Math.random() * 20;
+    const node = document.createElement("i");
+    node.style.cssText =
+      "left:" + x + "px;top:" + y + "px;width:" + sz + "px;height:" + sz + "px;" +
+      "--dx:" + Math.cos(a) * d + "px;--dy:" + (Math.sin(a) * d - 18) + "px;" +
+      "background-image:url(/assets/sprites/" +
+      (Math.random() > 0.5 ? "sparkle" : "star") + ".png)";
+    host.appendChild(node);
+    setTimeout(() => node.remove(), 750);
+  }
+}
 
-  loadStreamApps();
-  loadHealth();
+/* ------------------------------------------------------------- templating
+   Views build HTML strings and get swapped in wholesale. Two guards make
+   that safe: every interpolated value goes through esc(), and focus plus
+   caret position are restored after the swap so typing in a filter box
+   survives the 3-second background poll. */
+function esc(s) {
+  return String(s == null ? "" : s).replace(/[&<>"']/g, (c) =>
+    ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+}
+function h(strings, ...vals) {
+  return strings.reduce((out, s, i) => out + s + (i < vals.length ? vals[i] : ""), "");
+}
 
-
-
-  api('GET', '/controls/presets').then(p => {
-    document.getElementById('presets').textContent = p.presets.join(', ') || '(none)';
+/* Delegated events: handlers are named via data-act / data-change /
+   data-input and resolved here, so re-rendering can never strand a
+   listener or leak one. */
+const ACTIONS = {};
+function delegate(evt, attr) {
+  document.addEventListener(evt, (e) => {
+    const t = e.target.closest("[data-" + attr + "]");
+    if (!t || t.disabled) return;
+    const fn = ACTIONS[t.dataset[attr]];
+    if (!fn) return;
+    if (evt === "click") e.preventDefault();
+    fn(t, e);
   });
-  const scope = document.getElementById('scope');
-  if (!scope.options.length) {
-    ['global','system:nes','system:snes','system:genesis','system:arcade',
-     'system:gba','system:psx','system:gb'].forEach(s => scope.add(new Option(s, s)));
-    renderTargets();
-  }
-  showCurrentMap();
-  loadLibrary();   // every cycle: ROMs delivered while the page is open must appear
-  const q = await api('GET', '/roms/status');
-  document.getElementById('queue').innerHTML = (q.queue || []).map(e =>
-    `<li><b>${e.title}</b> — ${e.status} <small>${e.detail || ''}</small></li>`).join('') || '<li><small>empty</small></li>';
 }
-// ---- CTL-3 interactive remapper ----
-const TARGETS = ['a','b','x','y','l','r','start','select','up','down','left','right'];
-let capturedButton = null;
+delegate("click", "act");
+delegate("change", "change");
+delegate("input", "input");
 
-function renderTargets() {
-  document.getElementById('targets').innerHTML = TARGETS.map(t =>
-    `<button class="tgt" onclick="assign('${t}')">${t}</button>`).join(' ');
+function setView(html) {
+  const host = document.getElementById("view");
+  const act = document.activeElement;
+  const key = act && act.dataset ? act.dataset.k : null;
+  const start = act && act.selectionStart, end = act && act.selectionEnd;
+  host.innerHTML = html;
+  if (!key) return;
+  const next = host.querySelector('[data-k="' + CSS.escape(key) + '"]');
+  if (!next) return;
+  next.focus();
+  try { next.setSelectionRange(start, end); } catch (_) { /* not a text field */ }
 }
 
-async function capture() {
-  const btn = document.getElementById('captureBtn');
-  btn.textContent = 'listening… press it now';
-  // live evdev events relayed from cabd (input.monitor RPC)
-  const r = await api('POST', '/controls/monitor', {seconds: 3}).catch(() => ({}));
-  const down = (r.events || []).map(e => e.split(' ')[0]).filter(Boolean);
-  capturedButton = down.length ? down[0] : null;
-  document.getElementById('captured').textContent = capturedButton || '(nothing)';
-  document.getElementById('mapStatus').textContent = capturedButton
-    ? `Captured "${capturedButton}" — now click the logical target.`
-    : 'No input seen. Press the physical button while capturing.';
-  btn.textContent = '1. Press a button…';
+/* ------------------------------------------------------------- formatting */
+const pct = (v) => (v == null ? "—" : Math.round(v) + "%");
+const dash = (v) => (v == null || v === "" ? "—" : v);
+function hms(sec) {
+  if (sec == null) return "—";
+  const s = Math.max(0, Math.floor(sec));
+  const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60);
+  return (h ? h + ":" + String(m).padStart(2, "0") : String(m)) +
+         ":" + String(s % 60).padStart(2, "0");
 }
-
-async function assign(target) {
-  if (!capturedButton) {
-    document.getElementById('mapStatus').textContent =
-      'Capture a physical button first.';
-    return;
-  }
-  await api('POST', '/controls/map',
-            {scope: val('scope'), set: {[capturedButton]: target}});
-  document.getElementById('mapStatus').textContent =
-    `Mapped ${capturedButton} → ${target} in ${val('scope')} (committed).`;
-  capturedButton = null;
-  document.getElementById('captured').textContent = '—';
-  refresh();
+function relTime(ts) {
+  if (!ts) return "";
+  const s = Math.max(0, Date.now() / 1000 - ts);
+  if (s < 60) return Math.round(s) + "s ago";
+  if (s < 3600) return Math.round(s / 60) + "m ago";
+  if (s < 86400) return Math.round(s / 3600) + "h ago";
+  return Math.round(s / 86400) + "d ago";
 }
-
-async function showCurrentMap() {
-  const b = await api('GET', '/state/bundle').catch(() => ({}));
-  const scope = val('scope');
-  const data = scope === 'global'
-    ? (b['controllers/global.yaml'] || {}).buttons
-    : (b['controllers/systems/' + scope.split(':')[1] + '.yaml'] || {}).remap;
-  document.getElementById('curmap').textContent =
-    Object.entries(data || {}).map(([k, v]) => `${k}→${v}`).join('  ') || '(none)';
+/** '/roms/nes/Metroid (USA).nes' -> {system:'nes', file:'Metroid (USA).nes'} */
+function splitRom(path) {
+  if (!path) return null;
+  const parts = String(path).split("/").filter(Boolean);
+  const file = parts.pop();
+  return { system: parts.pop() || "?", file };
 }
+const artUrl = (system, file) =>
+  "/art/" + encodeURIComponent(system) + "/" + encodeURIComponent(file);
 
-// ---- library page (§6.3): browse, favorite, launch ----
-async function loadLibrary() {
-  const sysSel = document.getElementById('libSystem');
-  const qs = [];
-  if (sysSel.value) qs.push('system=' + encodeURIComponent(sysSel.value));
-  if (document.getElementById('libFavs').checked) qs.push('favorites=1');
-  const r = await api('GET', '/games/list' + (qs.length ? '?' + qs.join('&') : ''))
-                  .catch(() => ({games: []}));
-  // Rebuild the system list from the FULL library (the filtered response
-  // can't name systems it filtered out) whenever the set changes — a new
-  // system appearing must not require a page reload.
-  const all = sysSel.value || document.getElementById('libFavs').checked
-    ? await api('GET', '/games/list').catch(() => ({games: []})) : r;
-  const systems = [...new Set(all.games.map(g => g.system))].sort();
-  const shown = [...sysSel.options].slice(1).map(o => o.value);
-  if (systems.join() !== shown.join()) {
-    const keep = sysSel.value;
-    sysSel.innerHTML = '';
-    sysSel.add(new Option('(all systems)', ''));
-    systems.forEach(s => sysSel.add(new Option(s, s)));
-    sysSel.value = systems.includes(keep) ? keep : '';
-  }
-  document.getElementById('library').innerHTML = r.games.map(g =>
-    `<li><button onclick="api('POST','/games/launch',
-        {system:'${g.system}',path:'${g.path}'}).then(refresh)">▶</button>
-     <button class="${g.favorite ? '' : 'red'}"
-       onclick="api('POST','/favorites/${g.favorite ? 'remove' : 'add'}',
-         {id:'${g.id}'}).then(loadLibrary)">${g.favorite ? '★' : '☆'}</button>
-     ${g.id}</li>`).join('') || '<li><small>no games</small></li>';
+/** Cover art with a graceful placeholder. A 404 is the normal state for a
+ *  cold cache (art is fetched lazily), so it must never look like an error. */
+function cover(system, file, w, ht) {
+  const box = "width:" + w + "px;height:" + ht + "px;";
+  if (!system || !file) return h`<div class="art ph" style="${box}">no art</div>`;
+  return h`<img class="art" style="${box}" loading="lazy" alt="" src="${esc(artUrl(system, file))}"
+    onerror="this.outerHTML='<div class=&quot;art ph&quot; style=&quot;${box}&quot;>no art</div>'">`;
 }
-
-// ---- screensaver sources: filter + bulk enable/disable ----
-function renderSources() {
-  const q = (document.getElementById('srcFilter')?.value || '').toLowerCase();
-  const list = (window._sources || []).filter(s => !q || s.name.toLowerCase().includes(q));
-  document.getElementById('sources').innerHTML = list.map(s =>
-    `<li><button class="${s.enabled ? '' : 'red'}"
-      onclick="api('POST','/screensaver/set-source',{id:'${s.id}',enabled:${!s.enabled}}).then(refresh)">
-      ${s.enabled ? '✓' : '✗'}</button>
-     ${s.thumb ? `<img src="${s.thumb}" alt="" class="thumb">` : ''}
-     ${s.name} <small>${s.type}</small></li>`).join('')
-    || '<li><small>no matching sources</small></li>';
+function badge(text, color) {
+  return h`<span class="badge" style="background:${color}">${esc(text)}</span>`;
 }
+function panel(cls, cap, body) {
+  return h`<div class="panel ${cls}"><div class="cap">${cap}</div><div class="body">${body}</div></div>`;
+}
+function gapNote(title, html) {
+  return h`<div class="gap"><b>${esc(title)}</b><br>${html}</div>`;
+}
+const off = () => !S.online;
 
-async function setAllSources(enabled) {
-  const q = (document.getElementById('srcFilter')?.value || '').toLowerCase();
-  const list = (window._sources || []).filter(s => !q || s.name.toLowerCase().includes(q));
-  for (const s of list) {
-    if (s.enabled !== enabled) {
-      await api('POST', '/screensaver/set-source', {id: s.id, enabled});
+/** Elapsed play time, ticking between heartbeats.
+ *  cabd sends both `elapsed_s` (monotonic, authoritative) and `started_at`
+ *  (epoch). Using the epoch to interpolate keeps the counter moving at 1 Hz
+ *  instead of jumping every heartbeat; it falls back to the reported value
+ *  when clocks disagree, which is what monotonic is there for. */
+function liveElapsed(cab) {
+  if (!cab || !cab.running) return null;
+  if (cab.started_at) {
+    const wall = Date.now() / 1000 - cab.started_at;
+    if (wall >= 0 && (cab.elapsed_s == null || Math.abs(wall - cab.elapsed_s) < 120)) {
+      return wall;
     }
   }
-  refresh();
+  return cab.elapsed_s;
 }
 
-// ---- streaming quality ----
-async function loadStreamApps() {
-  const r = await api('GET', '/stream/apps').catch(() => ({apps: []}));
-  document.getElementById('streamApps').innerHTML = (r.apps || []).map(a => {
-    const q = a.quality || {};
-    const id = a.name.replace(/[^a-z0-9]/gi, '');
-    return `<div class="row"><b>${a.name}</b> <small>${a.kind}</small><br>
-      <input type="text" id="res${id}" size="9" value="${q.resolution || ''}">
-      <input type="text" id="fps${id}" size="3" value="${q.fps || ''}">
-      <input type="text" id="bit${id}" size="6" value="${q.bitrate_kbps || ''}">
-      <button onclick="setQuality('${a.name.replace(/'/g, "\\'")}','${id}')">Set</button>
-      <br><small>resolution / fps / kbps</small></div>`;
-  }).join('') || '<small>no stream apps</small>';
-}
-
-async function setQuality(name, id) {
-  const body = {app: name};
-  const res = val('res' + id), fps = val('fps' + id), bit = val('bit' + id);
-  if (res) body.resolution = res;
-  if (fps) body.fps = +fps;
-  if (bit) body.bitrate_kbps = +bit;
-  await api('POST', '/stream/set-quality', body).catch(e => alert('rejected: ' + e));
-  loadStreamApps();
-}
-
-// ---- cabinet health + cache + ssh ----
-async function loadHealth() {
-  const h = await api('GET', '/cab/health').catch(() => null);
-  const el = document.getElementById('health');
-  if (!h) { el.innerHTML = '<small>cabinet offline</small>'; return; }
-  const pct = h.disk_used_pct ?? 0;
-  el.innerHTML = `
-    <div class="row"><label>Disk</label>
-      <b style="color:${pct > 90 ? 'var(--red)' : 'inherit'}">${pct}% used</b>
-      <small>${h.disk_free_h || ''} free of ${h.disk_total_h || ''}</small></div>
-    <div class="row"><label>Uptime</label>${h.uptime_h || '?'}</div>
-    <div class="row"><label>Load</label>${(h.load || []).join('  ')}</div>
-    <div class="row"><label>Temp</label>${h.temp_c != null ? h.temp_c + ' °C' : 'n/a'}</div>
-    <div class="row"><label>Clip cache</label>${h.clips || 0} file(s), ${h.clips_h || '0B'}</div>
-    <div class="row"><small>${(h.versions || []).join(' · ')}</small></div>`;
-  const link = document.getElementById('sshLink');
-  if (h.ssh_user && h.ip) {
-    link.href = `ssh://${h.ssh_user}@${h.ip}`;
-    window._sshCmd = `ssh ${h.ssh_user}@${h.ip}`;
-    document.getElementById('sshHint').textContent =
-      'opens your terminal on macOS; Windows needs an ssh:// handler — use Copy';
+/* =========================================================== data loading */
+async function refresh() {
+  try {
+    const ov = await api("GET", "/overview");
+    S.ov = ov;
+    S.online = !!ov.online;
+    if (ov.online) S.lastSeen = Date.now();
+    if (S.page !== "health" || !S.health) S.health = ov.health;
+    if (!S.audioDirty) S.audio = ov.audio;
+    if (!S.saverDirty) S.saver = ov.screensaver;
+    S.stream = ov.streaming;
+  } catch (_) {
+    S.online = false;
   }
+  try { S.alerts = (await api("GET", "/alerts?limit=8")).alerts; } catch (_) { /* non-fatal */ }
+  paint();
 }
 
-async function clearCache() {
-  const msg = document.getElementById('cacheMsg');
-  msg.textContent = 'clearing…';
-  const r = await api('POST', '/cab/clear-cache').catch(() => null);
-  msg.textContent = r ? `freed ${r.freed_h || '0B'}` : 'failed';
-  loadHealth();
+/* Tab-scoped loads. Kept off the 3s poll so it never drags a Plex library
+   listing or an evdev enumeration along with it. */
+const LOADED = {};
+async function loadTab(page) {
+  try {
+    if (page === "saver" && !S.sources && !S.srcLoading) {
+      S.srcLoading = true; paint();
+      try { S.sources = await api("GET", "/screensaver/sources"); }
+      finally { S.srcLoading = false; }
+    }
+    if (page === "health") S.health = await api("GET", "/cab/health");
+    if (page === "integ") S.integ = await api("GET", "/integrations");
+    if (page === "rom" && !S.romBackend) {
+      S.romBackend = await api("GET", "/roms/backend").catch(() => ({}));
+    }
+    if (page === "remap" && !LOADED.remap) {
+      LOADED.remap = true;
+      const [scopes, presets] = await Promise.all([
+        api("GET", "/controls/scopes").catch(() => ({ scopes: ["global"] })),
+        api("GET", "/controls/presets").catch(() => ({ presets: [] })),
+      ]);
+      S.remap.scopes = scopes.scopes;
+      S.remap.presets = presets.presets;
+      S.remap.devices = await api("GET", "/controls/devices")
+        .then((r) => r.devices).catch(() => null);
+      await loadBindings();
+    }
+  } catch (e) {
+    toast("✖ " + e.message, "err");
+  }
+  paint();
+}
+async function loadBindings() {
+  const r = await api("GET",
+    "/controls/bindings?scope=" + encodeURIComponent(S.remap.scope))
+    .catch(() => ({}));
+  S.remap.bindings = r.bindings || {};
+  S.remap.combos = r.combos || [];
+  if (r.targets) S.remap.targets = r.targets;
 }
 
-function copySsh() {
-  const cmd = window._sshCmd || '';
-  navigator.clipboard?.writeText(cmd);
-  document.getElementById('sshHint').textContent = 'copied: ' + cmd;
+/* =============================================================== chrome    */
+function paintChrome() {
+  document.body.classList.toggle("nomotion", !S.motion);
+  document.getElementById("btnMotion").textContent =
+    S.motion ? "REDUCE MOTION" : "MOTION: FULL";
+
+  const p = document.getElementById("pillOnline");
+  p.textContent = S.online ? "● CABINET ONLINE" : "○ CABINET OFFLINE";
+  p.style.background = S.online ? "var(--lime)" : "#8a0035";
+  p.style.animation = S.online || !S.motion ? "none" : "blink 1.2s steps(1) infinite";
+
+  const ops = document.getElementById("pillOps");
+  ops.textContent = S.pending
+    ? "↻ " + S.pending + " OPERATION" + (S.pending > 1 ? "S" : "") + " PENDING"
+    : "✓ NO PENDING OPS";
+  ops.style.background = S.pending ? "#c47a00" : "#6a4a8a";
+
+  const queue = (S.ov && S.ov.rom_queue) || [];
+  const active = queue.filter((r) =>
+    ["queued", "downloading", "delivering"].indexOf(r.status) >= 0);
+  const xf = document.getElementById("pillXfer");
+  xf.textContent = active.length
+    ? "⇅ " + active[0].title + " · " + active[0].status.toUpperCase()
+    : "⇅ NO ROM JOBS";
+  xf.style.background = active.length ? "var(--blue)" : "#6a4a8a";
+
+  document.getElementById("offlineBanner").classList.toggle("hide", S.online);
+  document.getElementById("offlineText").textContent = S.lastSeen
+    ? "Showing last known values from " + new Date(S.lastSeen).toLocaleTimeString() +
+      ". Controls that need the cabinet are disabled until the socket comes back."
+    : "No cabinet has connected yet. Server-side settings still save — they sync on connect.";
+
+  const games = (S.ov && S.ov.games) || [];
+  const hh = S.health || {};
+  const rotating = ((S.ov && S.ov.screensaver && S.ov.screensaver.sources) || [])
+    .filter((s) => s.enabled).length;
+  const mq = "★ WELCOME 2 THE ARCADE CONTROL PLANE ★ " + games.length +
+    " GAMES ON CAB-01 ★ DISK " + pct(hh.disk_used_pct) + " USED ★ " +
+    (hh.clips || 0) + " CLIPS CACHED ★ NO CRT FILTERS WERE HARMED ★ " +
+    rotating + " SOURCES IN TONIGHT'S ROTATION ★ ";
+  document.getElementById("mq1").textContent = mq;
+  document.getElementById("mq2").textContent = mq;
+
+  document.getElementById("subline").textContent =
+    "cab-01 · welcome back player one · " +
+    (S.ov && S.ov.art_cache ? S.ov.art_cache.cached + " covers cached" : "—");
+
+  document.getElementById("tabs").innerHTML = TABS.map(([k, label]) =>
+    h`<button class="tab ${S.page === k ? "on" : ""}" data-act="tab" data-tab="${k}">${label}</button>`
+  ).join("");
 }
 
-function shot() { document.getElementById('shot').src = '/cab/screenshot?' + Date.now(); }
-refresh(); shot(); setInterval(refresh, 5000);
+function paint() {
+  paintChrome();
+  setView((VIEWS[S.page] || VIEWS.dash)());
+}
+function go(page) {
+  S.page = page;
+  location.hash = page;
+  paint();
+  loadTab(page);
+}
+ACTIONS.tab = (el) => go(el.dataset.tab);
+ACTIONS.goto = (el) => go(el.dataset.tab);
+document.getElementById("btnMotion").onclick = () => { S.motion = !S.motion; paint(); };
+
+const VIEWS = {};
+
+/* --------------------------------------------------------------- dashboard */
+VIEWS.dash = () => {
+  const ov = S.ov || {};
+  const cab = ov.cabinet_state || {};
+  const hh = S.health || {};
+  const games = ov.games || [];
+  const running = splitRom(cab.running);
+  const queue = ov.rom_queue || [];
+  const used = hh.disk_used_pct;
+
+  const nowPlaying = panel("p-hot", "NOW PLAYING", h`
+    <div class="row" style="gap:16px;">
+      ${running ? cover(running.system, running.file, 96, 130)
+                : h`<div class="art ph" style="width:96px;height:130px;">idle</div>`}
+      <div style="flex:1; min-width:220px;">
+        <div style="font-family:var(--disp); font-size:30px; line-height:1.1;
+             color:var(--blue); overflow-wrap:anywhere;">
+          ${esc(running ? running.file : "NOTHING RUNNING")}</div>
+        <div class="row" style="margin-top:6px;">
+          <span class="chip">SYSTEM: ${esc(running ? (cab.system || running.system).toUpperCase() : "—")}</span>
+          <span class="chip">ELAPSED: ${esc(hms(liveElapsed(cab)))}</span>
+          <span class="chip">${off() ? "STATUS UNKNOWN (OFFLINE)"
+                                     : running ? "RUNNING" : "AT PEGASUS HOME"}</span>
+        </div>
+        <div class="row" style="margin-top:12px;">
+          <button class="danger" data-act="kill" ${running && !off() ? "" : "disabled"}>KILL GAME</button>
+          <button data-act="ss-on" ${off() ? "disabled" : ""}>SCREENSAVER ON</button>
+          <button class="grey" data-act="ss-off" ${off() ? "disabled" : ""}>SCREENSAVER OFF</button>
+        </div>
+      </div>
+      <div style="width:132px; text-align:center; font-size:10px; font-weight:bold;
+           letter-spacing:.1em; padding:10px; border-radius:12px; color:#3a1a6a;
+           border:4px solid ${cab.screensaver ? "var(--purp)" : "var(--grey)"};
+           background:${cab.screensaver ? "#f3ecff" : "#f7f4fa"};">SCREENSAVER<br>
+        <b style="font-size:24px; font-family:var(--cap);">${cab.screensaver ? "ON" : "OFF"}</b></div>
+      <div style="width:132px; text-align:center; font-size:10px; font-weight:bold;
+           letter-spacing:.1em; padding:10px; border-radius:12px; color:#3a1a6a;
+           border:4px solid ${cab.lifeline ? "var(--red)" : "var(--grey)"};
+           background:${cab.lifeline ? "#ffe9f1" : "#f7f4fa"};">LIFELINE<br>
+        <b style="font-size:24px; font-family:var(--cap);">${cab.lifeline ? "UP" : "off"}</b></div>
+    </div>
+    ${running && cab.started_at ? h`<div class="note" style="opacity:.7; margin-top:10px;">
+      started ${esc(new Date(cab.started_at * 1000).toLocaleTimeString())}</div>` : ""}`);
+
+  const content = panel("p-blue", "CABINET CONTENT", h`
+    <div class="row" style="margin-bottom:10px;">
+      <div style="flex:1; min-width:260px;">
+        <div style="font-size:11px; font-weight:bold; letter-spacing:.1em; margin-bottom:5px;">
+          STORAGE &mdash; ${esc(dash(hh.disk_free_h))} free of ${esc(dash(hh.disk_total_h))}</div>
+        <div class="meter"><i class="${used > 90 ? "hot" : ""}" style="width:${used || 0}%"></i></div>
+      </div>
+      <div class="stat"><b>${games.length}</b>ON CABINET</div>
+      <div class="stat pink"><b>${queue.filter((r) =>
+        r.status !== "ready" && r.status !== "error").length}</b>ROM JOBS</div>
+      <button data-act="goto" data-tab="lib">MANAGE GAMES &rarr;</button>
+    </div>
+    <table><thead><tr><th>ART</th><th>GAME</th><th>SYSTEM</th><th>FAV</th></tr></thead><tbody>
+    ${games.slice(0, 6).map((g) => h`<tr>
+      <td>${cover(g.system, g.file, 34, 46)}</td>
+      <td><b>${esc(g.file)}</b></td>
+      <td>${esc(g.system.toUpperCase())}</td>
+      <td>${g.favorite ? "★" : "☆"}</td></tr>`).join("")
+      || h`<tr><td colspan="4" class="note">${off()
+            ? "cabinet offline — library unknown" : "no roms on the cabinet yet"}</td></tr>`}
+    </tbody></table>`);
+
+  const healthCard = panel("p-lime", "HEALTH SUMMARY", h`
+    <div class="kv"><span>Disk used</span><b>${pct(hh.disk_used_pct)}</b></div>
+    <div class="kv"><span>Temperature</span><b>${esc(hh.temp_c != null ? hh.temp_c + " °C" : "—")}</b></div>
+    <div class="kv"><span>Uptime</span><b>${esc(dash(hh.uptime_h))}</b></div>
+    <div class="kv"><span>Load</span><b>${esc((hh.load || []).join(" / ") || "—")}</b></div>
+    <div class="kv"><span>Clip cache</span><b>${esc(hh.clips != null
+      ? hh.clips + " · " + dash(hh.clips_h) : "—")}</b></div>
+    <div style="margin-top:10px;"><a href="#health" data-act="goto" data-tab="health">
+      FULL CABINET HEALTH &rarr;</a></div>`);
+
+  const romCard = panel("p-purp", "RECENT ROM QUEUE", h`
+    ${queue.slice(0, 5).map((r) => h`<div class="kv">
+      <span style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${esc(r.title)}</span>
+      <b style="color:${r.status === "error" ? "#c1004a"
+        : r.status === "ready" ? "#065c22" : "var(--blue)"}">${esc(r.status)}</b></div>`).join("")
+      || h`<div class="note" style="opacity:.7;">queue is squeaky clean ✨</div>`}
+    <div style="margin-top:10px;"><a href="#rom" data-act="goto" data-tab="rom">
+      OPEN ROM QUEUE &rarr;</a></div>`);
+
+  const opsCard = panel("p-red", "OPERATIONS", h`<div class="col">
+      <button class="danger" data-act="reboot" ${off() ? "disabled" : ""}>REBOOT CABINET</button>
+      <button class="danger" data-act="restart-fe" ${off() ? "disabled" : ""}>RESTART FRONTEND</button>
+      <div class="row">
+        <button class="sm" data-act="ll-on" ${off() ? "disabled" : ""}>LIFELINE ON</button>
+        <button class="sm grey" data-act="ll-off" ${off() ? "disabled" : ""}>LIFELINE OFF</button>
+      </div>
+      <div class="kv"><span>Lifeline</span><b>${cab.lifeline ? "ON (showing on CRT)" : "off"}</b></div>
+      <a href="#" data-act="logs">VIEW LOGS (cabd journal) &rarr;</a>
+    </div>`);
+
+  const alertsCard = panel("p-yel", "ALERTS &amp; ERRORS", h`
+    <div class="col" style="gap:8px;">
+    ${(S.alerts || []).map((a) => {
+      const c = a.tag === "FAILED" ? ["var(--red)", "#ffe9f1"]
+              : a.tag === "WARN" ? ["var(--yel)", "#fff8db"] : ["#6a4a8a", "#f6f0ff"];
+      return h`<div style="border:3px solid ${c[0]}; background:${c[1]}; border-radius:8px;
+        padding:7px 9px; font-size:11.5px; font-weight:bold; line-height:1.5;">
+        <b>${esc(a.tag)}</b> ${esc(a.msg)}
+        <div style="font-size:10px; opacity:.7; margin-top:3px;">${esc(relTime(a.ts))}</div></div>`;
+    }).join("") || h`<div class="note" style="opacity:.7;">nothing to report ✨</div>`}
+    </div>`);
+
+  const goToCard = panel("p-aqua", "GO TO", h`
+    <div style="display:grid; grid-template-columns:1fr 1fr; gap:6px;">
+    ${TABS.slice(1).map(([k, l]) =>
+      h`<button class="sm grey" data-act="goto" data-tab="${k}">${l}</button>`).join("")}
+    </div>`);
+
+  return h`<div class="grid g-dash">
+    <div class="col">${nowPlaying}${content}
+      <div class="grid g-half">${healthCard}${romCard}</div></div>
+    <div class="col">${opsCard}${alertsCard}${goToCard}</div></div>`;
+};
+
+ACTIONS.kill = async () => {
+  if (await ask("Kill the running game? Any unsaved emulator state is gone."))
+    op("kill game", () => api("POST", "/games/kill"), "✔ game killed, back at pegasus home");
+};
+ACTIONS["ss-on"] = () => op("screensaver on", () => api("POST", "/screensaver/on"));
+ACTIONS["ss-off"] = () => op("screensaver off", () => api("POST", "/screensaver/off"));
+ACTIONS["ll-on"] = () => op("lifeline on", () => api("POST", "/cab/lifeline/on"));
+ACTIONS["ll-off"] = () => op("lifeline off", () => api("POST", "/cab/lifeline/off"));
+ACTIONS.reboot = async () => {
+  if (await ask("Reboot CAB-01? The cabinet is unreachable for ~40 seconds and any running game dies."))
+    op("reboot", () => api("POST", "/cab/reboot"), "✔ reboot accepted, cab going down");
+};
+ACTIONS["restart-fe"] = async () => {
+  if (await ask("Restart the Pegasus frontend? The screen goes black for a couple of seconds."))
+    op("restart frontend", () => api("POST", "/cab/restart-frontend"));
+};
+ACTIONS.logs = async () => {
+  try {
+    const r = await api("GET", "/cab/logs?lines=300");
+    const w = window.open("", "_blank");
+    if (!w) return toast("✖ popup blocked", "err");
+    w.document.title = "cabd logs";
+    const pre = w.document.createElement("pre");
+    pre.style.font = "12px ui-monospace, monospace";
+    pre.style.whiteSpace = "pre-wrap";
+    pre.textContent = (r.lines || [])
+      .map((l) => (Array.isArray(l) ? l.join(" ") : String(l))).join("\n");
+    w.document.body.appendChild(pre);
+  } catch (e) { toast("✖ logs: " + e.message, "err"); }
+};
+
+/* ------------------------------------------------------------------- audio */
+const VOL_ROWS = [
+  ["master", "Master volume", "global output cap", null],
+  ["games", "Games volume", "retroarch + local steam", null],
+  ["trailers", "Trailers volume", "stored policy only", "ALWAYS MUTED ON CAB"],
+  ["screensaver", "Screensaver volume", "stored policy only", "ALWAYS SILENT (mpv)"],
+  ["system", "System volume", "ui blips + lifeline beeps", null],
+];
+function volOf(k) {
+  const a = S.audio || {};
+  if (k === "master") return { volume: a.master == null ? 70 : a.master, muted: false };
+  return (a.classes && a.classes[k]) || { volume: 100, muted: false };
+}
+VIEWS.audio = () => panel("p-blue", "AUDIO MIXER &mdash; SLIDE IT, IT SPARKLES ✨", h`
+  ${VOL_ROWS.map(([k, label, note, policy]) => {
+    const v = volOf(k);
+    return h`<div style="display:flex; align-items:center; gap:12px; flex-wrap:wrap;
+        padding:11px 0; border-bottom:2px dotted #ffb0d8;">
+      <div style="width:210px; flex-shrink:0;">
+        <div style="font-family:var(--cap); font-size:14px; color:var(--blue);">${label}</div>
+        <div style="font-size:10.5px; font-weight:bold; opacity:.7; margin-top:3px;">${note}</div>
+      </div>
+      <input type="range" min="0" max="100" value="${v.volume}" style="flex:1; min-width:180px;"
+             data-input="vol" data-vk="${k}" data-k="vol-${k}">
+      <div style="font-family:var(--cap); font-size:15px; width:62px; text-align:center;
+           border:3px solid var(--ink); border-radius:6px; background:#fff; padding:3px 0;">${v.volume}%</div>
+      ${k === "master" ? "" : h`<button class="sm ${v.muted ? "danger" : "grey"}"
+             data-act="mute" data-vk="${k}">${v.muted ? "MUTED" : "MUTE"}</button>`}
+      ${policy ? h`<div style="font-size:10px; font-weight:bold; letter-spacing:.06em;
+           padding:5px 9px; border-radius:6px; background:#fff3c4; border:3px solid #d1a300;
+           color:#6b4700;">${policy}</div>` : ""}
+    </div>`;
+  }).join("")}
+  <div class="row" style="margin-top:14px;">
+    <button data-act="audio-apply" ${S.audioDirty ? "" : "disabled"}>APPLY MIXER</button>
+    <div class="state ${S.audioState.indexOf("✔") === 0 ? "ok" : S.audioState ? "pend" : ""}">
+      ${esc(S.audioState || (S.audioDirty ? "unsaved changes" : "no pending change"))}</div>
+  </div>
+  <div style="margin-top:14px; border:4px solid #ffd400; background:#fffbe4; border-radius:10px;
+       padding:10px 12px;" class="note">
+    <b style="font-family:var(--cap); font-size:13px;">ENFORCED SILENT POLICIES</b><br>
+    Trailer and screensaver audio are <b>always muted on the cabinet</b> (AUD-2). Their sliders
+    store a policy level for later &mdash; they are not currently audible output.
+  </div>`);
+
+ACTIONS.vol = (el) => {
+  const k = el.dataset.vk, v = +el.value;
+  S.audio = S.audio || {};
+  if (k === "master") S.audio.master = v;
+  else {
+    S.audio.classes = S.audio.classes || {};
+    S.audio.classes[k] = Object.assign({ volume: 100, muted: false }, S.audio.classes[k], { volume: v });
+  }
+  S.audioDirty = true; S.audioState = "";
+  sparkle(el, v / 100);
+  paint();
+};
+ACTIONS.mute = (el) => {
+  const k = el.dataset.vk, cur = volOf(k);
+  S.audio = S.audio || {};
+  S.audio.classes = S.audio.classes || {};
+  S.audio.classes[k] = Object.assign({}, cur, { muted: !cur.muted });
+  S.audioDirty = true; S.audioState = "";
+  paint();
+};
+ACTIONS["audio-apply"] = async () => {
+  S.audioState = "applying..."; paint();
+  try {
+    // /volume/set takes master OR one class per call, so the mixer applies as
+    // a sequence. Sequential rather than parallel on purpose: each call is a
+    // git commit in the state repo, and concurrent commits would race.
+    await api("POST", "/volume/set", { master: volOf("master").volume });
+    for (const row of VOL_ROWS.slice(1)) {
+      const v = volOf(row[0]);
+      await api("POST", "/volume/set",
+        { "class": row[0], volume: v.volume, muted: !!v.muted });
+    }
+    S.audioDirty = false; S.audioState = "✔ mixer applied";
+    toast("✔ audio mixer applied to cabd", "ok");
+  } catch (e) {
+    S.audioState = "";
+    toast("✖ mixer: " + e.message, "err");
+  }
+  await refresh();
+};
+
+/* ------------------------------------------------------------- screensaver */
+const SS_SHUFFLE = ["in_order", "random_episode", "even_series", "round_robin", "decay"];
+const SS_ASPECT = ["crop", "bars", "stretch"];
+const SS_FALLBACK = ["local_clips", "dim_clock", "off"];
+const SUPPRESS = [["30m", 1800], ["2h", 7200], ["8h", 28800]];
+const srcId = (s) => s.plex_id || s.jellyfin_id;
+
+VIEWS.saver = () => {
+  const sv = S.saver || {};
+  const added = new Map(((sv.sources) || []).map((s) => [srcId(s), s]));
+  const lib = S.sources || [];
+  const byId = new Map(lib.map((i) => [i.id, i]));
+  const q = S.srcQuery.trim().toLowerCase();
+  const hits = q ? lib.filter((i) => String(i.name || "").toLowerCase().indexOf(q) >= 0) : [];
+  const pf = S.poolFilter.trim().toLowerCase();
+
+  const pool = [...added.keys()]
+    .map((id) => ({ id, meta: byId.get(id) || { id, name: id, type: "" },
+                    air: !!added.get(id).enabled }))
+    .filter((p) => String(p.meta.name).toLowerCase().indexOf(pf) >= 0)
+    .sort((a, b) => String(a.meta.name).localeCompare(String(b.meta.name)));
+  const airing = pool.filter((p) => p.air).length;
+
+  const field = (label, node, state) => h`
+    <div class="row" style="border-top:2px dotted #d3b8ff; padding-top:9px;">
+      <div style="width:150px; font-size:12px; font-weight:bold;">${label}</div>
+      <div style="flex:1; min-width:200px;">${node}</div>
+      <div class="state" style="font-size:10px; padding:4px 8px;">${state}</div></div>`;
+  const sel = (k, opts, val) => h`<select data-change="sv" data-sk="${k}">
+    ${opts.map((o) => h`<option ${o === val ? "selected" : ""}>${esc(o)}</option>`).join("")}</select>`;
+  const num = (k, val, suffix) => h`<span style="display:inline-flex; align-items:center; gap:6px;">
+    <input type="number" min="0" style="width:90px" value="${val == null ? 0 : val}"
+           data-change="sv" data-sk="${k}" data-k="sv-${k}"><b style="font-size:11px">${suffix}</b></span>`;
+
+  const policy = panel("p-purp", "SCREENSAVER POLICY", h`<div class="col" style="gap:10px;">
+      <div class="row">
+        <div style="width:150px; font-size:12px; font-weight:bold;">Brightness</div>
+        <input type="range" min="0" max="100" style="flex:1;"
+               value="${sv.brightness == null ? 80 : sv.brightness}"
+               data-input="sv-bright" data-k="sv-bright">
+        <div style="font-family:var(--cap); font-size:15px; width:62px; text-align:center;
+             border:3px solid var(--ink); border-radius:6px; padding:3px 0;">
+          ${sv.brightness == null ? 80 : sv.brightness}%</div>
+      </div>
+      ${field("Idle timeout", num("idle_seconds", sv.idle_seconds, "seconds"), "stored")}
+      ${field("Aspect", sel("aspect", SS_ASPECT, sv.aspect), "live")}
+      ${field("Shuffle", sel("shuffle", SS_SHUFFLE, sv.shuffle), "live")}
+      ${field("Movies = own series", h`<label style="font-size:12px; font-weight:bold;
+          display:inline-flex; gap:6px; align-items:center;">
+          <input type="checkbox" data-change="sv" data-sk="movies_as_series"
+                 ${sv.movies_as_series ? "checked" : ""}> each movie counts as its own series</label>`, "live")}
+      ${field("Skip intro", num("skip_intro_s", sv.skip_intro_s, "seconds"), "stored")}
+      ${field("Skip outro", num("skip_outro_s", sv.skip_outro_s, "seconds"), "stored")}
+      ${field("Fallback", sel("fallback", SS_FALLBACK, sv.fallback), "live")}
+      <div class="row" style="border-top:4px double var(--purp); padding-top:10px;">
+        <button data-act="sv-apply" ${S.saverDirty ? "" : "disabled"}>SET / APPLY</button>
+        <div class="state ${S.saverState.indexOf("✔") === 0 ? "ok" : S.saverState ? "pend" : ""}">
+          ${esc(S.saverState || (S.saverDirty ? "unsaved changes" : "no pending change"))}</div>
+      </div>
+      <div class="row" style="border-top:2px dotted #d3b8ff; padding-top:10px;">
+        <div style="width:150px; font-size:12px; font-weight:bold;">Suppress</div>
+        ${SUPPRESS.map((s) => h`<button class="sm grey" data-act="sv-suppress" data-secs="${s[1]}"
+          ${off() ? "disabled" : ""}>OFF FOR ${s[0]}</button>`).join("")}
+        <button class="sm lime" data-act="sv-suppress" data-secs="0" ${off() ? "disabled" : ""}>RESUME</button>
+      </div>
+      <div class="note" style="border:3px dashed var(--purp); padding:8px; border-radius:8px;
+           background:#f7f0ff;"><b>LEGACY mode:</b> <code>${esc(sv.mode || "shuffle_episodes")}</code>
+        &mdash; the richer <code>shuffle</code> policy above wins when both are set.</div>
+      ${gapNote("“UNTIL REBOOT” SUPPRESSION",
+        "<code>/screensaver/disable</code> takes a duration in seconds. An indefinite suppression that survives to the next boot has no representation in cabd yet.")}
+    </div>`);
+
+  const search = panel("p-hot", "FIND &amp; ADD SOURCES (" +
+    (lib.length ? lib.length + " IN LIBRARY" : "LIBRARY NOT LOADED") + ")",
+    h`<div class="col" style="gap:10px;">
+      <div class="note">Nothing is listed until you search &mdash; the library is huge. Find a show
+        or movie once, ADD it, and it lives on the rotation board below where you flip it ON or OFF.</div>
+      <input type="search" placeholder="search shows &amp; movies..." value="${esc(S.srcQuery)}"
+             data-input="src-q" data-k="src-q" style="font-size:14px; padding:9px;">
+      <div style="font-size:11px; font-weight:bold; color:#6a4a8a;">
+        ${S.srcLoading ? "loading library from plex..."
+          : !lib.length ? "library unavailable — is Plex reachable?"
+          : q ? (hits.length
+                  ? "showing " + Math.min(hits.length, 8) + " of " + hits.length + " matches"
+                  : "no matches for “" + esc(S.srcQuery) + "”")
+              : "type at least one letter to search the library"}</div>
+      ${hits.slice(0, 8).map((i) => {
+        const on = added.has(i.id);
+        return h`<div style="display:flex; align-items:center; gap:10px; padding:8px 9px;
+            border-radius:9px; border:3px solid ${on ? "#8fe36a" : "#e0cff0"};
+            background:${on ? "#f6fff2" : "#fdfbff"};">
+          <img class="thumb" src="/thumb/${encodeURIComponent(i.id)}" alt=""
+               onerror="this.style.visibility='hidden'">
+          <div style="flex:1; min-width:0;">
+            <b style="font-size:13px;">${esc(i.name)}</b>
+            <div style="font-size:10.5px; font-weight:bold; opacity:.7;">${esc(i.type || "")}
+              · ${on ? "already on the board (" + (added.get(i.id).enabled ? "ON" : "OFF") + ")"
+                          : "not added yet"}</div></div>
+          <button class="sm lime" data-act="src-add" data-sid="${esc(i.id)}" ${on ? "disabled" : ""}>
+            ${on ? "ON BOARD ✓" : "+ ADD"}</button></div>`;
+      }).join("")}
+    </div>`);
+
+  const board = panel("p-lime",
+    "ROTATION BOARD &mdash; " + pool.length + " ADDED · " + airing + " ON", h`
+    <div class="row" style="margin-bottom:12px;">
+      <input type="text" placeholder="filter the pool..." value="${esc(S.poolFilter)}"
+             data-input="pool-f" data-k="pool-f" style="min-width:200px;">
+      <button class="sm" data-act="src-all" data-on="1">TURN ALL ON</button>
+      <button class="sm grey" data-act="src-all" data-on="">TURN ALL OFF</button>
+      <div style="font-size:10.5px; font-weight:bold; color:#3a1a6a; background:#f6f0ff;
+           border:3px solid #d3b8ff; border-radius:8px; padding:6px 9px;">
+        ON = in tonight's rotation · OFF = added but skipped · REMOVE takes it off entirely</div>
+    </div>
+    <div style="display:grid; grid-template-columns:repeat(auto-fill,minmax(340px,1fr)); gap:10px;">
+    ${pool.map((p) => h`<div style="border:4px solid ${p.air ? "var(--lime)" : "#c9b8dd"};
+        border-radius:11px; padding:9px 10px;
+        background:${p.air ? "linear-gradient(180deg,#fbfff8,#eaffe4)" : "#f7f4fa"};
+        box-shadow:3px 3px 0 ${p.air ? "rgba(31,168,60,.3)" : "rgba(27,11,46,.12)"};">
+      <div style="display:flex; gap:8px; align-items:center;">
+        <img class="thumb" src="/thumb/${encodeURIComponent(p.id)}" alt=""
+             onerror="this.style.visibility='hidden'">
+        <div style="flex:1; min-width:0;">
+          <b style="font-size:13px; display:block; overflow:hidden; text-overflow:ellipsis;
+             white-space:nowrap;">${esc(p.meta.name)}</b>
+          <span style="font-size:10px; font-weight:bold; opacity:.7;">${esc(p.meta.type || "")}
+            · ${p.air ? "IN ROTATION" : "SKIPPED"}</span></div>
+        <button class="sm ${p.air ? "lime" : "grey"}" data-act="src-toggle"
+                data-sid="${esc(p.id)}" data-on="${p.air ? "" : "1"}">${p.air ? "ON" : "OFF"}</button>
+      </div>
+      <button class="xs danger" style="width:100%; margin-top:8px;" data-act="src-remove"
+              data-sid="${esc(p.id)}" data-name="${esc(p.meta.name)}">REMOVE</button>
+    </div>`).join("")}</div>
+    ${pool.length ? "" : h`<div class="note" style="opacity:.7; padding:10px 0;">
+      Pool is empty &mdash; search above and add something ✨</div>`}`);
+
+  return h`<div class="col"><div class="grid g-half">${policy}${search}</div>${board}</div>`;
+};
+
+ACTIONS["sv-bright"] = (el) => {
+  S.saver = S.saver || {};
+  S.saver.brightness = +el.value;
+  S.saverDirty = true; S.saverState = "";
+  sparkle(el, +el.value / 100); paint();
+};
+ACTIONS.sv = (el) => {
+  S.saver = S.saver || {};
+  S.saver[el.dataset.sk] = el.type === "checkbox" ? el.checked
+                         : el.type === "number" ? +el.value : el.value;
+  S.saverDirty = true; S.saverState = ""; paint();
+};
+ACTIONS["sv-apply"] = async () => {
+  const sv = S.saver || {};
+  S.saverState = "applying..."; paint();
+  try {
+    await api("POST", "/screensaver/set", {
+      brightness: sv.brightness, idle_seconds: sv.idle_seconds,
+      aspect: sv.aspect, shuffle: sv.shuffle, fallback: sv.fallback,
+      movies_as_series: !!sv.movies_as_series,
+      skip_intro_s: sv.skip_intro_s, skip_outro_s: sv.skip_outro_s,
+    });
+    S.saverDirty = false; S.saverState = "✔ policy applied";
+    toast("✔ screensaver policy applied", "ok");
+  } catch (e) {
+    S.saverState = ""; toast("✖ screensaver: " + e.message, "err");
+  }
+  await refresh();
+};
+ACTIONS["sv-suppress"] = (el) => {
+  const s = +el.dataset.secs;
+  op(s ? "suppress screensaver " + s + "s" : "resume screensaver",
+     () => api("POST", "/screensaver/disable", { seconds: s }));
+};
+ACTIONS["src-q"] = (el) => { S.srcQuery = el.value; paint(); };
+ACTIONS["pool-f"] = (el) => { S.poolFilter = el.value; paint(); };
+ACTIONS["src-add"] = (el) =>
+  op("add source", () => api("POST", "/screensaver/set-source",
+    { id: el.dataset.sid, enabled: true }), "✔ added — rotation ON");
+ACTIONS["src-toggle"] = (el) =>
+  op("toggle source", () => api("POST", "/screensaver/set-source",
+    { id: el.dataset.sid, enabled: !!el.dataset.on }), null);
+ACTIONS["src-remove"] = async (el) => {
+  if (await ask("Remove " + el.dataset.name + " from the rotation board? " +
+                "You'd have to search for it again to add it back."))
+    op("remove source", () => api("POST", "/screensaver/remove-source", { id: el.dataset.sid }));
+};
+ACTIONS["src-all"] = async (el) => {
+  const want = !!el.dataset.on;
+  const todo = ((S.saver && S.saver.sources) || []).filter((s) => !!s.enabled !== want);
+  if (!todo.length) return toast("nothing to change", "warn");
+  S.pending++; paintChrome();
+  try {
+    for (const s of todo) {
+      await api("POST", "/screensaver/set-source", { id: srcId(s), enabled: want });
+    }
+    toast("✔ turned " + todo.length + " source(s) " + (want ? "ON" : "OFF"), "ok");
+  } catch (e) {
+    toast("✖ " + e.message, "err");
+  } finally {
+    S.pending--; await refresh();
+  }
+};
+
+/* --------------------------------------------------------------- streaming */
+const RES = ["1280x720", "1600x900", "1920x1080", "2560x1440"];
+const FPS = ["30", "60", "120"];
+VIEWS.stream = () => {
+  const cfg = S.stream || {};
+  const apps = cfg.entries || [];
+  const defaults = cfg.defaults || {};
+  const colors = ["p-blue", "p-aqua", "p-purp"];
+  return h`<div class="col">
+  ${apps.map((a, i) => {
+    const q = Object.assign({}, defaults, a.quality || {});
+    const games = a.games || [];
+    return panel(colors[i % 3], esc(a.name) + " &mdash; " + esc(a.kind), h`
+      <div class="rowe" style="gap:16px; padding-bottom:12px; border-bottom:3px dotted #cbb8e6;">
+        <label class="field">RESOLUTION
+          <select data-change="app-q" data-app="${esc(a.name)}" data-qk="resolution" style="min-width:130px">
+            ${RES.map((o) => h`<option ${o === q.resolution ? "selected" : ""}>${o}</option>`).join("")}
+          </select></label>
+        <label class="field">FPS
+          <select data-change="app-q" data-app="${esc(a.name)}" data-qk="fps" style="min-width:90px">
+            ${FPS.map((o) => h`<option ${+o === +q.fps ? "selected" : ""}>${o}</option>`).join("")}
+          </select></label>
+        <label class="field">BITRATE (kbps)
+          <input type="number" step="1000" min="1" style="width:120px" value="${esc(q.bitrate_kbps)}"
+                 data-change="app-q" data-app="${esc(a.name)}" data-qk="bitrate_kbps"
+                 data-k="br-${esc(a.name)}"></label>
+        <div style="border:3px dashed var(--blue); border-radius:9px; padding:6px 10px;
+             background:#f2f6ff; min-width:210px;">
+          <div style="font-size:10px; letter-spacing:.1em; opacity:.7;">CURRENT EFFECTIVE</div>
+          <b style="font-family:ui-monospace,monospace; font-size:13px;">${esc(q.resolution)}
+            @ ${esc(q.fps)}fps · ${esc(q.bitrate_kbps)} kbps</b></div>
+        <button class="sm" data-act="app-launch" data-app="${esc(a.name)}"
+                ${off() ? "disabled" : ""}>LAUNCH ON CAB</button>
+      </div>
+      <div style="padding-top:12px;">
+        <div style="font-family:var(--cap); font-size:13px; margin-bottom:8px;">
+          GAMES ON THIS SERVICE (${games.filter((g) => g.enabled !== false).length}
+          on cab / ${games.length}) &mdash; THESE APPEAR IN THE CABINET STREAMING COLLECTION</div>
+        <table><thead><tr><th>ON CAB</th><th>TITLE</th><th>LAUNCH TARGET</th><th>ACTIONS</th></tr></thead>
+        <tbody>
+        ${games.map((g) => h`<tr>
+          <td><button class="xs ${g.enabled !== false ? "lime" : "grey"}" data-act="sgame-toggle"
+                data-app="${esc(a.name)}" data-title="${esc(g.title)}"
+                data-on="${g.enabled !== false ? "" : "1"}">${g.enabled !== false ? "ON" : "OFF"}</button></td>
+          <td><b>${esc(g.title)}</b></td>
+          <td><code style="font-size:11px">${esc(g.target)}</code></td>
+          <td><button class="xs danger" data-act="sgame-remove" data-app="${esc(a.name)}"
+                data-title="${esc(g.title)}">REMOVE</button></td></tr>`).join("")
+          || h`<tr><td colspan="4" class="note" style="opacity:.7">no games pinned for this service yet</td></tr>`}
+        </tbody></table>
+        <div class="rowe" style="margin-top:10px; border-top:3px dotted #cbb8e6; padding-top:10px;">
+          <label class="field">NEW GAME TITLE
+            <input type="text" placeholder="e.g. Forza Horizon 5" style="min-width:200px"
+                   data-k="ngt-${esc(a.name)}" id="ngt-${i}"></label>
+          <label class="field">LAUNCH TARGET
+            <input type="text" placeholder="${esc(a.kind)}:${esc(a.target)}" style="min-width:250px"
+                   data-k="ngg-${esc(a.name)}" id="ngg-${i}"></label>
+          <button data-act="sgame-add" data-app="${esc(a.name)}" data-i="${i}">+ ADD GAME</button>
+        </div>
+      </div>`);
+  }).join("") || h`<div class="note">no streaming apps configured in <code>streaming.yaml</code></div>`}
+  <div class="note" style="opacity:.75;">Apps come from <code>streaming.yaml</code>; game lists here
+    are written back to it and rendered into the cabinet's Streaming collection on the next sync.</div>
+  ${gapNote("PER-GAME QUALITY OVERRIDES",
+    "The state schema stores a <code>quality</code> block per game and <code>/stream/games/set</code> accepts one, but nothing consumes it yet &mdash; cabd applies the app-level quality when it launches a stream.")}
+  </div>`;
+};
+
+ACTIONS["app-q"] = (el) => {
+  const app = el.dataset.app, k = el.dataset.qk;
+  const val = k === "resolution" ? el.value : +el.value;
+  const body = { app: app };
+  body[k] = val;
+  op("set " + app + " " + k, () => api("POST", "/stream/set-quality", body),
+     "✔ " + app + ": " + k + " = " + val);
+};
+ACTIONS["app-launch"] = (el) =>
+  op("launch " + el.dataset.app, () => api("POST", "/stream/launch", { app: el.dataset.app }));
+ACTIONS["sgame-toggle"] = (el) =>
+  op("toggle game", () => api("POST", "/stream/games/set",
+    { app: el.dataset.app, title: el.dataset.title, enabled: !!el.dataset.on }), null);
+ACTIONS["sgame-remove"] = async (el) => {
+  if (await ask("Remove " + el.dataset.title + " from " + el.dataset.app +
+                "? It disappears from the cabinet Streaming collection after sync."))
+    op("remove game", () => api("POST", "/stream/games/remove",
+      { app: el.dataset.app, title: el.dataset.title }));
+};
+ACTIONS["sgame-add"] = (el) => {
+  const i = el.dataset.i;
+  const t = document.getElementById("ngt-" + i).value.trim();
+  const g = document.getElementById("ngg-" + i).value.trim();
+  if (!t || !g) return toast("✖ need a title AND a launch target", "err");
+  op("add game", () => api("POST", "/stream/games/set",
+    { app: el.dataset.app, title: t, target: g }),
+     "✔ added " + t + " to " + el.dataset.app);
+};
+
+/* Gauge trio for the health tab, fed by cabd's 1 Hz sampler. Each one degrades
+   independently: a cabinet with no amdgpu node shows the GPU card greyed with
+   its reason rather than a fake 0%. */
+const GB = (b) => (b == null ? null : (b / 1073741824).toFixed(1) + " GB");
+function gauge(name, color, pct, big, rows, pctl, unit) {
+  const has = pct != null;
+  const hot = has && pct > 85;
+  return h`<div style="border:4px solid ${has ? color : "var(--grey)"}; border-radius:10px;
+      background:#fff; box-shadow:3px 3px 0 rgba(27,11,46,.18); overflow:hidden;
+      opacity:${has ? 1 : 0.6};">
+    <div style="font-family:var(--cap); font-size:11px; letter-spacing:.08em; color:#fff;
+         padding:5px 9px; text-shadow:0 2px 0 rgba(0,0,0,.35);
+         background:linear-gradient(180deg,rgba(255,255,255,.5),rgba(255,255,255,0) 55%),
+                    ${has ? color : "var(--grey)"};">${name}</div>
+    <div style="padding:8px 10px 10px; display:flex; flex-direction:column; gap:6px;">
+      <div style="display:flex; align-items:baseline; gap:6px; white-space:nowrap;">
+        <b style="font-family:var(--cap); font-size:24px; color:${hot ? "#c1004a" : has ? color : "var(--grey)"}">
+          ${has ? Math.round(pct) + (unit || "%") : "—"}</b>
+        <span style="font-size:10px; font-weight:bold; opacity:.7;">${esc(big || "")}</span>
+      </div>
+      <div class="meter" style="height:16px; border-width:3px;">
+        <i class="${hot ? "hot" : ""}" style="width:${has ? pct : 0}%; background:${
+          hot ? "" : "repeating-linear-gradient(90deg," + color + "aa 0 8px," + color + " 8px 16px)"}"></i>
+      </div>
+      ${rows.map((r) => h`<div style="display:flex; justify-content:space-between; gap:8px;
+        font-size:10.5px; font-weight:bold; border-bottom:1px dotted #e0cff0; padding:2px 0;">
+        <span>${esc(r[0])}</span><b style="font-family:ui-monospace,monospace">${esc(dash(r[1]))}</b></div>`).join("")}
+      ${pctl ? h`<div style="display:flex; justify-content:space-between; gap:8px;
+        font-size:10.5px; font-weight:bold; padding:2px 0;">
+        <span>p99 / p95 / p90</span><b style="font-family:ui-monospace,monospace">${esc(pctl)}</b></div>` : ""}
+    </div></div>`;
+}
+function gauges(m) {
+  if (!m) {
+    return gapNote("NO SAMPLER DATA",
+      "The cabinet has not reported a <code>metrics</code> block — it is offline, or running a cabd older than the sampler.");
+  }
+  const c = m.current || {}, p = m.percentiles || {}, f = m.facts || {};
+  const trio = (k, unit, digits) => {
+    const v = p[k];
+    if (!v) return null;
+    const fmt = (x) => (x == null ? "—" : digits ? (x / 1073741824).toFixed(1) : Math.round(x));
+    return fmt(v.p99) + " / " + fmt(v.p95) + " / " + fmt(v.p90) + (unit || "");
+  };
+  const memPct = c.mem_total ? (100 * c.mem_used / c.mem_total) : null;
+  const vramPct = c.vram_total ? (100 * c.vram_used / c.vram_total) : null;
+  return h`<div style="display:grid; grid-template-columns:repeat(3,1fr); gap:10px; margin-bottom:14px;">
+    ${gauge("CPU", "#0b3fd1", c.cpu_pct,
+      c.cpu_temp_c != null ? c.cpu_temp_c + " °C" : "",
+      [["model", f.cpu_model], ["cores", f.cpu_cores && f.cpu_threads
+        ? f.cpu_cores + "c / " + f.cpu_threads + "t" : f.cpu_threads]],
+      trio("cpu_pct", "%"))}
+    ${gauge("GPU", "#7b2dff", c.gpu_pct,
+      c.gpu_temp_c != null ? c.gpu_temp_c + " °C" : "",
+      [["vram", c.vram_total ? GB(c.vram_used) + " / " + GB(c.vram_total) : null],
+       ["vram used", vramPct == null ? null : Math.round(vramPct) + "%"]],
+      trio("gpu_pct", "%"))}
+    ${gauge("MEMORY", "#1fa83c", memPct,
+      c.mem_total ? GB(c.mem_used) + " / " + GB(c.mem_total) : "",
+      [["swap", c.swap_total ? GB(c.swap_used) + " / " + GB(c.swap_total) : null],
+       ["window", m.samples + " samples / " + Math.round((m.window_s || 0) / 60) + "m"]],
+      trio("mem_used", " GB", true))}
+  </div>`;
+}
+
+/* ------------------------------------------------------------------ health */
+VIEWS.health = () => {
+  const hh = S.health || {};
+  const used = hh.disk_used_pct;
+  const art = S.ov && S.ov.art_cache;
+  const rows = [
+    ["Disk used", pct(hh.disk_used_pct)],
+    ["Disk free", dash(hh.disk_free_h)],
+    ["Disk total", dash(hh.disk_total_h)],
+    ["Temperature", hh.temp_c != null ? hh.temp_c + " °C" : "— (no thermal zone)"],
+    ["Uptime", dash(hh.uptime_h)],
+    ["Load averages", (hh.load || []).join(" / ") || "—"],
+    ["Clip cache", hh.clips != null ? hh.clips + " clips · " + dash(hh.clips_h) : "—"],
+    ["Versions", (hh.versions || []).join(" · ") || "—"],
+    ["IP", dash(hh.ip)],
+    ["SSH user", dash(hh.ssh_user)],
+    ["Server link", S.online
+      ? "connected · ws · heartbeat " + (S.ov && S.ov.heartbeat_age_s != null
+          ? S.ov.heartbeat_age_s + "s ago" : "?") : "disconnected"],
+    ["Art cache", art ? art.cached + " covers · " +
+      (art.bytes / 1048576).toFixed(1) + " MB · " + art.negative + " misses" : "—"],
+  ];
+  const left = panel("p-lime", "CABINET HEALTH", h`
+    <div style="margin-bottom:12px;">
+      <div style="font-size:11px; font-weight:bold; letter-spacing:.1em; margin-bottom:5px;">
+        DISK &mdash; ${esc(dash(hh.disk_free_h))} free of ${esc(dash(hh.disk_total_h))}</div>
+      <div class="meter"><i class="${used > 90 ? "hot" : ""}" style="width:${used || 0}%"></i></div>
+    </div>
+    ${gauges(hh.metrics)}
+    <table><tbody>${rows.map((r) => h`<tr><td>${esc(r[0])}</td>
+      <td style="text-align:right"><b style="font-family:ui-monospace,monospace">${esc(r[1])}</b></td>
+      </tr>`).join("")}</tbody></table>`);
+
+  const right = h`<div class="col">
+    ${panel("p-red", "MAINTENANCE", h`<div class="col">
+      <button class="danger" data-act="clear-cache" ${off() ? "disabled" : ""}>CLEAR CLIP CACHE</button>
+      <div class="state">${hh.clips != null
+        ? "cache: " + hh.clips + " clips · " + dash(hh.clips_h) : "cache: unknown"}</div>
+      <button class="danger" data-act="reboot" ${off() ? "disabled" : ""}>REBOOT CABINET</button>
+      <button class="danger" data-act="restart-fe" ${off() ? "disabled" : ""}>RESTART FRONTEND</button>
+      <div class="row">
+        <button class="sm" data-act="ll-on" ${off() ? "disabled" : ""}>LIFELINE ON</button>
+        <button class="sm grey" data-act="ll-off" ${off() ? "disabled" : ""}>LIFELINE OFF</button>
+      </div>
+      <button class="sm gold" data-act="art-warm">WARM BOX ART CACHE</button>
+      <button class="sm gold" data-act="art-push" ${off() ? "disabled" : ""}>PUSH ART TO CABINET</button>
+    </div>`)}
+    ${panel("p-aqua", "ACCESS", h`<div class="col" style="font-size:12px; font-weight:bold;">
+      <code style="background:var(--ink); color:#7cff5a; padding:8px; border-radius:6px;
+        font-size:11px; overflow-x:auto; display:block;">ssh ${esc(dash(hh.ssh_user))}@${esc(dash(hh.ip))}</code>
+      <button class="sm grey" data-act="copy-ssh"
+        data-cmd="ssh ${esc(dash(hh.ssh_user))}@${esc(dash(hh.ip))}">COPY SSH COMMAND</button>
+      <a href="#" data-act="logs">VIEW LOGS &rarr;</a>
+      <a href="/state/log" target="_blank">STATE REPO LOG &rarr;</a>
+      <a href="/cab/screenshot" target="_blank">CABINET SCREENSHOT &rarr;</a>
+    </div>`)}
+  </div>`;
+  return h`<div class="grid g-health">${left}${right}</div>`;
+};
+
+ACTIONS["clear-cache"] = async () => {
+  if (await ask("Clear the clip cache? Screensaver clips re-download on demand."))
+    op("clear cache", async () => {
+      const r = await api("POST", "/cab/clear-cache");
+      toast("✔ clip cache cleared, " + (r.freed_h || "0B") + " freed", "ok");
+      return r;
+    }, null);
+};
+ACTIONS["art-warm"] = () => op("warm art cache", async () => {
+  const r = await api("POST", "/art/warm");
+  toast("✔ art: " + r.hit + " found, " + r.miss + " missing of " + r.games, "ok");
+  return r;
+}, null);
+ACTIONS["art-push"] = () => op("push art", async () => {
+  const r = await api("POST", "/art/push");
+  toast("✔ pushed " + r.pushed.length + " covers to the cabinet", "ok");
+  return r;
+}, null);
+ACTIONS["copy-ssh"] = (el) => {
+  navigator.clipboard.writeText(el.dataset.cmd)
+    .then(() => toast("copied: " + el.dataset.cmd, "ok"))
+    .catch(() => toast("✖ clipboard blocked by the browser", "err"));
+};
+
+/* --------------------------------------------------------------- remapper  */
+VIEWS.remap = () => {
+  const rm = S.remap;
+  const binds = Object.entries(rm.bindings || {});
+  const boundLogical = new Set(binds.map((b) => String(b[1])));
+  const stageColor = { idle: "#6a4a8a", waiting: "var(--blue)", captured: "#c47a00",
+                       saved: "var(--lime)", err: "var(--red)" }[rm.stage] || "#6a4a8a";
+  const stageLabel = { idle: "READY", waiting: "LISTENING ON THE CABINET",
+                       captured: "CAPTURED — PICK A LOGICAL TARGET",
+                       saved: "BINDING SAVED", err: "CAPTURE FAILED" }[rm.stage] || "READY";
+
+  const capture = panel("p-hot", "CAPTURE &amp; BIND", h`<div class="col" style="gap:12px;">
+      <div class="row">
+        <label class="field" style="flex:1;">CONTROLLER DEVICE
+          <select style="width:100%" ${rm.devices && rm.devices.length ? "" : "disabled"}>
+            ${(rm.devices || []).map((d) =>
+              h`<option>${esc(d.name)} (${esc(d.path)})</option>`).join("")
+              || h`<option>${rm.devices ? "no evdev devices reported" : "cabinet offline"}</option>`}
+          </select></label>
+        <label class="field" style="flex:1;">SCOPE
+          <select style="width:100%" data-change="rm-scope">
+            ${rm.scopes.map((s) =>
+              h`<option ${s === rm.scope ? "selected" : ""}>${esc(s)}</option>`).join("")}
+          </select></label>
+      </div>
+      <div style="border:5px solid ${stageColor}; border-radius:12px; padding:14px;
+           background:linear-gradient(180deg,#fff,#fff2f9); display:flex; flex-direction:column;
+           gap:8px; align-items:center; text-align:center; color:#3a1a6a;">
+        <div style="font-size:11px; font-weight:bold; letter-spacing:.14em;">${stageLabel}</div>
+        <div style="font-family:var(--disp); font-size:32px; color:${stageColor};
+             ${rm.stage === "waiting" && S.motion ? "animation:blink .8s steps(1) infinite" : ""}">
+          ${esc(rm.capture || "—")}</div>
+        <div class="note">${esc(rm.msg)}</div>
+      </div>
+      <div class="row">
+        <button class="danger" data-act="rm-capture" ${off() || rm.stage === "waiting" ? "disabled" : ""}>
+          ${rm.stage === "waiting" ? "LISTENING..." : rm.combo.length ? "RE-CAPTURE" : "CAPTURE PHYSICAL PRESS"}</button>
+        <button class="sm gold" data-act="rm-capture" data-add="1"
+                ${off() || rm.stage === "waiting" || !rm.combo.length ? "disabled" : ""}>
+          + ADD ANOTHER BUTTON (COMBO)</button>
+        <button class="sm grey" data-act="rm-clear">CLEAR</button>
+      </div>
+      <div>
+        <div style="font-family:var(--cap); font-size:12px; margin-bottom:6px;">
+          TRIGGER STYLE</div>
+        <div class="row" style="gap:5px;">
+        ${HOLDS.map((ms) => h`<button class="sm ${rm.hold === ms ? "lime" : "grey"}"
+          data-act="rm-hold" data-ms="${ms}">${ms ? "HOLD " + (ms / 1000) + "s" : "TAP"}</button>`).join("")}
+        </div>
+      </div>
+      <div>
+        <div style="font-family:var(--cap); font-size:12px; margin-bottom:6px;">
+          ASSIGN TO LOGICAL TARGET
+          <span style="font-family:var(--body); font-size:10px; opacity:.75;">
+            ${rm.combo.length > 1 || rm.hold
+              ? "— saves as a combo/hold binding (cabd detects it)"
+              : "— saves as a plain remap (RetroArch applies it)"}</span></div>
+        <div style="display:grid; grid-template-columns:repeat(4,1fr); gap:5px;">
+        ${(rm.targets.pad || LOGICAL).map((t) => h`<button class="sm ${rm.combo.length ? "lime" : "grey"}"
+          data-act="rm-bind" data-t="${t}" ${rm.combo.length ? "" : "disabled"}>${t.toUpperCase()}${
+          boundLogical.has(t) ? "" : " •"}</button>`).join("")}
+        </div>
+        <div style="font-family:var(--cap); font-size:12px; margin:10px 0 6px;">
+          &hellip;OR A CABINET ACTION</div>
+        <div style="display:grid; grid-template-columns:repeat(3,1fr); gap:5px;">
+        ${(rm.targets.action || []).map((t) => h`<button class="sm ${rm.combo.length ? "gold" : "grey"}"
+          data-act="rm-bind" data-t="${t}" ${rm.combo.length ? "" : "disabled"}>
+          ${t.replace(/_/g, " ").toUpperCase()}</button>`).join("")}
+        </div>
+      </div>
+      <div class="note" style="border:3px dashed var(--purp); padding:8px;
+           border-radius:8px; background:#f7f0ff;">
+        A <b>pad button</b> target needs <code>/dev/uinput</code> on the cabinet so cabd can
+        emit a real gamepad event — RetroArch reads the pad directly and cannot be told
+        &ldquo;press B&rdquo; any other way. <b>Action</b> targets work regardless.
+      </div>
+    </div>`);
+
+  const combos = rm.combos || [];
+  const table = panel("p-blue",
+    "BINDINGS IN " + esc(rm.scope) + " (" + (binds.length + combos.length) + ")", h`
+    <table><thead><tr><th>PHYSICAL EXPRESSION</th><th>TRIGGER</th><th>TARGET</th>
+      <th>APPLIED BY</th><th>ACTION</th></tr></thead><tbody>
+    ${binds.map((b) => h`<tr>
+      <td><code style="font-size:11.5px; font-weight:bold;">${esc(b[0])}</code></td>
+      <td>PRESS</td>
+      <td><b style="font-size:13px;">${esc(b[1])}</b></td>
+      <td><span class="badge" style="background:var(--blue)">RETROARCH</span></td>
+      <td><button class="xs danger" data-act="rm-unbind" data-key="${esc(b[0])}">UNBIND</button></td>
+    </tr>`).join("")}
+    ${combos.map((c) => h`<tr>
+      <td><code style="font-size:11.5px; font-weight:bold;">${esc((c.buttons || []).join(" + "))}</code></td>
+      <td>${c.hold_ms ? "HOLD " + (c.hold_ms / 1000) + "s" : "PRESS"}</td>
+      <td><b style="font-size:13px;">${esc(c.target)}</b></td>
+      <td><span class="badge" style="background:${
+        (rm.targets.action || []).indexOf(c.target) >= 0 ? "var(--yel)" : "var(--purp)"}">
+        ${(rm.targets.action || []).indexOf(c.target) >= 0 ? "CABD ACTION" : "CABD → PAD"}</span></td>
+      <td><button class="xs danger" data-act="rm-unbind-combo"
+            data-buttons="${esc((c.buttons || []).join("+"))}"
+            data-hold="${c.hold_ms || 0}">UNBIND</button></td>
+    </tr>`).join("")}
+    ${binds.length + combos.length ? "" : h`<tr><td colspan="5" class="note" style="opacity:.7">
+      nothing bound in this scope — it inherits the layer above</td></tr>`}
+    </tbody></table>
+    <div class="note" style="margin-top:8px; opacity:.8;">Unbound logical targets:
+      ${LOGICAL.filter((t) => !boundLogical.has(t)).join(", ") || "none"}</div>`);
+
+  const presets = panel("p-yel", "PRESETS", h`<div class="col" style="gap:10px;">
+      <div class="row">
+        <input type="text" placeholder="preset name" style="flex:1; min-width:140px;"
+               value="${esc(rm.presetName)}" data-input="rm-pname" data-k="rm-pname">
+        <button class="sm" data-act="rm-save">SAVE PRESET</button>
+      </div>
+      ${rm.presets.map((p) => h`<div class="row" style="border:3px solid #d3b8ff; border-radius:8px;
+        padding:6px 9px; background:#f7f0ff; font-size:12px; font-weight:bold;">
+        <b style="flex:1">${esc(p)}</b>
+        <button class="xs grey" data-act="rm-load" data-p="${esc(p)}">LOAD</button></div>`).join("")
+        || h`<div class="note" style="opacity:.7">no presets saved yet</div>`}
+    </div>`);
+
+  const bench = panel("p-aqua", "TEST BENCH", h`<div class="col">
+      <div class="note">Watch what the cabinet actually reports for 5 seconds &mdash; the same
+        <code>input.monitor</code> path <code>arcadectl controls monitor</code> uses.</div>
+      <div class="row">
+        <button class="sm" data-act="rm-monitor" ${off() ? "disabled" : ""}>MONITOR 5s</button>
+        <div class="state" id="benchOut">idle</div>
+      </div></div>`);
+
+  return h`<div class="grid g-remap">${capture}<div class="col">${table}${bench}${presets}</div></div>`;
+};
+
+ACTIONS["rm-scope"] = async (el) => {
+  S.remap.scope = el.value;
+  S.remap.capture = null; S.remap.combo = []; S.remap.hold = 0;
+  S.remap.stage = "idle";
+  S.remap.msg = "scope changed to " + el.value;
+  await loadBindings(); paint();
+};
+ACTIONS["rm-capture"] = async (el) => {
+  const rm = S.remap;
+  const adding = !!(el && el.dataset.add);
+  rm.stage = "waiting";
+  if (!adding) rm.combo = [];
+  rm.msg = adding ? "press the NEXT button in the combo..."
+                  : "press a button on the cabinet panel now...";
+  paint();
+  try {
+    const r = await api("POST", "/controls/monitor", { seconds: 5 });
+    const ev = (r.events || [])[0];
+    if (!ev) {
+      rm.stage = "err";
+      rm.msg = "no input seen in 5s — is the panel connected?";
+    } else {
+      /* cabd reports raw monitor lines ("a down") as well as structured
+         events, depending on the input source; take the button either way */
+      const btn = String(ev.button || ev.key || ev).split(/\s+/)[0].toLowerCase();
+      if (rm.combo.indexOf(btn) < 0) rm.combo.push(btn);
+      rm.capture = rm.combo.join(" + ");
+      rm.stage = "captured";
+      rm.msg = rm.combo.length > 1
+        ? "combo is now " + rm.capture + " — pick a trigger style, then a target"
+        : "captured " + btn + " — add another button, or pick a target";
+    }
+  } catch (e) {
+    rm.stage = "err";
+    rm.msg = "capture failed: " + e.message;
+  }
+  paint();
+};
+ACTIONS["rm-hold"] = (el) => { S.remap.hold = +el.dataset.ms; paint(); };
+ACTIONS["rm-clear"] = () => {
+  Object.assign(S.remap, { capture: null, combo: [], hold: 0,
+                           stage: "idle", msg: "capture cleared" });
+  paint();
+};
+ACTIONS["rm-bind"] = async (el) => {
+  const rm = S.remap;
+  if (!rm.combo.length) return;
+  const target = el.dataset.t;
+  const expr = rm.combo.join(" + ") + (rm.hold ? " (hold " + rm.hold / 1000 + "s)" : "");
+  /* A single tap onto a pad button is expressible in RetroArch's own remap,
+     so it goes through /controls/map and stays where the emulator applies it.
+     Anything with a combo, a hold, or an action target has to be a cabd-side
+     binding — RetroArch's format cannot represent it. */
+  const plain = rm.combo.length === 1 && !rm.hold &&
+                (rm.targets.pad || LOGICAL).indexOf(target) >= 0;
+  try {
+    if (plain) {
+      const set = {};
+      set[rm.combo[0]] = target;
+      await op("bind " + expr + " → " + target,
+        () => api("POST", "/controls/map", { scope: rm.scope, set: set }));
+    } else {
+      await op("bind " + expr + " → " + target,
+        () => api("POST", "/controls/bind", { scope: rm.scope,
+          buttons: rm.combo, hold_ms: rm.hold, target: target }));
+    }
+    rm.stage = "saved";
+    rm.msg = "✔ " + expr + " → " + target + " in " + rm.scope;
+    rm.combo = []; rm.capture = null; rm.hold = 0;
+  } catch (_) {
+    rm.stage = "err";
+  }
+  await loadBindings(); paint();
+};
+ACTIONS["rm-unbind-combo"] = async (el) => {
+  try {
+    await op("unbind " + el.dataset.buttons, () => api("POST", "/controls/unbind-combo",
+      { scope: S.remap.scope, buttons: el.dataset.buttons.split("+"),
+        hold_ms: +el.dataset.hold }));
+  } catch (_) { /* toasted by op */ }
+  await loadBindings(); paint();
+};
+ACTIONS["rm-unbind"] = async (el) => {
+  try {
+    await op("unbind " + el.dataset.key, () => api("POST", "/controls/unbind",
+      { scope: S.remap.scope, key: el.dataset.key }));
+  } catch (_) { /* toasted by op */ }
+  await loadBindings(); paint();
+};
+ACTIONS["rm-pname"] = (el) => { S.remap.presetName = el.value; };
+ACTIONS["rm-save"] = async () => {
+  const name = S.remap.presetName.trim();
+  if (!name) return toast("✖ name the preset first", "err");
+  try {
+    await op("save preset " + name, () => api("POST", "/controls/save-preset", { name: name }));
+  } catch (_) { /* toasted by op */ }
+  S.remap.presets = await api("GET", "/controls/presets")
+    .then((r) => r.presets).catch(() => S.remap.presets);
+  paint();
+};
+ACTIONS["rm-load"] = async (el) => {
+  if (!await ask("Load preset " + el.dataset.p + "? It replaces every mapping layer it captured."))
+    return;
+  try {
+    await op("load preset " + el.dataset.p,
+      () => api("POST", "/controls/load-preset", { name: el.dataset.p }));
+  } catch (_) { /* toasted by op */ }
+  await loadBindings(); paint();
+};
+ACTIONS["rm-monitor"] = async () => {
+  const out = document.getElementById("benchOut");
+  out.textContent = "listening 5s...";
+  try {
+    const r = await api("POST", "/controls/monitor", { seconds: 5 });
+    const evs = r.events || [];
+    out.textContent = evs.length
+      ? evs.map((e) => JSON.stringify(e)).join("  ") : "no input seen";
+  } catch (e) {
+    out.textContent = "error: " + e.message;
+  }
+};
+
+/* ----------------------------------------------------------- game library  */
+VIEWS.lib = () => {
+  const all = (S.ov && S.ov.games) || [];
+  const systems = ["All"].concat([...new Set(all.map((g) => g.system))].sort());
+  const q = S.lib.q.trim().toLowerCase();
+  const rows = all.filter((g) =>
+    (S.lib.sys === "All" || g.system === S.lib.sys) &&
+    (!q || g.file.toLowerCase().indexOf(q) >= 0) &&
+    (!S.lib.favOnly || g.favorite));
+  const hh = S.health || {};
+
+  return h`<div class="col">
+  ${panel("p-blue", "GAME LIBRARY &mdash; WHAT IS ON THE CABINET", h`
+    <div class="rowe" style="margin-bottom:12px;">
+      <label class="field">SYSTEM
+        <select data-change="lib-sys" style="min-width:130px">
+          ${systems.map((s) =>
+            h`<option ${s === S.lib.sys ? "selected" : ""}>${esc(s)}</option>`).join("")}
+        </select></label>
+      <label class="field">SEARCH
+        <input type="search" placeholder="title contains..." style="min-width:200px"
+               value="${esc(S.lib.q)}" data-input="lib-q" data-k="lib-q"></label>
+      <button class="sm ${S.lib.favOnly ? "gold" : "grey"}" data-act="lib-fav">
+        ${S.lib.favOnly ? "★ FAVORITES ONLY" : "☆ ALL GAMES"}</button>
+      <div style="flex:1; min-width:200px;">
+        <div style="font-size:11px; font-weight:bold; margin-bottom:4px;">
+          CABINET STORAGE &mdash; ${esc(dash(hh.disk_free_h))} free</div>
+        <div class="meter"><i class="${hh.disk_used_pct > 90 ? "hot" : ""}"
+             style="width:${hh.disk_used_pct || 0}%"></i></div>
+      </div>
+      <div class="stat"><b>${rows.length}</b>SHOWN</div>
+      <button class="sm gold" data-act="art-warm">WARM ART</button>
+    </div>
+    <table><thead><tr><th>ART</th><th>TITLE</th><th>SYSTEM</th><th>ID</th><th>ACTIONS</th></tr></thead>
+    <tbody>
+    ${rows.map((g) => h`<tr>
+      <td>${cover(g.system, g.file, 44, 60)}</td>
+      <td><b>${esc(g.file)}</b> ${g.favorite ? "<span style='color:var(--yel)'>★</span>" : ""}</td>
+      <td>${esc(g.system.toUpperCase())}</td>
+      <td><code style="font-size:10.5px">${esc(g.id)}</code></td>
+      <td><div class="row" style="gap:4px;">
+        <button class="xs" data-act="lib-launch" data-sys="${esc(g.system)}"
+                data-path="${esc(g.path)}" ${off() ? "disabled" : ""}>LAUNCH</button>
+        <button class="xs ${g.favorite ? "gold" : "grey"}" data-act="lib-fav-toggle"
+                data-id="${esc(g.id)}" data-on="${g.favorite ? "" : "1"}">
+          ${g.favorite ? "UNFAV" : "FAV"}</button>
+      </div></td></tr>`).join("")
+      || h`<tr><td colspan="5" class="note" style="opacity:.7">${off()
+            ? "cabinet offline — library unknown" : "nothing matches those filters"}</td></tr>`}
+    </tbody></table>`)}
+  ${panel("p-purp", "TRANSFER QUEUE", gapNote(
+    "LOAD / UNLOAD AND THE TRANSFER QUEUE ARE NOT BUILT",
+    "The design treats the server as a big library and the cabinet as a small cache you load games into and unload them from, with per-transfer progress. Today there is no server-side game store: <code>library.list</code> reports the cabinet's own <code>/roms</code> tree and that is the only library there is. So this table is read-only plus launch and favorite. The gap report lists what building it needs."))}
+  </div>`;
+};
+
+ACTIONS["lib-sys"] = (el) => { S.lib.sys = el.value; paint(); };
+ACTIONS["lib-q"] = (el) => { S.lib.q = el.value; paint(); };
+ACTIONS["lib-fav"] = () => { S.lib.favOnly = !S.lib.favOnly; paint(); };
+ACTIONS["lib-launch"] = (el) =>
+  op("launch", () => api("POST", "/games/launch",
+    { system: el.dataset.sys, path: el.dataset.path }));
+ACTIONS["lib-fav-toggle"] = (el) =>
+  op("favorite", () => api("POST", el.dataset.on ? "/favorites/add" : "/favorites/remove",
+    { id: el.dataset.id }), el.dataset.on ? "★ favorited" : "☆ unfavorited");
+
+/* ---------------------------------------------------------------- rom queue */
+const ROM_BADGE = {
+  ready: "var(--lime)", error: "var(--red)", downloading: "var(--blue)",
+  delivering: "var(--purp)", queued: "#c47a00",
+};
+VIEWS.rom = () => {
+  const q = (S.ov && S.ov.rom_queue) || [];
+  const be = S.romBackend || {};
+  const systems = be.systems || [];
+  const cov = (be.coverage || {})[S.rom.system];
+  return h`<div class="col">
+  ${panel("p-hot", "REQUEST A ROM", h`
+    <div class="rowe">
+      <label class="field" style="flex:1; min-width:240px;">TITLE / QUERY
+        <input type="text" placeholder="e.g. Super Mario World"
+               style="width:100%; font-size:14px; padding:9px;"
+               value="${esc(S.rom.query)}" data-input="rom-q" data-k="rom-q"></label>
+      <label class="field">SYSTEM
+        <select data-change="rom-sys" style="min-width:150px; font-size:14px; padding:8px;">
+          <option value="">— pick one —</option>
+          ${systems.map((s) => h`<option ${s === S.rom.system ? "selected" : ""}>${esc(s)}</option>`).join("")}
+        </select></label>
+      <button data-act="rom-search">SEARCH SOURCES</button>
+      <button class="grey sm" data-act="rom-sync">RETRY ALL FAILED</button>
+      <div class="state">backend: ${esc(be.backend || "?")}</div>
+    </div>
+    ${cov ? h`<div class="gap"><b>NO LIVE SOURCE FOR ${esc(S.rom.system.toUpperCase())}</b><br>${esc(cov)}</div>` : ""}
+    ${be.backend === "fake" ? gapNote("FAKE ROMDL BACKEND",
+      "<code>ROMDL_BACKEND=fake</code> — this server is serving a generated test catalogue, not real sources. That is the sim's configuration.") : ""}`)}
+  ${panel("p-blue", "QUEUE (" + q.length + ")", h`
+    <table><thead><tr><th>TITLE</th><th>STATUS</th><th>DETAIL / ERROR</th><th>ACTIONS</th></tr></thead>
+    <tbody>
+    ${q.map((r) => h`<tr>
+      <td><b>${esc(r.title)}</b></td>
+      <td>${badge(r.status, ROM_BADGE[r.status] || "#6a4a8a")}</td>
+      <td><span style="font-family:ui-monospace,monospace; font-size:11px;">${esc(r.detail || "")}</span></td>
+      <td><div class="row" style="gap:4px;">
+        <button class="xs" data-act="rom-retry" data-id="${esc(r.id)}"
+          ${["queued", "downloading", "delivering"].indexOf(r.status) >= 0 ? "disabled" : ""}>RETRY</button>
+        <button class="xs danger" data-act="rom-cancel" data-id="${esc(r.id)}"
+          ${["downloading", "delivering"].indexOf(r.status) >= 0 ? "disabled" : ""}>DROP</button>
+      </div></td></tr>`).join("")
+      || h`<tr><td colspan="4" class="note" style="opacity:.7">queue is empty</td></tr>`}
+    </tbody></table>`)}
+  <div id="romSearch"></div></div>`;
+};
+
+ACTIONS["rom-q"] = (el) => { S.rom.query = el.value; };
+ACTIONS["rom-sys"] = (el) => { S.rom.system = el.value; paint(); };
+ACTIONS["rom-search"] = async () => {
+  const query = S.rom.query.trim();
+  if (!query) return toast("✖ type something to search for", "err");
+  const host = document.getElementById("romSearch");
+  host.innerHTML = h`<div class="note">searching sources — this can take a minute...</div>`;
+  try {
+    const qs = "q=" + encodeURIComponent(query) +
+      (S.rom.system ? "&system=" + encodeURIComponent(S.rom.system) : "");
+    const r = await api("GET", "/roms/search?" + qs);
+    const list = Array.isArray(r) ? r : (r.results || []);
+    const note = (r && r.note) || "";
+    host.innerHTML = panel("p-lime", "SOURCE MATCHES (" + list.length + ")", h`
+      ${note ? h`<div class="gap"><b>NOTHING TO SEARCH</b><br>${esc(note)}</div>` : ""}
+      <table><thead><tr><th>SCORE</th><th>TITLE</th><th>SOURCE</th><th>SYSTEM</th><th></th></tr></thead><tbody>
+      ${list.map((c) => h`<tr>
+        <td><code style="font-size:11px">${esc(c.score == null ? "—" : c.score)}</code></td>
+        <td><b>${esc(c.title || "")}</b></td>
+        <td>${esc(c.source || "")}</td>
+        <td>${esc(c.system || "")}</td>
+        <td><button class="xs" data-act="rom-queue" data-id="${esc(c.id)}"
+              data-title="${esc(c.title || "")}" data-sys="${esc(c.system || "")}">QUEUE THIS</button></td>
+      </tr>`).join("")
+        || (note ? "" : h`<tr><td colspan="5" class="note" style="opacity:.7">no source matched</td></tr>`)}
+      </tbody></table>`);
+  } catch (e) {
+    host.innerHTML = panel("p-red", "SEARCH FAILED", h`<div class="note">${esc(e.message)}</div>`);
+  }
+};
+/* Queue the exact candidate that was picked, by id — not a second
+   "best match" search, which could rank a different dump first. */
+ACTIONS["rom-queue"] = (el) =>
+  op("queue " + el.dataset.title, () => api("POST", "/roms/request",
+    { id: el.dataset.id, title: el.dataset.title, system: el.dataset.sys }),
+     "✔ queued: " + el.dataset.title);
+ACTIONS["rom-sync"] = () => op("retry failed roms", async () => {
+  const r = await api("POST", "/roms/sync");
+  toast("✔ retried " + r.retried.length + ", rescan " + (r.rescan ? "ok" : "failed"), "ok");
+  return r;
+}, null);
+ACTIONS["rom-retry"] = (el) => op("retry", () => api("POST", "/roms/retry", { id: el.dataset.id }));
+ACTIONS["rom-cancel"] = (el) => op("drop", () => api("POST", "/roms/cancel", { id: el.dataset.id }));
+
+/* ------------------------------------------------------- broadcast / integrations */
+VIEWS.integ = () => {
+  const I = S.integ;
+  if (!I) return h`<div class="note">loading integrations…</div>`;
+  const d = I.config.discord || {}, ha = I.config.homeassistant || {};
+  const st = I.status || {}, snap = I.snapshot || {};
+
+  const field = (section, key, label, type, placeholder, hint) => h`
+    <label class="field" style="display:block; margin-bottom:9px;">${label}
+      <input type="${type || "text"}" style="width:100%; max-width:520px;"
+             placeholder="${esc(placeholder || "")}"
+             value="${esc((I.config[section] || {})[key] == null ? "" : (I.config[section] || {})[key])}"
+             data-input="integ-f" data-sec="${section}" data-key="${key}"
+             data-k="integ-${section}-${key}">
+      ${hint ? h`<span style="font-size:10px; font-weight:bold; opacity:.7;
+        display:block; margin-top:3px;">${hint}</span>` : ""}</label>`;
+  const toggle = (section, key, label) => h`
+    <label style="font-size:12px; font-weight:bold; display:inline-flex;
+        gap:6px; align-items:center; margin-right:14px;">
+      <input type="checkbox" data-change="integ-t" data-sec="${section}" data-key="${key}"
+             ${(I.config[section] || {})[key] ? "checked" : ""}> ${label}</label>`;
+
+  const nowPlaying = panel("p-aqua", "WHAT WOULD BE BROADCAST RIGHT NOW", h`
+    <div class="row">
+      <div class="state ${snap.state === "playing" ? "ok" : ""}">${esc(snap.state || "?")}</div>
+      <div class="kv" style="flex:1; border:none;">
+        <span>Title</span><b>${esc(snap.title || "—")}</b></div>
+      <div class="kv" style="flex:1; border:none;">
+        <span>System</span><b>${esc((snap.system || "—").toUpperCase())}</b></div>
+      <div class="kv" style="flex:1; border:none;">
+        <span>Elapsed</span><b>${esc(hms(snap.elapsed_s))}</b></div>
+    </div>
+    ${snap.art_url ? h`<div class="note" style="opacity:.7; margin-top:6px;">
+      art: <code>${esc(snap.art_url)}</code></div>` : ""}
+    ${I.config.public_base_url ? "" : gapNote("NO PUBLIC BASE URL",
+      "Set <b>public base URL</b> below, or Discord embeds and the Home Assistant entity picture have no reachable image.")}`);
+
+  const discord = panel("p-purp", "DISCORD", h`
+    <div class="row" style="margin-bottom:10px;">
+      ${toggle("discord", "enabled", "Enabled")}
+      ${toggle("discord", "post_on_start", "Post when a game starts")}
+      ${toggle("discord", "post_on_stop", "Post when it stops")}
+    </div>
+    ${field("discord", "webhook_url", "CHANNEL WEBHOOK URL", "text",
+            "https://discord.com/api/webhooks/…",
+            d.webhook_url_set ? "a value is saved — leave the dots to keep it" : "")}
+    ${field("discord", "username", "POST AS", "text", "CAB-01")}
+    ${field("discord", "mention", "MENTION (optional)", "text", "<@&role-id>")}
+    <div class="row" style="margin-top:8px;">
+      <button data-act="integ-save" ${S.integDirty ? "" : "disabled"}>SAVE</button>
+      <button class="grey sm" data-act="integ-test" data-which="discord">SEND TEST MESSAGE</button>
+      <div class="state ${st.discord && st.discord.enabled ? "ok" : ""}">
+        ${st.discord && st.discord.enabled ? "active" : "off"}</div>
+    </div>
+    <div class="gap"><b>WEBHOOK, NOT RICH PRESENCE</b><br>
+      Discord Rich Presence (the &ldquo;Playing&hellip;&rdquo; line under a username) is delivered by a
+      <i>local desktop Discord client</i> over an IPC socket. The cabinet does not run one, and
+      the server is not your account. A channel webhook posts an embed with the title, system,
+      play time and box art instead — which is the part that is actually shareable.</div>`);
+
+  const hass = panel("p-blue", "HOME ASSISTANT", h`
+    <div class="row" style="margin-bottom:10px;">${toggle("homeassistant", "enabled", "Enabled")}</div>
+    ${field("homeassistant", "mqtt_host", "MQTT BROKER HOST", "text", "homeassistant.local")}
+    ${field("homeassistant", "mqtt_port", "MQTT PORT", "number", "1883")}
+    ${field("homeassistant", "mqtt_username", "MQTT USERNAME", "text", "")}
+    ${field("homeassistant", "mqtt_password", "MQTT PASSWORD", "password", "",
+            ha.mqtt_password_set ? "a value is saved — leave the dots to keep it" : "")}
+    ${field("homeassistant", "device_name", "DEVICE NAME IN HA", "text", "Arcade Cabinet")}
+    ${field("homeassistant", "node_id", "NODE ID", "text", "arcade_cabinet",
+            "changing this creates a second device in HA")}
+    <div style="border-top:3px dotted #cbb8e6; margin:12px 0 10px; padding-top:10px;">
+      <div style="font-family:var(--cap); font-size:12px; margin-bottom:8px;">
+        MEDIA PLAYER (OPTIONAL, SEPARATE TRANSPORT)</div>
+      ${field("homeassistant", "rest_url", "HOME ASSISTANT URL", "text",
+              "http://homeassistant.local:8123")}
+      ${field("homeassistant", "rest_token", "LONG-LIVED ACCESS TOKEN", "password", "",
+              ha.rest_token_set ? "a value is saved — leave the dots to keep it"
+                                : "HA profile → Security → Long-lived access tokens")}
+    </div>
+    <div class="row" style="margin-top:8px;">
+      <button data-act="integ-save" ${S.integDirty ? "" : "disabled"}>SAVE</button>
+      <button class="grey sm" data-act="integ-test" data-which="homeassistant">CONNECT &amp; ANNOUNCE</button>
+      <div class="state ${st.homeassistant && st.homeassistant.connected ? "ok"
+                        : st.homeassistant && st.homeassistant.enabled ? "pend" : ""}">
+        ${st.homeassistant && st.homeassistant.connected ? "mqtt connected"
+          : st.homeassistant && st.homeassistant.enabled ? "mqtt not connected" : "off"}</div>
+      <div class="state ${st.homeassistant && st.homeassistant.media_player ? "ok" : ""}">
+        ${st.homeassistant && st.homeassistant.media_player
+          ? "media player: " + esc(st.homeassistant.entity_id) : "media player: off"}</div>
+    </div>
+    <div class="note" style="margin-top:10px; border:3px dashed var(--blue);
+         padding:8px; border-radius:8px; background:#f2f6ff;">
+      <b>Over MQTT discovery</b> (appears on its own, controllable, survives restarts):
+      a <b>screensaver switch</b>, a <b>stop-game button</b>, a <b>connectivity</b> binary
+      sensor, and sensors for now-playing title, system, play time, CPU, GPU, memory,
+      CPU temperature and disk. Availability is an MQTT last-will, so HA marks the
+      cabinet unavailable if the server goes away instead of showing a stale game.</div>
+    <div class="gap"><b>WHY THE MEDIA PLAYER NEEDS A TOKEN</b><br>
+      Home Assistant's MQTT integration has no <code>media_player</code> platform — a
+      discovery topic for one is accepted by the broker and then ignored, which looks
+      like it worked until you go looking for the entity. The media card is pushed to
+      HA's REST API instead. Two consequences worth knowing: HA cannot call services on
+      a REST-pushed entity (use the switch and button above for control), and its state
+      is dropped on an HA restart — we re-push every heartbeat, so it returns in seconds.</div>
+    ${st.last_error ? h`<div class="gap"><b>LAST ERROR</b><br>${esc(st.last_error)}</div>` : ""}`);
+
+  const shared = panel("p-yel", "SHARED", h`
+    <label class="field" style="display:block;">PUBLIC BASE URL OF THIS SERVER
+      <input type="text" style="width:100%; max-width:520px;"
+             placeholder="http://192.168.1.10:8000"
+             value="${esc(I.config.public_base_url || "")}"
+             data-input="integ-base" data-k="integ-base">
+      <span style="font-size:10px; font-weight:bold; opacity:.7; display:block; margin-top:3px;">
+        Used to build absolute box-art URLs. Discord must be able to reach it from the
+        public internet for embed thumbnails; Home Assistant only needs it on your LAN.</span></label>
+    <div class="row" style="margin-top:8px;">
+      <button data-act="integ-save" ${S.integDirty ? "" : "disabled"}>SAVE</button>
+      <div class="state ${S.integState.indexOf("✔") === 0 ? "ok" : S.integState ? "pend" : ""}">
+        ${esc(S.integState || (S.integDirty ? "unsaved changes" : "no pending change"))}</div>
+    </div>`);
+
+  return h`<div class="col">${nowPlaying}
+    <div class="grid g-half">${discord}${hass}</div>${shared}</div>`;
+};
+
+ACTIONS["integ-f"] = (el) => {
+  const sec = el.dataset.sec, key = el.dataset.key;
+  S.integ.config[sec] = S.integ.config[sec] || {};
+  S.integ.config[sec][key] = el.type === "number" ? +el.value : el.value;
+  S.integDirty = true; S.integState = "";
+};
+ACTIONS["integ-t"] = (el) => {
+  const sec = el.dataset.sec;
+  S.integ.config[sec] = S.integ.config[sec] || {};
+  S.integ.config[sec][el.dataset.key] = el.checked;
+  S.integDirty = true; S.integState = ""; paint();
+};
+ACTIONS["integ-base"] = (el) => {
+  S.integ.config.public_base_url = el.value;
+  S.integDirty = true; S.integState = "";
+};
+ACTIONS["integ-save"] = async () => {
+  S.integState = "saving..."; paint();
+  try {
+    const r = await api("POST", "/integrations/set", S.integ.config);
+    S.integ.config = r.config;
+    S.integ.status = r.status;
+    S.integDirty = false; S.integState = "✔ saved";
+    toast("✔ integrations saved", "ok");
+  } catch (e) {
+    S.integState = ""; toast("✖ save failed: " + e.message, "err");
+  }
+  paint();
+};
+ACTIONS["integ-test"] = (el) => op("test " + el.dataset.which, async () => {
+  const r = await api("POST", "/integrations/test/" + el.dataset.which);
+  if (r.sent) toast("✔ test message sent to Discord", "ok");
+  else if (r.connected) toast("✔ connected to MQTT and announced entities", "ok");
+  else toast("✖ " + (r.note || "test failed"), "err");
+  S.integ = await api("GET", "/integrations");
+  return r;
+}, null);
+
+/* ------------------------------------------------------------------ konami */
+const KONAMI = ["arrowup", "arrowup", "arrowdown", "arrowdown", "arrowleft",
+                "arrowright", "arrowleft", "arrowright", "b", "a"];
+addEventListener("keydown", (e) => {
+  const k = String(e.key).toLowerCase();
+  S.konami = k === KONAMI[S.konami] ? S.konami + 1 : (k === "arrowup" ? 1 : 0);
+  if (S.konami < KONAMI.length) return;
+  S.konami = 0;
+  const p = document.getElementById("party");
+  p.querySelector(".nyan").style.backgroundImage = "url(/assets/gifs/nyan_cat_all.gif)";
+  p.classList.remove("hide");
+  toast("⬆⬆⬇⬇⬅➡⬅➡ B A — nice. have a nyan cat.", "ok");
+  setTimeout(() => p.classList.add("hide"), 6500);
+});
+addEventListener("hashchange", () => {
+  const p = location.hash.slice(1);
+  if (TAB_KEYS.indexOf(p) >= 0 && p !== S.page) go(p);
+});
+
+/* -------------------------------------------------------------------- boot */
+paint();
+refresh().then(() => loadTab(S.page));
+setInterval(refresh, 3000);
+// The elapsed counter ticks per second; everything else waits for the poll.
+setInterval(() => {
+  if (S.page === "dash" && S.ov && (S.ov.cabinet_state || {}).running) paint();
+}, 1000);
 </script>
 </body>
 </html>

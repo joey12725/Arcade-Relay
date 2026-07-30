@@ -104,12 +104,26 @@ controller identities. `cabd` gets
 
      ```sh
      mkdir -p ~arcade/.config/pegasus-frontend/themes
-     cp -r themes/pegasus-redblue ~arcade/.config/pegasus-frontend/themes/
+     cp -r themes/pegasus-y2k ~arcade/.config/pegasus-frontend/themes/
+     # The Y2K theme needs the asset pack (skins, sprites, tagged GIFs)
+     # INSIDE the theme dir — it loads them by relative path, and without
+     # them you get flat colours and no mascots.
+     cp -r assets ~arcade/.config/pegasus-frontend/themes/pegasus-y2k/assets
      printf '%s\n' /roms/gb /roms/nes /roms/snes /roms/genesis /roms/arcade \
          /roms/gba /roms/psx /roms/favorites /roms/streaming /roms/steam \
          > ~arcade/.config/pegasus-frontend/game_dirs.txt
-     # in Pegasus settings (or settings.txt): theme = pegasus-redblue
+     # in Pegasus settings (or settings.txt): theme = pegasus-y2k
      chown -R arcade:arcade ~arcade/.config/pegasus-frontend
+     ```
+
+     `themes/pegasus-redblue` is still present as the plain fallback; set
+     `theme = pegasus-redblue` if the Y2K theme misbehaves on the panel.
+
+     Box art is not bundled — it is fetched by the server and pushed down:
+
+     ```sh
+     arcadectl art warm    # fill the server-side cache from libretro-thumbnails
+     arcadectl art push    # deliver it to /roms/art on the cabinet
      ```
 
    - **Steam**: `dpkg --add-architecture i386 && apt update &&
@@ -118,7 +132,7 @@ controller identities. `cabd` gets
      flatpak. Pair with Sunshine/Apollo on the gaming desktop (same LAN).
    - **Greenlight** (xCloud, best-effort tier): AppImage from its releases
      page → `/usr/local/bin/greenlight`. Sign in once via remote view (§5).
-4. Reboot. The cabinet should come up in Pegasus with the red/blue theme.
+4. Reboot. The cabinet should come up in Pegasus with the Y2K theme.
 
 ## 4. Pairing check (cabinet ↔ server)
 

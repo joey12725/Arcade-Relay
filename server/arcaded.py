@@ -18,12 +18,15 @@ import random
 import re
 import subprocess
 import time
+import urllib.parse
 import uuid
 
 import aiohttp
 import yaml
 from aiohttp import WSMsgType, web
 
+import artdb
+import integrations
 import plex
 import romdl
 import shuffle
@@ -158,6 +161,9 @@ async def cab_ws(request):
                 hub.last_hb = time.monotonic()
                 hub.hb_interval = float(data.get("interval", hub.hb_interval))
                 hub.cab_state = data.get("state", {})
+                # Discord / Home Assistant ride the heartbeat rather than
+                # polling; a slow publisher must not stall the socket read.
+                asyncio.get_event_loop().create_task(_publish_presence())
             elif data.get("kind") == "res":
                 fut = hub.pending.get(data.get("id"))
                 if fut is not None and not fut.done():
@@ -788,28 +794,52 @@ def _queue_entry(rid):
     return next((e for e in rom_queue if e["id"] == rid), None)
 
 
+async def _deliver_art(files, dest_rom):
+    """Put cover art next to a freshly delivered ROM. Never fatal.
+
+    Two sources, in order: art the backend staged itself (the fake backend
+    does; real ROMDL has no artwork), then artdb's libretro-thumbnails
+    lookup. A game with no cover is still a perfectly good game, so a miss
+    here must not fail the request the way it used to.
+    """
+    stem = os.path.splitext(files["filename"])[0]
+    try:
+        if files.get("art_path"):
+            res = await hub.rpc("file.fetch", {
+                "path": f"/roms/files/{urllib.parse.quote(files['filename'])}.png",
+                "dest": f"/roms/art/{files['filename']}.png"})
+            return bool(res.get("ok"))
+        if await artdb.art(files["system"], files["filename"]) is None:
+            hub.log_event(f"no cover art found for {files['title']}")
+            return False
+        res = await hub.rpc("file.fetch", {
+            "path": f"/art/{files['system']}/{urllib.parse.quote(files['filename'])}",
+            "dest": f"/roms/art/{stem}.png"})
+        return bool(res.get("ok"))
+    except (web.HTTPException, OSError, RuntimeError) as e:
+        hub.log_event(f"art delivery skipped for {files['title']}: {e!r}")
+        return False
+
+
 async def rom_worker(entry):
     """request -> download (ROMDL) -> deliver over the tunnel -> rescan."""
     try:
         entry["status"] = "downloading"
         files = await asyncio.to_thread(romdl.download, entry["id"])
         entry["status"] = "delivering"
+        entry["system"] = files["system"]
         dest = f"/roms/{files['system']}/{files['filename']}"
         res = await hub.rpc("file.fetch", {
-            "path": f"/roms/files/{files['filename']}",
+            "path": f"/roms/files/{urllib.parse.quote(files['filename'])}",
             "dest": dest, "sha256": files["sha256"]})
         if not res.get("ok"):
             raise RuntimeError(res.get("error", "delivery failed"))
-        art = await hub.rpc("file.fetch", {
-            "path": f"/roms/files/{files['filename']}.png",
-            "dest": f"/roms/art/{files['filename']}.png"})
-        if not art.get("ok"):
-            raise RuntimeError("art delivery failed")
+        arted = await _deliver_art(files, dest)
         rescan = await hub.rpc("library.rescan", {})
         if not rescan.get("ok"):
             raise RuntimeError("rescan failed")
         entry["status"] = "ready"
-        entry["detail"] = dest
+        entry["detail"] = dest + ("" if arted else "  (no cover art)")
         hub.log_event(f"ROM ready: {entry['title']} at {dest}")
     except Exception as e:  # noqa: BLE001
         entry["status"] = "error"
@@ -818,22 +848,65 @@ async def rom_worker(entry):
 
 
 async def roms_search(request):
-    q = request.query.get("q", "")
-    return web.json_response(await asyncio.to_thread(romdl.search, q))
+    """Candidates for a query. `system` is required by the real ROMDL backend
+    (it searches one console at a time); the fake ignores it."""
+    try:
+        res = await asyncio.to_thread(
+            romdl.search, request.query.get("q", ""),
+            request.query.get("system"),
+            min(int(request.query.get("limit", 10)), 50),
+            request.query.get("deep") in ("1", "true"))
+    except ValueError as e:
+        return web.json_response({"error": str(e)}, status=400)
+    except (RuntimeError, OSError, subprocess.SubprocessError) as e:
+        return web.json_response({"error": f"romdl search failed: {e}"},
+                                 status=502)
+    # An empty result from a console with no live source is not a bad query;
+    # say which, so the UI does not tell someone to try different spelling.
+    note = None
+    if not res and romdl.using_real():
+        note = romdl.coverage(request.query.get("system"))
+    return web.json_response({"results": res, "note": note})
+
+
+async def roms_backend(request):
+    """Which backend is live and which systems it can actually reach."""
+    systems = sorted(romdl.SYSTEM_TO_CONSOLE)
+    return web.json_response({
+        "backend": romdl.backend_name(),
+        "systems": systems,
+        "coverage": ({s: romdl.coverage(s) for s in systems}
+                     if romdl.using_real() else {}),
+        "dead_sources": romdl.DEAD_SOURCES if romdl.using_real() else {},
+    })
 
 
 async def roms_request(request):
     body = await request.json()
-    cands = await asyncio.to_thread(romdl.search, body["query"])
-    if not cands:
-        return web.json_response({"error": "no match"}, status=404)
-    cand = cands[0]
+    # An explicit id skips the search entirely — that is how the UI queues a
+    # specific candidate the user picked out of a result list, rather than
+    # trusting "best match" a second time.
+    if body.get("id"):
+        cand = {"id": body["id"], "title": body.get("title") or body["id"]}
+    else:
+        try:
+            cands = await asyncio.to_thread(
+                romdl.search, body["query"], body.get("system"))
+        except ValueError as e:
+            return web.json_response({"error": str(e)}, status=400)
+        except (RuntimeError, OSError, subprocess.SubprocessError) as e:
+            return web.json_response({"error": f"romdl search failed: {e}"},
+                                     status=502)
+        if not cands:
+            return web.json_response({"error": "no match"}, status=404)
+        cand = cands[0]
     async with rom_lock:
         entry = _queue_entry(cand["id"])
         if entry is None or entry["status"] == "error":
             if entry:
                 rom_queue.remove(entry)
             entry = {"id": cand["id"], "title": cand["title"],
+                     "system": cand.get("system") or body.get("system") or "",
                      "status": "queued", "detail": ""}
             rom_queue.append(entry)
             asyncio.get_event_loop().create_task(rom_worker(entry))
@@ -1157,6 +1230,664 @@ async def games_kill(request):
     return web.json_response(res["result"])
 
 
+# ------------------------------------------------------------------ box art
+#
+# The web UI and the Pegasus theme both want cover art. arcaded owns the
+# fetch (server/artdb.py) so the cabinet never needs internet egress: art is
+# cached here and delivered over the same tunnel as everything else.
+
+def _find_assets():
+    """Locate the Y2K asset pack.
+
+    Docker COPYs it to /app/assets next to arcaded.py; a checkout runs the
+    daemon from server/ with the pack at the repo root. Try both so `python3
+    server/arcaded.py` serves images without needing ASSETS_DIR set.
+    """
+    if os.environ.get("ASSETS_DIR"):
+        return os.environ["ASSETS_DIR"]
+    here = os.path.dirname(os.path.abspath(__file__))
+    for cand in (os.path.join(here, "assets"),
+                 os.path.join(os.path.dirname(here), "assets")):
+        if os.path.isdir(cand):
+            return cand
+    return os.path.join(here, "assets")
+
+
+ASSETS_DIR = _find_assets()
+
+
+async def art_get(request):
+    """Artwork for one game. Also the URL cabd's file.fetch pulls from."""
+    kind = request.query.get("kind", "box")
+    if kind not in artdb.KINDS:
+        return web.json_response(
+            {"error": f"kind must be one of {', '.join(artdb.KINDS)}"},
+            status=400)
+    try:
+        body = await artdb.art(request.match_info["system"],
+                               request.match_info["rom"], kind)
+    except ValueError as e:
+        return web.json_response({"error": str(e)}, status=400)
+    if body is None:
+        raise web.HTTPNotFound(text="no art for this game")
+    # Sniffed, not assumed: Steam's CDN serves JPEG, libretro serves PNG.
+    ctype = "image/jpeg" if body[:3] == b"\xff\xd8\xff" else "image/png"
+    return web.Response(body=body, content_type=ctype,
+                        headers={"Cache-Control": "max-age=86400"})
+
+
+async def art_status(request):
+    return web.json_response(artdb.cache_stats())
+
+
+async def _art_targets():
+    """Every game the cabinet can launch, as (system, rom) art lookups."""
+    items = [(g["system"], g["file"]) for g in await _game_index()]
+    for t in (_read_yaml("library/steam.yaml").get("titles") or []):
+        if t.get("appid"):
+            items.append(("steam", str(t["appid"])))
+    return items
+
+
+async def art_warm(request):
+    """Pre-fetch art for the whole library into the server-side cache."""
+    items = await _art_targets()
+    counts = await artdb.warm(items, request.query.get("kind", "box"))
+    hub.log_event(f"art warm: {counts['hit']} hit, {counts['miss']} miss")
+    return web.json_response({"games": len(items), **counts})
+
+
+async def art_push(request):
+    """Deliver cached art to the cabinet so Pegasus can show boxFront.
+
+    pegasus_gen points every game's `assets.boxFront` at /roms/art/<rom>.png;
+    this is what puts the file there. Only already-cached art is pushed —
+    call /art/warm first (or let it run, it is idempotent).
+    """
+    items = await _art_targets()
+    await artdb.warm(items)
+    pushed, missing = [], 0
+    for system, rom in items:
+        if artdb.cached_path(system, rom) is None:
+            missing += 1
+            continue
+        stem = artdb.rom_stem(rom)
+        res = await hub.rpc("file.fetch", {
+            "path": f"/art/{system}/{urllib.parse.quote(rom)}",
+            "dest": f"/roms/art/{stem}.png"})
+        if res.get("ok"):
+            pushed.append(f"{system}/{stem}")
+    await hub.rpc("library.rescan", {})
+    hub.log_event(f"art pushed to cabinet: {len(pushed)} files, {missing} missing")
+    return web.json_response({"pushed": pushed, "missing": missing})
+
+
+# ------------------------------------------------------- screensaver sources
+
+async def screensaver_remove_source(request):
+    """Take a source off the rotation board entirely.
+
+    Distinct from disabling it: the UI's board shows every *added* source
+    with an on/off switch, so 'added but off' and 'not added' are different
+    states and removal has to actually drop the entry.
+    """
+    sid = (await request.json())["id"]
+    cfg = load_screensaver()
+    kept = [s for s in cfg["sources"] if source_id(s) != sid]
+    if len(kept) == len(cfg["sources"]):
+        return web.json_response({"error": f"no source {sid}"}, status=404)
+    cfg["sources"] = kept
+    _write_yaml(SCREENSAVER_REL, cfg)
+    git_commit(f"arcadectl: screensaver remove-source {sid}")
+    push_state_soon()
+    hub.log_event(f"screensaver source removed: {sid}")
+    return web.json_response(cfg)
+
+
+# ------------------------------------------------------------------ controls
+
+def _controls_layer(scope):
+    """(relpath, whole-file data, bindings dict) for a mapping scope.
+
+    The three layers store their bindings under different keys in different
+    files (spec §5.7); every controls route needs the same resolution, so it
+    lives here rather than being re-derived per handler.
+    """
+    if scope == "global":
+        rel = "controllers/global.yaml"
+        data = _read_yaml(rel)
+        return rel, data, data.setdefault("buttons", {})
+    if scope.startswith("system:"):
+        name = scope.split(":", 1)[1]
+        if not name or "/" in name or ".." in name:
+            raise ValueError(f"bad system scope {scope!r}")
+        rel = f"controllers/systems/{name}.yaml"
+        data = _read_yaml(rel)
+        return rel, data, data.setdefault("remap", {})
+    if scope.startswith("game:"):
+        gid = scope.split(":", 1)[1]
+        sysname, _, rom = gid.partition("/")
+        if (not sysname or not rom or "/" in rom
+                or ".." in gid or gid != gid.strip()):
+            raise ValueError(f"game scope needs <system>/<rom>, got {gid!r}")
+        rel = "controllers/games.yaml"
+        data = _read_yaml(rel)
+        binds = (data.setdefault("games", {}).setdefault(gid, {})
+                 .setdefault("remap", {}))
+        return rel, data, binds
+    raise ValueError(f"bad scope {scope}")
+
+
+def _layer_file(scope):
+    """(relpath, whole-file data, per-scope dict) — the dict a scope's
+    `bindings:` list hangs off. For global/system that is the file root; for
+    a game it is that game's entry."""
+    if scope == "global":
+        rel = "controllers/global.yaml"
+        data = _read_yaml(rel)
+        return rel, data, data
+    if scope.startswith("system:"):
+        name = scope.split(":", 1)[1]
+        if not name or "/" in name or ".." in name:
+            raise ValueError(f"bad system scope {scope!r}")
+        rel = f"controllers/systems/{name}.yaml"
+        data = _read_yaml(rel)
+        return rel, data, data
+    if scope.startswith("game:"):
+        gid = scope.split(":", 1)[1]
+        sysname, _, rom = gid.partition("/")
+        if (not sysname or not rom or "/" in rom
+                or ".." in gid or gid != gid.strip()):
+            raise ValueError(f"game scope needs <system>/<rom>, got {gid!r}")
+        rel = "controllers/games.yaml"
+        data = _read_yaml(rel)
+        return rel, data, data.setdefault("games", {}).setdefault(gid, {})
+    raise ValueError(f"bad scope {scope}")
+
+
+# Mirrors cabinet/inputs.py. Duplicated rather than imported because the
+# server does not ship the cabinet package — kept in sync by
+# test_binding_validation, which asserts the two lists match.
+PAD_TARGETS = ("a", "b", "x", "y", "l", "r", "l2", "r2",
+               "start", "select", "up", "down", "left", "right")
+ACTION_TARGETS = ("home", "screensaver", "lifeline", "save_state",
+                  "load_state", "pause", "reset", "quit",
+                  "fast_forward", "rewind", "screenshot")
+
+
+def _norm_binding(body):
+    """Validate a combo/hold binding from the API into its stored form."""
+    buttons = body.get("buttons")
+    if isinstance(buttons, str):
+        buttons = buttons.split("+")
+    buttons = [str(b).strip().lower() for b in (buttons or []) if str(b).strip()]
+    if not buttons:
+        raise ValueError("a binding needs at least one button")
+    if len(set(buttons)) != len(buttons):
+        raise ValueError("a binding cannot list the same button twice")
+    target = str(body.get("target") or "").strip().lower()
+    if target not in PAD_TARGETS and target not in ACTION_TARGETS:
+        raise ValueError(
+            f"unknown target {target!r} — one of: "
+            + ", ".join(PAD_TARGETS + ACTION_TARGETS))
+    try:
+        hold_ms = int(body.get("hold_ms", 0) or 0)
+    except (TypeError, ValueError):
+        raise ValueError("hold_ms must be an integer") from None
+    if hold_ms < 0:
+        raise ValueError("hold_ms must not be negative")
+    return {"buttons": sorted(buttons), "hold_ms": hold_ms, "target": target}
+
+
+def _same_expr(a, b):
+    return (sorted(a.get("buttons") or []) == sorted(b.get("buttons") or [])
+            and int(a.get("hold_ms", 0) or 0) == int(b.get("hold_ms", 0) or 0))
+
+
+async def controls_bindings(request):
+    """Everything bound in one scope: the flat remap AND the combo list."""
+    scope = request.query.get("scope", "global")
+    try:
+        _, _, binds = _controls_layer(scope)
+        _, _, holder = _layer_file(scope)
+    except ValueError as e:
+        return web.json_response({"error": str(e)}, status=400)
+    combos = [c for c in (holder.get("bindings") or []) if isinstance(c, dict)]
+    return web.json_response({"scope": scope, "bindings": binds,
+                              "combos": combos,
+                              "targets": {"pad": list(PAD_TARGETS),
+                                          "action": list(ACTION_TARGETS)}})
+
+
+async def controls_bind(request):
+    """Add or replace a combo / hold-to-trigger binding.
+
+    Distinct from /controls/map, which writes the flat physical->logical
+    remap RetroArch consumes. A combo cannot be expressed in that file at
+    all — cabd detects these itself — so they live in a separate list.
+    """
+    body = await request.json()
+    scope = body.get("scope", "global")
+    try:
+        rel, data, holder = _layer_file(scope)
+        binding = _norm_binding(body)
+    except ValueError as e:
+        return web.json_response({"error": str(e)}, status=400)
+    combos = holder.setdefault("bindings", [])
+    for i, existing in enumerate(list(combos)):
+        if isinstance(existing, dict) and _same_expr(existing, binding):
+            if existing.get("target") == binding["target"]:
+                return web.json_response(
+                    {"scope": scope, "binding": binding, "unchanged": True})
+            combos[i] = binding          # same expression, new target
+            break
+    else:
+        combos.append(binding)
+    _write_yaml(rel, data)
+    expr = "+".join(binding["buttons"]) + (
+        f" hold {binding['hold_ms']}ms" if binding["hold_ms"] else "")
+    git_commit(f"arcadectl: controls bind {scope} {expr} -> {binding['target']}")
+    push_state_soon()
+    hub.log_event(f"controls bind {scope}: {expr} -> {binding['target']}")
+    return web.json_response({"scope": scope, "binding": binding,
+                              "combos": combos})
+
+
+async def controls_unbind_combo(request):
+    """Remove a combo binding by its expression (buttons + hold)."""
+    body = await request.json()
+    scope = body.get("scope", "global")
+    try:
+        rel, data, holder = _layer_file(scope)
+    except ValueError as e:
+        return web.json_response({"error": str(e)}, status=400)
+    want = {"buttons": body.get("buttons"), "hold_ms": body.get("hold_ms", 0)}
+    if isinstance(want["buttons"], str):
+        want["buttons"] = want["buttons"].split("+")
+    want["buttons"] = [str(b).strip().lower()
+                       for b in (want["buttons"] or []) if str(b).strip()]
+    combos = holder.get("bindings") or []
+    kept = [c for c in combos
+            if not (isinstance(c, dict) and _same_expr(c, want))]
+    if len(kept) == len(combos):
+        return web.json_response(
+            {"error": f"no binding for {'+'.join(want['buttons'])} in {scope}"},
+            status=404)
+    holder["bindings"] = kept
+    _write_yaml(rel, data)
+    git_commit(f"arcadectl: controls unbind-combo {scope} "
+               + "+".join(want["buttons"]))
+    push_state_soon()
+    hub.log_event(f"controls unbind-combo {scope}: {want['buttons']}")
+    return web.json_response({"scope": scope, "combos": kept})
+
+
+async def controls_scopes(request):
+    """Every scope that currently has bindings, plus 'global'."""
+    root = pathlib.Path(STATE_DIR) / "controllers"
+    scopes = ["global"]
+    sysdir = root / "systems"
+    if sysdir.is_dir():
+        scopes += [f"system:{p.stem}" for p in sorted(sysdir.glob("*.yaml"))]
+    scopes += [f"game:{gid}" for gid in
+               sorted((_read_yaml("controllers/games.yaml").get("games") or {}))]
+    return web.json_response({"scopes": scopes})
+
+
+async def controls_unbind(request):
+    body = await request.json()
+    scope, keys = body["scope"], body.get("keys") or [body["key"]]
+    try:
+        rel, data, binds = _controls_layer(scope)
+    except ValueError as e:
+        return web.json_response({"error": str(e)}, status=400)
+    removed = [k for k in keys if binds.pop(k, None) is not None]
+    if not removed:
+        return web.json_response(
+            {"error": f"nothing bound to {', '.join(keys)} in {scope}"},
+            status=404)
+    _write_yaml(rel, data)
+    git_commit(f"arcadectl: controls unbind {scope} {' '.join(removed)}")
+    push_state_soon()
+    hub.log_event(f"controls unbind {scope}: {removed}")
+    return web.json_response({"scope": scope, "unbound": removed,
+                              "bindings": binds})
+
+
+async def controls_devices(request):
+    """Input devices the cabinet can see — the remapper's device picker."""
+    res = await hub.rpc("input.devices", {})
+    if not res.get("ok"):
+        return web.json_response(res, status=500)
+    return web.json_response(res["result"])
+
+
+# --------------------------------------------------- streaming per-app games
+
+def _find_stream_app(cfg, name):
+    want = str(name).lower()
+    for e in cfg["entries"]:
+        if want in (str(e.get("name", "")).lower(),
+                    str(e.get("target", "")).lower()):
+            return e
+    return None
+
+
+async def stream_games_set(request):
+    """Upsert one game under a streaming app (add, rename target, toggle
+    whether it shows on the cabinet, or override its quality)."""
+    body = await request.json()
+    cfg = load_streaming_cfg()
+    app_entry = _find_stream_app(cfg, body.get("app", ""))
+    if app_entry is None:
+        return web.json_response({"error": f"no stream app {body.get('app')!r}"},
+                                 status=404)
+    title = str(body.get("title", "")).strip()
+    if not title:
+        return web.json_response({"error": "title is required"}, status=400)
+    games = app_entry.setdefault("games", [])
+    game = next((g for g in games if g.get("title") == title), None)
+    if game is None:
+        if not str(body.get("target", "")).strip():
+            return web.json_response(
+                {"error": "a new game needs a launch target"}, status=400)
+        game = {"title": title, "target": str(body["target"]).strip(),
+                "enabled": True}
+        games.append(game)
+    if "target" in body:
+        game["target"] = str(body["target"]).strip()
+    if "enabled" in body:
+        game["enabled"] = bool(body["enabled"])
+    if "quality" in body:
+        # null clears the override so the game inherits the app default
+        if body["quality"] is None:
+            game.pop("quality", None)
+        else:
+            game["quality"] = body["quality"]
+    _write_yaml(STREAMING_REL, cfg)
+    git_commit(f"arcadectl: stream game set {app_entry['name']}/{title}")
+    push_state_soon()
+    hub.log_event(f"stream game set: {app_entry['name']}/{title}")
+    return web.json_response(app_entry)
+
+
+async def stream_games_remove(request):
+    body = await request.json()
+    cfg = load_streaming_cfg()
+    app_entry = _find_stream_app(cfg, body.get("app", ""))
+    if app_entry is None:
+        return web.json_response({"error": f"no stream app {body.get('app')!r}"},
+                                 status=404)
+    title = body.get("title")
+    games = app_entry.get("games") or []
+    kept = [g for g in games if g.get("title") != title]
+    if len(kept) == len(games):
+        return web.json_response(
+            {"error": f"no game {title!r} on {app_entry['name']}"}, status=404)
+    app_entry["games"] = kept
+    _write_yaml(STREAMING_REL, cfg)
+    git_commit(f"arcadectl: stream game remove {app_entry['name']}/{title}")
+    push_state_soon()
+    hub.log_event(f"stream game removed: {app_entry['name']}/{title}")
+    return web.json_response(app_entry)
+
+
+# ------------------------------------------------------------ rom queue ops
+
+async def roms_retry(request):
+    rid = (await request.json())["id"]
+    async with rom_lock:
+        entry = _queue_entry(rid)
+        if entry is None:
+            return web.json_response({"error": f"no queue entry {rid}"},
+                                     status=404)
+        if entry["status"] in ("queued", "downloading", "delivering"):
+            return web.json_response(
+                {"error": f"{rid} is already {entry['status']}"}, status=409)
+        entry["status"] = "queued"
+        entry["detail"] = ""
+        asyncio.get_event_loop().create_task(rom_worker(entry))
+    hub.log_event(f"ROM retry: {entry['title']}")
+    return web.json_response(entry)
+
+
+async def roms_cancel(request):
+    """Drop a queue entry. An in-flight download is left to finish — the
+    worker owns it — so cancelling only removes terminal or queued rows."""
+    rid = (await request.json())["id"]
+    async with rom_lock:
+        entry = _queue_entry(rid)
+        if entry is None:
+            return web.json_response({"error": f"no queue entry {rid}"},
+                                     status=404)
+        if entry["status"] in ("downloading", "delivering"):
+            return web.json_response(
+                {"error": f"{rid} is mid-transfer; let it finish or fail"},
+                status=409)
+        rom_queue.remove(entry)
+    hub.log_event(f"ROM queue entry dropped: {entry['title']}")
+    return web.json_response({"cancelled": rid})
+
+
+# ------------------------------------------------------------------ alerts
+
+# Word -> severity for the presence/event log. The log is free text written
+# by every handler, so this classifies rather than parses.
+_ALERT_WORDS = (
+    ("error", "FAILED"), ("failed", "FAILED"), ("fail", "FAILED"),
+    ("disconnected", "WARN"), ("deferred", "WARN"), ("timed out", "WARN"),
+    ("offline", "WARN"), ("suppressed", "WARN"),
+)
+
+
+def _severity(text):
+    low = text.lower()
+    for word, sev in _ALERT_WORDS:
+        if word in low:
+            return sev
+    return "INFO"
+
+
+async def alerts(request):
+    """Severity-tagged recent activity for the dashboard's alerts panel.
+
+    Two sources: the presence/event log (classified by keyword) and the ROM
+    queue's own error rows, which carry a real exception repr and would
+    otherwise only surface on the ROM tab.
+    """
+    out = [{"tag": _severity(text), "msg": text, "ts": ts}
+           for ts, text in hub.events[-60:]]
+    out += [{"tag": "FAILED", "msg": f"{e['title']}: {e['detail']}",
+             "ts": None}
+            for e in rom_queue if e["status"] == "error"]
+    limit = min(int(request.query.get("limit", 20)), 200)
+    if request.query.get("severity"):
+        want = {s.upper() for s in request.query["severity"].split(",")}
+        out = [a for a in out if a["tag"] in want]
+    out.sort(key=lambda a: a["ts"] or 0, reverse=True)
+    return web.json_response({"alerts": out[:limit]})
+
+
+# ---------------------------------------------------------------- overview
+
+async def overview(request):
+    """Everything the dashboard needs in one round trip.
+
+    The dashboard would otherwise fan out to eight endpoints on every poll,
+    and half of them 503 when the cabinet is offline. Here each cabinet-
+    dependent section degrades to null independently, so an offline cabinet
+    still renders the server-side panels (ROM queue, favorites, state log)
+    instead of blanking the page.
+    """
+    async def maybe(coro):
+        try:
+            return await coro
+        except (web.HTTPException, OSError, ValueError):
+            return None
+
+    health = await maybe(hub.rpc("system.health", {}))
+    library = await maybe(hub.rpc("library.list", {}))
+    games = None
+    if library and library.get("ok"):
+        favs = set(load_favorites())
+        games = [{"id": f"{s}/{f}", "system": s, "file": f,
+                  "path": f"/roms/{s}/{f}", "favorite": f"{s}/{f}" in favs}
+                 for s, files in sorted(library["result"]["systems"].items())
+                 for f in files]
+    return web.json_response({
+        "online": hub.online,
+        "cabinet_state": hub.cab_state,
+        "heartbeat_age_s": (round(time.monotonic() - hub.last_hb, 3)
+                            if hub.connects else None),
+        "health": health.get("result") if health and health.get("ok") else None,
+        "games": games,
+        "favorites": load_favorites(),
+        "audio": load_audio(),
+        "screensaver": load_screensaver(),
+        "streaming": load_streaming_cfg(),
+        "rom_queue": rom_queue,
+        "art_cache": artdb.cache_stats(),
+    })
+
+
+# ----------------------------------------------------- outbound integrations
+#
+# Discord "now playing" and the Home Assistant media_player/device. Both are
+# driven off the heartbeat, so nothing polls the cabinet on their behalf.
+
+INTEGRATIONS_REL = integrations.CONFIG_REL
+
+
+async def _integration_command(kind, payload, leaf):
+    """A command arriving from Home Assistant over MQTT."""
+    cmd = (payload or "").strip().lower()
+    try:
+        if kind == "screensaver":
+            await hub.rpc("screensaver.on" if cmd in ("on", "true", "1")
+                          else "screensaver.off", {})
+            hub.log_event(f"home assistant: screensaver {cmd}")
+            return
+        # media_player commands. "turn_off"/"stop" mean stop the game, not
+        # power off the cabinet — HA's off switch should not cut the machine.
+        if cmd in ("turn_off", "stop", "media_stop"):
+            await hub.rpc("game.kill", {})
+        elif cmd in ("pause", "media_pause", "play", "media_play",
+                     "media_play_pause"):
+            await hub.rpc("input.press", {"key": "pause"})
+        else:
+            hub.log_event(f"home assistant: ignoring command {cmd!r}")
+            return
+        hub.log_event(f"home assistant: {cmd}")
+    except web.HTTPException as e:
+        hub.log_event(f"home assistant command {cmd} failed: {e.reason}")
+
+
+manager = None      # built at startup so it can capture the running loop
+
+
+def _snapshot():
+    """Current cabinet state in the shape the publishers want, with an art
+    URL when the server has a public base configured."""
+    cab = hub.cab_state or {}
+    cfg = manager.cfg if manager else {}
+    art_path = None
+    running = cab.get("running")
+    if running:
+        parts = [p for p in str(running).split("/") if p]
+        if len(parts) >= 2:
+            art_path = ("/art/" + urllib.parse.quote(parts[-2]) + "/"
+                        + urllib.parse.quote(parts[-1]))
+    return integrations.snapshot_from(
+        cab, hub.online, cfg.get("public_base_url"), art_path)
+
+
+async def integrations_get(request):
+    cfg = manager.cfg if manager else integrations.load_config(STATE_DIR)
+    return web.json_response({"config": integrations.redact(cfg),
+                              "status": manager.status() if manager else {},
+                              "snapshot": _snapshot().as_dict()})
+
+
+async def integrations_set(request):
+    """Patch the integration config. A secret sent back unchanged (the
+    redaction sentinel) is left alone, so saving the form does not wipe a
+    webhook URL the browser was never given."""
+    body = await request.json()
+    cfg = integrations.load_config(STATE_DIR)
+    for section in ("discord", "homeassistant"):
+        patch = body.get(section)
+        if not isinstance(patch, dict):
+            continue
+        for k, v in patch.items():
+            if k.endswith("_set"):
+                continue
+            if isinstance(v, str) and set(v) == {"•"}:
+                continue        # unchanged secret placeholder
+            cfg.setdefault(section, {})[k] = v
+    if "public_base_url" in body:
+        cfg["public_base_url"] = body["public_base_url"]
+    _write_yaml(INTEGRATIONS_REL, cfg)
+    git_commit("arcadectl: integrations set")
+    if manager is not None:
+        await manager.reload()
+    hub.log_event("integrations config updated")
+    return web.json_response({"config": integrations.redact(cfg),
+                              "status": manager.status() if manager else {}})
+
+
+async def integrations_test(request):
+    which = request.match_info["which"]
+    if manager is None:
+        return web.json_response({"error": "integrations not started"},
+                                 status=503)
+    if which == "discord":
+        try:
+            ok = await manager.discord.test()
+        except ValueError as e:
+            return web.json_response({"error": str(e)}, status=400)
+        return web.json_response({"sent": bool(ok)})
+    if which == "homeassistant":
+        if not manager.ha.enabled:
+            return web.json_response(
+                {"error": "home assistant integration is not enabled"},
+                status=400)
+        ok = await asyncio.to_thread(manager.ha.connect)
+        if ok:
+            await asyncio.to_thread(manager.ha.publish, _snapshot(), None)
+        return web.json_response({"connected": bool(ok),
+                                  "note": None if ok else manager.last_error})
+    return web.json_response({"error": "discord|homeassistant"}, status=400)
+
+
+async def _publish_presence():
+    """Push current state to the integrations. Called on every heartbeat."""
+    if manager is None:
+        return
+    health = None
+    if manager.ha.client is not None:
+        # Only the HA sensors need health; do not wake the cabinet for it.
+        try:
+            res = await asyncio.wait_for(hub.rpc("system.health", {}), 8)
+            health = res.get("result") if res.get("ok") else None
+        except (web.HTTPException, asyncio.TimeoutError):
+            health = None
+    await manager.update(_snapshot(), health)
+
+
+async def _on_startup(app):
+    global manager
+    manager = integrations.Manager(STATE_DIR, hub.log_event,
+                                   _integration_command)
+    await manager.start()
+    if manager.discord.enabled or manager.ha.enabled:
+        hub.log_event(f"integrations started: {manager.status()}")
+
+
+async def _on_cleanup(app):
+    if manager is not None:
+        await asyncio.to_thread(manager.ha.disconnect)
+
+
 # Body cap must fit save-backup tarballs (aiohttp's 1 MiB default would
 # silently 413 any real /saves tree — savestates alone are MBs each).
 app = web.Application(
@@ -1205,11 +1936,15 @@ app.add_routes([
     web.get("/screensaver/sources", screensaver_sources),
     web.get("/thumb/{item_id}", thumb_proxy),
     web.post("/screensaver/set-source", screensaver_set_source),
+    # NB: must precede the /screensaver/{action} catch-all below — aiohttp
+    # resolves in registration order, so a later literal route never wins.
+    web.post("/screensaver/remove-source", screensaver_remove_source),
     web.get("/screensaver/playlist", screensaver_playlist),
     web.post("/screensaver/disable", screensaver_disable),
     web.post("/screensaver/{action}", screensaver_cmd),
     web.get("/media/{video_id}", media_proxy),
     web.get("/roms/search", roms_search),
+    web.get("/roms/backend", roms_backend),
     web.post("/roms/request", roms_request),
     web.get("/roms/status", roms_status),
     web.get("/roms/files/{fname}", roms_file),
@@ -1218,7 +1953,33 @@ app.add_routes([
     web.get("/favorites", favorites_list),
     web.post("/favorites/add", favorites_add),
     web.post("/favorites/remove", favorites_remove),
+    web.get("/overview", overview),
+    web.get("/alerts", alerts),
+    web.get("/art/status", art_status),
+    web.post("/art/warm", art_warm),
+    web.post("/art/push", art_push),
+    web.get("/art/{system}/{rom}", art_get),
+    web.get("/controls/bindings", controls_bindings),
+    web.get("/controls/scopes", controls_scopes),
+    web.get("/controls/devices", controls_devices),
+    web.post("/controls/unbind", controls_unbind),
+    web.post("/controls/bind", controls_bind),
+    web.post("/controls/unbind-combo", controls_unbind_combo),
+    web.post("/stream/games/set", stream_games_set),
+    web.post("/stream/games/remove", stream_games_remove),
+    web.get("/integrations", integrations_get),
+    web.post("/integrations/set", integrations_set),
+    web.post("/integrations/test/{which}", integrations_test),
+    web.post("/roms/retry", roms_retry),
+    web.post("/roms/cancel", roms_cancel),
 ])
+# Y2K asset pack (skins, sprites, tagged GIF library) for the web UI. Static
+# rather than a handler: these are ~100 MB of immutable files and aiohttp's
+# static route does range requests and conditional GETs for free.
+if os.path.isdir(ASSETS_DIR):
+    app.add_routes([web.static("/assets", ASSETS_DIR)])
+app.on_startup.append(_on_startup)
+app.on_cleanup.append(_on_cleanup)
 
 if __name__ == "__main__":
     web.run_app(app, host="0.0.0.0", port=int(os.environ.get("PORT", "8000")),

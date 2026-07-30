@@ -21,7 +21,11 @@ services:
       retries: 5
 
   server:
-    build: ../server
+    # Context is the repo root: the image needs both server/ and the top-level
+    # assets/ pack (shared with the Pegasus theme).
+    build:
+      context: ..
+      dockerfile: server/Dockerfile
     networks: [srvnet]
     environment:
       # MUST be an IP, not the "plex" service name. An unclaimed PMS decides
@@ -34,6 +38,11 @@ services:
       # the token-free unclaimed path work. (allowedNetworks does NOT
       # affect this — verified with the pref both set and cleared.)
       PLEX_URL: http://172.31.7.10:32400
+      # The sim network is a closed toxiproxy topology with no egress, so the
+      # real ROMDL sources are unreachable. Pinned rather than left on `auto`
+      # because the romdl CLI *is* installed in the image, and accept-m4
+      # asserts on the fake payload's exact checksum.
+      ROMDL_BACKEND: fake
     volumes:
       - ../state:/state-seed:ro   # entrypoint seeds a writable git repo from this
     healthcheck:

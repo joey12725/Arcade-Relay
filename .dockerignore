@@ -1,0 +1,16 @@
+# The server image builds from the repo root (it needs assets/ as well as
+# server/), so keep the context from dragging in history and scratch data.
+.git
+sim/.data
+soak/.data
+**/__pycache__
+**/*.pyc
+.venv
+venv
+.pytest_cache
+tests
+docs
+themes
+cabinet
+arcade-y2k-frontend-assets
+*.log

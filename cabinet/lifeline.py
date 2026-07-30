@@ -135,30 +135,156 @@ def restart_network():
     return {"restarted": ok, "detail": detail}
 
 
+# ---- rendering (spec §5.11 + the Y2K design's Lifeline screen).
+#
+# Everything here is drawn huge on purpose: this screen exists for the case
+# where the cabinet is unreachable and someone is reading it across a room,
+# with no keyboard and no network. Layout mirrors the design's four status
+# bays over a detail panel and a recovery log.
+LL_W = int(os.environ.get("LIFELINE_WIDTH", "1024"))
+LL_H = int(os.environ.get("LIFELINE_HEIGHT", "768"))
+
+LL_BG = (0, 16, 40)          # deep navy field
+PANEL_BG = (1, 25, 60)
+GOLD = (255, 228, 92)
+OK_GREEN = (124, 255, 90)
+BAD_RED = (255, 75, 75)
+OK_FIELD = (4, 51, 26)
+BAD_FIELD = (58, 5, 16)
+PALE = (207, 230, 255)
+LABEL = (159, 208, 255)
+
+# First font that exists wins. DejaVu ships with Debian; the others cover a
+# minimal image or a non-Debian cabinet. PIL's built-in bitmap font is the
+# last resort — legible, just not big, which is why it is not the default.
+_FONT_CANDIDATES = [
+    "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+    "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf",
+    "/usr/share/fonts/TTF/DejaVuSans-Bold.ttf",
+    "/System/Library/Fonts/Supplemental/Arial Bold.ttf",
+]
+_font_cache = {}
+
+
+def _font(size):
+    if size in _font_cache:
+        return _font_cache[size]
+    from PIL import ImageFont
+    got = None
+    for path in _FONT_CANDIDATES:
+        if os.path.exists(path):
+            try:
+                got = ImageFont.truetype(path, size)
+                break
+            except OSError:
+                continue
+    if got is None:
+        got = ImageFont.load_default()
+    _font_cache[size] = got
+    return got
+
+
+def _centred(d, box, text, font, fill):
+    """Draw text centred in (x0, y0, x1, y1)."""
+    x0, y0, x1, y1 = box
+    left, top, right, bottom = d.textbbox((0, 0), text, font=font)
+    d.text((x0 + (x1 - x0 - (right - left)) / 2 - left,
+            y0 + (y1 - y0 - (bottom - top)) / 2 - top),
+           text, font=font, fill=fill)
+
+
 def render(status, version="cabd/1.0"):
     from PIL import Image, ImageDraw
-    img = Image.new("RGB", (1024, 768), BG)
+    img = Image.new("RGB", (LL_W, LL_H), LL_BG)
     d = ImageDraw.Draw(img)
-    d.text((40, 30), "LIFELINE", fill=RED)
-    rows = [("LOCAL NETWORK", status["network"]),
-            ("INTERNET (1.1.1.1)", status["internet"]),
-            ("DNS", status["dns"]),
-            ("SERVER LINK", status["server_ws"])]
-    y = 120
-    for label, ok in rows:
-        color = BLUE if ok else RED
-        d.rectangle([60, y, 160, y + 70], fill=color)
-        d.text((80, y + 25), "OK" if ok else "BAD", fill=FG)
-        d.text((190, y + 25), label, fill=FG)
-        y += 110
-    d.text((60, y + 10), f"ip {status['ip']}   uptime {status['uptime_s']}s   "
-                         f"{version}   last-sync {status['last_sync']}", fill=FG)
-    d.text((60, y + 50), "reconnect: maximum aggression (1s)", fill=BLUE)
+    pad = round(LL_W * 0.021)
+
+    # --- header
+    d.text((pad, round(LL_H * 0.018)), "LIFELINE",
+           font=_font(round(LL_H * 0.070)), fill=(255, 255, 255))
+    diag = "DIAGNOSTICS"
+    fdiag = _font(round(LL_H * 0.031))
+    d.text((LL_W - pad - d.textlength(diag, font=fdiag), round(LL_H * 0.042)),
+           diag, font=fdiag, fill=BAD_RED)
+    rule = round(LL_H * 0.115)
+    d.rectangle([pad, rule, LL_W - pad, rule + 3], fill=GOLD)
+    d.rectangle([pad, rule + 8, LL_W - pad, rule + 11], fill=GOLD)
+
+    # --- four status bays, the thing you can read from the doorway
+    bays = [("LOCAL NETWORK", status["network"], status.get("ip", "")),
+            ("INTERNET", status["internet"], "1.1.1.1"),
+            ("DNS", status["dns"], "resolver"),
+            ("SERVER LINK", status["server_ws"], "websocket")]
+    top = rule + round(LL_H * 0.035)
+    bay_h = round(LL_H * 0.235)
+    gap = round(LL_W * 0.010)
+    bay_w = (LL_W - 2 * pad - 3 * gap) / 4
+    for i, (name, ok, note) in enumerate(bays):
+        x0 = pad + i * (bay_w + gap)
+        box = [x0, top, x0 + bay_w, top + bay_h]
+        d.rectangle(box, fill=OK_FIELD if ok else BAD_FIELD,
+                    outline=OK_GREEN if ok else BAD_RED, width=6)
+        _centred(d, [x0, top + round(bay_h * 0.06),
+                     x0 + bay_w, top + round(bay_h * 0.24)],
+                 name, _font(round(LL_H * 0.025)), (255, 255, 255))
+        _centred(d, [x0, top + round(bay_h * 0.20),
+                     x0 + bay_w, top + round(bay_h * 0.80)],
+                 "OK" if ok else "BAD", _font(round(LL_H * 0.10)),
+                 OK_GREEN if ok else BAD_RED)
+        _centred(d, [x0, top + round(bay_h * 0.78),
+                     x0 + bay_w, top + bay_h],
+                 note, _font(round(LL_H * 0.021)), PALE)
+
+    # --- detail rows (left) and recovery log (right)
+    body_y = top + bay_h + round(LL_H * 0.025)
+    body_h = LL_H - body_y - pad
+    left_w = round((LL_W - 2 * pad - gap) * 0.52)
+    d.rectangle([pad, body_y, pad + left_w, body_y + body_h],
+                fill=PANEL_BG, outline=GOLD, width=5)
+
+    up = int(status.get("uptime_s", 0))
+    days, rem = divmod(up, 86400)
+    rows = [("IP", status.get("ip", "none")),
+            ("UPTIME", (f"{days}d " if days else "")
+                       + f"{rem // 3600:02d}:{rem % 3600 // 60:02d}"),
+            ("CABD", version),
+            ("LAST SYNC", str(status.get("last_sync", "never"))),
+            ("RECONNECT", "1s MAX"),
+            ("SSH", "REACHABLE" if ssh_listening() else "DOWN")]
+    rf = _font(round(LL_H * 0.028))
+    vf = _font(round(LL_H * 0.030))
+    row_h = (body_h - round(LL_H * 0.03)) / len(rows)
+    for i, (k, v) in enumerate(rows):
+        ry = body_y + round(LL_H * 0.015) + i * row_h
+        d.text((pad + round(LL_W * 0.014), ry), k, font=rf, fill=LABEL)
+        d.text((pad + left_w - round(LL_W * 0.014) - d.textlength(str(v), font=vf), ry),
+               str(v), font=vf, fill=(255, 255, 255))
+        if i < len(rows) - 1:
+            d.rectangle([pad + round(LL_W * 0.012), ry + row_h - round(LL_H * 0.012),
+                         pad + left_w - round(LL_W * 0.012),
+                         ry + row_h - round(LL_H * 0.012) + 1], fill=(44, 84, 144))
+
+    rx = pad + left_w + gap
+    d.rectangle([rx, body_y, LL_W - pad, body_y + body_h],
+                fill=PANEL_BG, outline=GOLD, width=5)
     rec = status.get("recovery") or {}
-    if rec:
-        d.text((60, y + 90), "recovery: " + "  ".join(
-            f"{k}={v}" for k, v in sorted(rec.items())), fill=FG)
-    d.text((60, y + 130), "press A: restart networking", fill=BLUE)
+    log = [f"> {k}: {v}" for k, v in sorted(rec.items())] or \
+          ["> wpa: COMPLETED", "> lease valid", "> ws heartbeat"]
+    lf = _font(round(LL_H * 0.026))
+    for i, line in enumerate(log[:6]):
+        d.text((rx + round(LL_W * 0.014),
+                body_y + round(LL_H * 0.018) + i * round(LL_H * 0.040)),
+               line[:46], font=lf, fill=(185, 214, 255))
+
+    # action + exit hint pinned to the bottom of the right panel
+    btn_h = round(LL_H * 0.075)
+    btn = [rx + round(LL_W * 0.014), body_y + body_h - btn_h - round(LL_H * 0.062),
+           LL_W - pad - round(LL_W * 0.014), body_y + body_h - round(LL_H * 0.062)]
+    d.rectangle(btn, fill=(155, 232, 106), outline=(255, 255, 255), width=5)
+    _centred(d, btn, "PRESS A: RESTART NET", _font(round(LL_H * 0.032)), (10, 42, 0))
+    _centred(d, [rx, body_y + body_h - round(LL_H * 0.055), LL_W - pad, body_y + body_h],
+             "HOLD START+SELECT 5s TO EXIT", _font(round(LL_H * 0.022)), LABEL)
+
     img.save(LL_PNG)
 
 

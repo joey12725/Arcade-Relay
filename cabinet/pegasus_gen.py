@@ -24,6 +24,9 @@ SYSTEM_EXTENSIONS = {
 }
 
 
+ART_DIR = os.path.join(ROMS_DIR, "art")
+
+
 def _write(path, text):
     os.makedirs(os.path.dirname(path), exist_ok=True)
     tmp = path + ".tmp"
@@ -33,19 +36,52 @@ def _write(path, text):
     return path
 
 
+def art_lines(rom, indent="  "):
+    """`assets.boxFront` for a rom, when the server has delivered its art.
+
+    Emitted only when the PNG actually exists: Pegasus renders a broken-image
+    box for a boxFront it cannot load, which looks worse than the theme's own
+    generated cover. Art arrives via arcaded's /art/push (file.fetch into
+    /roms/art), so a cabinet that has never been warmed just gets no line.
+    """
+    png = os.path.join(ART_DIR, os.path.splitext(os.path.basename(rom))[0] + ".png")
+    return [f"{indent}assets.boxFront: {png}"] if os.path.exists(png) else []
+
+
 def gen_system_collections(bundle):
-    """One metadata file per system dir under /roms."""
+    """One metadata file per system dir under /roms.
+
+    A per-rom `game:` block is emitted for every file present so box art can
+    be attached; Pegasus still discovers anything unlisted through
+    `extensions` + the collection launch line, so a rom that appears between
+    renders is playable immediately (just un-arted until the next sync).
+    """
     systems = (bundle.get("cabinet.yaml") or {}).get("systems") or []
     emulators = (bundle.get("cabinet.yaml") or {}).get("emulators") or {}
     written = []
     for sys_name in sorted(set(systems) | set(emulators)):
         ext = SYSTEM_EXTENSIONS.get(sys_name, "bin")
-        text = (f"collection: {sys_name.upper()}\n"
-                f"shortname: {sys_name}\n"
-                f"extensions: {ext}\n"
-                f"launch: {CABD_LAUNCH} {sys_name} {{file.path}}\n")
+        lines = [f"collection: {sys_name.upper()}",
+                 f"shortname: {sys_name}",
+                 f"extensions: {ext}",
+                 f"launch: {CABD_LAUNCH} {sys_name} {{file.path}}"]
+        d = os.path.join(ROMS_DIR, sys_name)
+        roms = []
+        if os.path.isdir(d):
+            roms = sorted(f for f in os.listdir(d)
+                          if os.path.isfile(os.path.join(d, f))
+                          and f != "metadata.pegasus.txt"
+                          and not f.endswith(".tmp"))
+        for rom in roms:
+            art = art_lines(rom)
+            if not art:
+                continue           # nothing to add beyond extension discovery
+            lines.append("")
+            lines.append(f"game: {os.path.splitext(rom)[0]}")
+            lines.append(f"  file: {os.path.join(d, rom)}")
+            lines.extend(art)
         written.append(_write(
-            os.path.join(ROMS_DIR, sys_name, "metadata.pegasus.txt"), text))
+            os.path.join(d, "metadata.pegasus.txt"), "\n".join(lines) + "\n"))
     return written
 
 
@@ -63,12 +99,21 @@ def gen_favorites(bundle):
             lines.append(f"game: {rom}")
             lines.append(f"file: {os.path.join(ROMS_DIR, sys_name, rom)}")
             lines.append(f"launch: {CABD_LAUNCH} {sys_name} {{file.path}}")
+            lines.extend(art_lines(rom, indent=""))
     return _write(os.path.join(ROMS_DIR, "favorites", "metadata.pegasus.txt"),
                   "\n".join(lines) + "\n")
 
 
 def gen_streaming(bundle):
-    """Streaming tiles (spec §5.8): stub .stream files + per-game launch."""
+    """Streaming tiles (spec §5.8): stub .stream files + per-game launch.
+
+    Each app entry may carry a `games:` list (managed from the control
+    plane's Streaming tab). Those become their own tiles alongside the app
+    itself, so 'Forza on Game Pass' is one launch from the cabinet rather
+    than 'open Game Pass, then navigate'. A game with `enabled: false` is
+    kept in state but not rendered — that is what the tab's ON CAB toggle
+    means.
+    """
     d = os.path.join(ROMS_DIR, "streaming")
     entries = (bundle.get("library/streaming.yaml") or {}).get("entries") or [
         {"name": "Steam Big Picture", "kind": "moonlight", "target": "Desktop"},
@@ -76,12 +121,24 @@ def gen_streaming(bundle):
     ]
     lines = ["collection: Streaming", "shortname: streaming",
              "extensions: stream"]
-    for e in entries:
-        fname = e["name"].replace(" ", "_") + ".stream"
-        _write(os.path.join(d, fname), f"{e['kind']}:{e['target']}\n")
-        lines.append(f"game: {e['name']}")
+
+    def tile(name, kind, target):
+        fname = name.replace(" ", "_").replace("/", "_") + ".stream"
+        _write(os.path.join(d, fname), f"{kind}:{target}\n")
+        lines.append(f"game: {name}")
         lines.append(f"file: {os.path.join(d, fname)}")
-        lines.append(f"launch: {CABD_LAUNCH} stream \"{e['kind']}:{e['target']}\"")
+        lines.append(f"launch: {CABD_LAUNCH} stream \"{kind}:{target}\"")
+
+    for e in entries:
+        tile(e["name"], e["kind"], e["target"])
+        # streaming.yaml is hand-editable state; a malformed `games:` must
+        # not take the whole render down (it runs on every state.sync)
+        games = e.get("games")
+        for g in games if isinstance(games, list) else []:
+            if not isinstance(g, dict) or not g.get("enabled", True):
+                continue
+            if g.get("title") and g.get("target"):
+                tile(g["title"], e["kind"], g["target"])
     return _write(os.path.join(d, "metadata.pegasus.txt"),
                   "\n".join(lines) + "\n")
 
@@ -97,6 +154,8 @@ def gen_steam(bundle):
         lines.append(f"game: {t['name']}")
         lines.append(f"file: {os.path.join(d, fname)}")
         lines.append(f"launch: {CABD_LAUNCH} steam {t['appid']}")
+        # Steam art is keyed on appid (arcaded pulls it from Steam's CDN)
+        lines.extend(art_lines(str(t["appid"]), indent=""))
     return _write(os.path.join(d, "metadata.pegasus.txt"),
                   "\n".join(lines) + "\n")
 

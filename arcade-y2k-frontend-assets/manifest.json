@@ -1,0 +1,23 @@
+{
+  "name": "arcade-y2k-frontend-assets",
+  "version": 1,
+  "generatedWith": "OpenAI image generation",
+  "cabinetCanvas": { "width": 724, "height": 543, "aspectRatio": "4:3" },
+  "cabinetSkins": [
+    "favorites", "nes", "snes", "n64", "genesis", "dreamcast",
+    "psx", "arcade", "gba", "streaming", "steam", "lifeline"
+  ],
+  "mascots": ["mascot-tabby-cat-anime"],
+  "librarySeed": "library-seeds/game-library-seed.json",
+  "webSprites": [
+    "gel-blue", "gel-red", "gel-yellow", "gel-purple", "chrome-title-plaque",
+    "panel-frame-top", "favorite-star", "status-online", "status-offline",
+    "status-pending", "status-success", "status-error", "bubble-cluster",
+    "glitter-divider", "marquee-stripe", "sparkle-cluster"
+  ],
+  "notes": [
+    "The user-supplied tabby cat is included as project-owned mascot art.",
+    "Mario and Pepsiman assets are absent because the image-generation service rejected their generation.",
+    "All text, values, diagnostic states, game cover art, and game metadata should be rendered by the frontend."
+  ]
+}

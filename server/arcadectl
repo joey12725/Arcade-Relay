@@ -34,6 +34,21 @@ def call(method, path, body=None):
         sys.exit(3)
 
 
+def _hold_ms(spec):
+    """'2s' | '500ms' | '0' | '1.5' (seconds) -> milliseconds."""
+    s = str(spec).strip().lower()
+    try:
+        if s.endswith("ms"):
+            return int(float(s[:-2]))
+        if s.endswith("s"):
+            return int(float(s[:-1]) * 1000)
+        return int(float(s) * 1000)
+    except ValueError:
+        print(f"arcadectl: bad hold time {spec!r} (try 2s, 500ms, 0)",
+              file=sys.stderr)
+        sys.exit(2)
+
+
 def main():
     ap = argparse.ArgumentParser(prog="arcadectl")
     ap.add_argument("--json", action="store_true", dest="as_json")
@@ -63,11 +78,23 @@ def main():
     rsub = roms.add_subparsers(dest="romscmd", required=True)
     rs = rsub.add_parser("search")
     rs.add_argument("query")
+    rs.add_argument("--system", help="nes, snes, psx, ... (required by the "
+                                     "real ROMDL backend)")
+    rs.add_argument("--limit", type=int, default=10)
+    rs.add_argument("--deep", action="store_true",
+                    help="more permissive matching, deeper crawl")
     rr = rsub.add_parser("request")
-    rr.add_argument("query")
+    rr.add_argument("query", nargs="?", help="omit when using --id")
+    rr.add_argument("--system")
+    rr.add_argument("--id", help="queue an exact candidate from a search")
     rsub.add_parser("queue")
     rsub.add_parser("status")
     rsub.add_parser("sync")
+    rsub.add_parser("backend", help="which ROMDL backend and source coverage")
+    rrt = rsub.add_parser("retry")
+    rrt.add_argument("id")
+    rc = rsub.add_parser("cancel")
+    rc.add_argument("id")
 
     ss = sub.add_parser("screensaver")
     sssub = ss.add_subparsers(dest="sscmd", required=True)
@@ -79,7 +106,12 @@ def main():
     sset.add_argument("--mode", choices=["shuffle_episodes", "continue_series"])
     sset.add_argument("--fallback", choices=["local_clips", "dim_clock", "off"],
                       help="what to show when no playlist is available")
-    for c in ("enable-source", "disable-source"):
+    sset.add_argument("--aspect", choices=["crop", "bars", "stretch"])
+    sset.add_argument("--shuffle", choices=["in_order", "random_episode",
+                                            "even_series", "round_robin", "decay"])
+    sset.add_argument("--skip-intro", type=int, dest="skip_intro_s")
+    sset.add_argument("--skip-outro", type=int, dest="skip_outro_s")
+    for c in ("enable-source", "disable-source", "remove-source"):
         sp = sssub.add_parser(c)
         sp.add_argument("id")
     sd = sssub.add_parser("disable")
@@ -122,8 +154,36 @@ def main():
                     help="global | system:<sys> | game:<sys>/<rom>")
     cm.add_argument("--set", dest="sets", action="append", required=True,
                     metavar="BTN=TARGET")
+    cbind = csub.add_parser("bind", help="combo / hold-to-trigger binding")
+    cbind.add_argument("--scope", required=True,
+                       help="global | system:<sys> | game:<sys>/<rom>")
+    cbind.add_argument("--buttons", required=True,
+                       help="one button or a combo, e.g. l+r")
+    cbind.add_argument("--hold", default="0",
+                       help="hold time before it fires, e.g. 2s, 500ms, 0")
+    cbind.add_argument("--target", required=True,
+                       help="pad button (a, start, ...) or action "
+                            "(screensaver, save_state, quit, ...)")
+    cub = csub.add_parser("unbind-combo")
+    cub.add_argument("--scope", required=True)
+    cub.add_argument("--buttons", required=True)
+    cub.add_argument("--hold", default="0")
+    cu = csub.add_parser("unbind")
+    cu.add_argument("--scope", required=True,
+                    help="global | system:<sys> | game:<sys>/<rom>")
+    cu.add_argument("keys", nargs="+", metavar="BTN")
+    cb = csub.add_parser("bindings")
+    cb.add_argument("--scope", default="global")
+    csub.add_parser("scopes")
+    csub.add_parser("devices")
     mon = csub.add_parser("monitor")
     mon.add_argument("--for", dest="seconds", type=float, default=2)
+
+    art = sub.add_parser("art", help="box art cache (libretro-thumbnails)")
+    artsub = art.add_subparsers(dest="artcmd", required=True)
+    artsub.add_parser("status")
+    artsub.add_parser("warm", help="fetch art for the whole library")
+    artsub.add_parser("push", help="deliver cached art to the cabinet")
 
     fav = sub.add_parser("favorites")
     fsub = fav.add_subparsers(dest="favcmd", required=True)
@@ -229,12 +289,35 @@ def main():
 
     if args.cmd == "roms":
         if args.romscmd == "search":
-            res = call("GET", "/roms/search?q=" +
-                       urllib.parse.quote(args.query))
+            qs = ["q=" + urllib.parse.quote(args.query),
+                  "limit=%d" % args.limit]
+            if args.system:
+                qs.append("system=" + urllib.parse.quote(args.system))
+            if args.deep:
+                qs.append("deep=1")
+            res = call("GET", "/roms/search?" + "&".join(qs))
+            # a dead upstream source reads as "no results" otherwise
+            if isinstance(res, dict) and res.get("note"):
+                print("arcadectl: " + res["note"], file=sys.stderr)
         elif args.romscmd == "request":
-            res = call("POST", "/roms/request", {"query": args.query})
+            if not args.query and not args.id:
+                print("usage: roms request <query> [--system S] | --id ID",
+                      file=sys.stderr)
+                sys.exit(2)
+            body = {}
+            for k, v in (("query", args.query), ("system", args.system),
+                         ("id", args.id)):
+                if v:
+                    body[k] = v
+            res = call("POST", "/roms/request", body)
         elif args.romscmd == "sync":
             res = call("POST", "/roms/sync")
+        elif args.romscmd == "backend":
+            res = call("GET", "/roms/backend")
+        elif args.romscmd == "retry":
+            res = call("POST", "/roms/retry", {"id": args.id})
+        elif args.romscmd == "cancel":
+            res = call("POST", "/roms/cancel", {"id": args.id})
         else:
             res = call("GET", "/roms/status")
         print(json.dumps(res))
@@ -263,8 +346,14 @@ def main():
                     (("brightness", args.brightness),
                      ("idle_seconds", args.idle_seconds),
                      ("mode", args.mode),
-                     ("fallback", args.fallback)) if v is not None}
+                     ("fallback", args.fallback),
+                     ("aspect", args.aspect),
+                     ("shuffle", args.shuffle),
+                     ("skip_intro_s", args.skip_intro_s),
+                     ("skip_outro_s", args.skip_outro_s)) if v is not None}
             res = call("POST", "/screensaver/set", body)
+        elif c == "remove-source":
+            res = call("POST", "/screensaver/remove-source", {"id": args.id})
         else:
             res = call("POST", "/screensaver/set-source",
                        {"id": args.id, "enabled": c == "enable-source"})
@@ -307,9 +396,38 @@ def main():
         print(json.dumps(res))
         sys.exit(0)
 
+    if args.cmd == "art":
+        if args.artcmd == "status":
+            res = call("GET", "/art/status")
+        else:
+            res = call("POST", "/art/" + args.artcmd)
+        print(json.dumps(res))
+        sys.exit(0)
+
     if args.cmd == "controls":
         if args.ctlcmd == "list-presets":
             res = call("GET", "/controls/presets")
+        elif args.ctlcmd == "scopes":
+            res = call("GET", "/controls/scopes")
+        elif args.ctlcmd == "devices":
+            res = call("GET", "/controls/devices")
+        elif args.ctlcmd == "bindings":
+            res = call("GET", "/controls/bindings?scope="
+                       + urllib.parse.quote(args.scope))
+        elif args.ctlcmd == "unbind":
+            res = call("POST", "/controls/unbind",
+                       {"scope": args.scope, "keys": args.keys})
+        elif args.ctlcmd == "bind":
+            res = call("POST", "/controls/bind",
+                       {"scope": args.scope,
+                        "buttons": args.buttons.split("+"),
+                        "hold_ms": _hold_ms(args.hold),
+                        "target": args.target})
+        elif args.ctlcmd == "unbind-combo":
+            res = call("POST", "/controls/unbind-combo",
+                       {"scope": args.scope,
+                        "buttons": args.buttons.split("+"),
+                        "hold_ms": _hold_ms(args.hold)})
         elif args.ctlcmd == "diff":
             res = call("GET", "/controls/diff?a=" + urllib.parse.quote(args.a)
                        + "&b=" + urllib.parse.quote(args.b))

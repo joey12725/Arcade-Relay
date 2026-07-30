@@ -1,0 +1,18 @@
+{
+  "schemaVersion": 1,
+  "purpose": "Curated cabinet-library seed. This contains metadata only; acquire and install game files through the authorized library/ROM workflow.",
+  "games": [
+    { "id": "nes/super-mario-bros-3", "system": "nes", "title": "Super Mario Bros. 3", "favorite": true },
+    { "id": "nes/metroid", "system": "nes", "title": "Metroid", "favorite": false },
+    { "id": "nes/mega-man-2", "system": "nes", "title": "Mega Man 2", "favorite": false },
+    { "id": "nes/the-legend-of-zelda", "system": "nes", "title": "The Legend of Zelda", "favorite": false },
+    { "id": "psx/pepsiman", "system": "psx", "title": "Pepsiman", "favorite": true },
+    { "id": "psx/castlevania-symphony-of-the-night", "system": "psx", "title": "Castlevania: Symphony of the Night", "favorite": false },
+    { "id": "psx/crash-bandicoot-3-warped", "system": "psx", "title": "Crash Bandicoot 3: Warped", "favorite": false },
+    { "id": "psx/tekken-3", "system": "psx", "title": "Tekken 3", "favorite": false },
+    { "id": "gb/pokemon-red-version", "system": "gb", "title": "Pokémon Red Version", "favorite": true },
+    { "id": "gbc/pokemon-crystal-version", "system": "gbc", "title": "Pokémon Crystal Version", "favorite": false },
+    { "id": "gba/pokemon-emerald-version", "system": "gba", "title": "Pokémon Emerald Version", "favorite": true },
+    { "id": "steam/celeste", "system": "steam", "title": "Celeste", "favorite": true }
+  ]
+}
