@@ -28,7 +28,12 @@ if [ -r "$KEY" ]; then
 fi
 
 cd "$REPO_DIR"
-git config --global --add safe.directory "$REPO_DIR" 2>/dev/null || true
+# System config, not --global: this runs as a systemd system service, where
+# HOME is unset and a --global write goes nowhere. The checkout is owned by
+# the arcade user while this runs as root, so without the exception every
+# git call dies on "dubious ownership".
+git config --system --get-all safe.directory 2>/dev/null | grep -qx "$REPO_DIR" \
+    || git config --system --add safe.directory "$REPO_DIR" || true
 
 [ -n "$BRANCH" ] || BRANCH=$(git rev-parse --abbrev-ref HEAD 2>/dev/null)
 [ -n "$BRANCH" ] && [ "$BRANCH" != HEAD ] || {
