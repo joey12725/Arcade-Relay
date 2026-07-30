@@ -21,12 +21,32 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # over the documented `--json` interface, so its dependency tree (requests,
 # bs4, rapidfuzz, tqdm) never has to be importable from the daemon.
 # Build-arg pinned so an image rebuild is reproducible; bump to update.
-ARG ROMDL_REF=main
-RUN python3 -m venv /opt/romdl \
-    && /opt/romdl/bin/pip install --no-cache-dir \
-         "git+https://example.invalid/romdl@${ROMDL_REF}" \
-    && ln -s /opt/romdl/bin/romdl /usr/local/bin/romdl \
-    && romdl --help >/dev/null
+# The repo is PRIVATE, so the build takes an optional read-only deploy key as a
+# BuildKit secret (id=romdl_key) and clones over SSH. Without the secret it
+# falls back to the anonymous HTTPS URL, and if that fails the install is
+# SKIPPED rather than failing the whole build: romdl.py's default `auto`
+# backend is `shutil.which(romdl)`, so a missing CLI degrades to the fake
+# catalog instead of taking the daemon down with it.
+ARG ROMDL_REF=master
+RUN --mount=type=secret,id=romdl_key,required=false \
+    set -eu; \
+    if [ -s /run/secrets/romdl_key ]; then \
+        install -m 600 /run/secrets/romdl_key /tmp/romdl_key; \
+        export GIT_SSH_COMMAND="ssh -i /tmp/romdl_key -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new"; \
+        URL="git+ssh://git@example.invalid/romdl@${ROMDL_REF}"; \
+    else \
+        URL="git+https://example.invalid/romdl@${ROMDL_REF}"; \
+    fi; \
+    if python3 -m venv /opt/romdl \
+       && /opt/romdl/bin/pip install --no-cache-dir "$URL"; then \
+        ln -s /opt/romdl/bin/romdl /usr/local/bin/romdl; \
+        romdl --help >/dev/null; \
+        echo "romdl: installed from ${ROMDL_REF}"; \
+    else \
+        echo "WARNING: romdl unavailable at build time -- arcaded falls back to its fake catalog"; \
+        rm -rf /opt/romdl; \
+    fi; \
+    rm -f /tmp/romdl_key
 
 # NB: the build context is the REPO ROOT, not server/ — the Y2K asset pack
 # below lives at the top level because the Pegasus theme uses it too. Build
