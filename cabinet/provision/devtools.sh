@@ -13,6 +13,8 @@ set -uo pipefail
 
 ARCADE_USER=${ARCADE_USER:-arcade}
 NODE_MAJOR=${NODE_MAJOR:-24}
+# T3 release the service tracks; pin a nightly here when the desktop app runs one
+T3_PKG=${T3_PKG:-t3@latest}
 HOME_DIR=$(getent passwd "$ARCADE_USER" | cut -d: -f6)
 FAILED=()
 
@@ -123,7 +125,7 @@ Wants=network-online.target
 [Service]
 Type=simple
 WorkingDirectory=%h/dev
-ExecStart=${NPX_PATH} --yes t3@latest serve --no-browser
+ExecStart=${NPX_PATH} --yes ${T3_PKG} serve --no-browser
 Restart=always
 RestartSec=5
 Environment=PATH=%h/.local/bin:%h/.npm-global/bin:/usr/local/bin:/usr/bin:/bin
