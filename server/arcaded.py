@@ -24,7 +24,7 @@ import aiohttp
 import yaml
 from aiohttp import WSMsgType, web
 
-import plex as jellyfin   # Plex adapter, same 4-function contract
+import plex
 import romdl
 import shuffle
 
@@ -566,7 +566,7 @@ def source_id(s):
 
 async def screensaver_sources(request):
     """Every series/movie in Jellyfin, merged with enabled flags (SCR-4)."""
-    lib = await jellyfin.items()
+    lib = await plex.items()
     cfg = load_screensaver()
     enabled = {source_id(s): s.get("enabled", False)
                for s in cfg["sources"]}
@@ -577,7 +577,7 @@ async def screensaver_sources(request):
 async def thumb_proxy(request):
     """Plex poster for a source (spec §6.3 thumbnails). Proxied so the
     browser needs no Plex credentials or reachability."""
-    got = await jellyfin.image(request.match_info["item_id"])
+    got = await plex.image(request.match_info["item_id"])
     if got is None:
         raise web.HTTPNotFound(text="no image for this item")
     body, ctype = got
@@ -607,14 +607,14 @@ async def screensaver_playlist(request):
     The cabinet reaches these through the same tunnel path as everything
     else (SCR-1)."""
     cfg = load_screensaver()
-    lib = {i["id"]: i for i in (await jellyfin.items())}
+    lib = {i["id"]: i for i in (await plex.items())}
     entries = []
     for si, src in enumerate(cfg["sources"]):
         if not src.get("enabled"):
             continue
         sid = source_id(src)
         meta = lib.get(sid) or {}
-        for idx, vid in enumerate(await jellyfin.episodes_of(sid)):
+        for idx, vid in enumerate(await plex.episodes_of(sid)):
             entries.append({"id": f"/media/{vid}", "source_id": sid,
                             "source_type": meta.get("type", "Series"),
                             "index": idx, "source_index": si})
@@ -655,7 +655,7 @@ async def media_proxy(request):
     mpv plays it straight from the pipe.
     """
     video_id = request.match_info["video_id"]
-    src = jellyfin.PLEX_URL + await jellyfin.part_path(video_id)
+    src = plex.PLEX_URL + await plex.part_path(video_id)
     argv = [
         FFMPEG, "-hide_banner", "-loglevel", "error",
         "-i", src,
