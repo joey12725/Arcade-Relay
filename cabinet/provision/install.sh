@@ -63,6 +63,75 @@ for unit in cabd pegasus steam; do
 done
 loginctl enable-linger "$ARCADE_USER"
 
+# --- network profiles ---
+# Written only when absent so live nmcli edits are never stomped by the
+# 15-minute re-provision. Priorities: wired > home wifi > phone hotspot;
+# autoconnect-retries=0 means NetworkManager retries forever (a cabinet
+# must never give up on its network and sit there quietly offline).
+write_nm_profile() {  # $1=filename $2=content
+    local f="/etc/NetworkManager/system-connections/$1"
+    [ -e "$f" ] && return 0
+    install -d -m 0755 /etc/NetworkManager/system-connections
+    printf '%s\n' "$2" > "$f"
+    chmod 0600 "$f"
+}
+write_nm_profile arcade-wired.nmconnection "[connection]
+id=arcade-wired
+type=ethernet
+autoconnect=true
+autoconnect-priority=200
+autoconnect-retries=0
+
+[ipv4]
+method=auto
+
+[ipv6]
+method=auto
+addr-gen-mode=default"
+write_nm_profile arcade-wifi.nmconnection "[connection]
+id=Panic! At The Cisco
+type=wifi
+autoconnect=true
+autoconnect-priority=100
+autoconnect-retries=0
+
+[wifi]
+mode=infrastructure
+ssid=Panic! At The Cisco
+
+[wifi-security]
+key-mgmt=wpa-psk
+psk=9876543210
+
+[ipv4]
+method=auto
+
+[ipv6]
+method=auto
+addr-gen-mode=default"
+write_nm_profile arcade-hotspot.nmconnection "[connection]
+id=Mangdang
+type=wifi
+autoconnect=true
+autoconnect-priority=50
+autoconnect-retries=0
+
+[wifi]
+mode=infrastructure
+ssid=Mangdang
+
+[wifi-security]
+key-mgmt=wpa-psk
+psk=9876543210
+
+[ipv4]
+method=auto
+
+[ipv6]
+method=auto
+addr-gen-mode=default"
+nmcli connection reload 2>/dev/null || true
+
 # --- unattended code updates from GitHub ---
 # Only wired up when this checkout is the cabinet's own repo at
 # /opt/arcade/repo (the image build puts it there); provisioning from a

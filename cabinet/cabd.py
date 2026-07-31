@@ -242,10 +242,33 @@ async def lifeline_restart_network():
     return res
 
 
+# Auto-surface lifeline after this many seconds without a server link, if no
+# game is running. <=0 disables the auto behavior (manual combo still works).
+LIFELINE_AUTO_S = float(os.environ.get("LIFELINE_AUTO_S", "60"))
+
+
 async def lifeline_loop(ws_state):
-    """Refresh the status screen every 2s while lifeline is active."""
+    """Refresh the status screen every 2s while lifeline is active, and
+    auto-raise/-drop it around server-link loss (no keyboard on a cabinet:
+    the panel must diagnose itself)."""
     while True:
         await asyncio.sleep(2)
+        if LIFELINE_AUTO_S > 0:
+            down = ws_state.get("down_since")
+            if (not ll["on"] and not ws_state["connected"]
+                    and down is not None
+                    and time.monotonic() - down >= LIFELINE_AUTO_S
+                    and game["session"] is None):
+                ll["auto"] = True
+                log(f"lifeline: no server link for {LIFELINE_AUTO_S:.0f}s "
+                    "and no game — auto-raising")
+                await lifeline_on()
+            # only auto-drop what was auto-raised: a manually summoned
+            # lifeline stays until the combo dismisses it
+            elif ll["on"] and ll.get("auto") and ws_state["connected"]:
+                ll["auto"] = False
+                log("lifeline: server link back — auto-dismissing")
+                await lifeline_off()
         if not ll["on"]:
             continue
         try:
@@ -274,8 +297,11 @@ async def on_combo(name):
             await start_screensaver_now()
     elif name == "lifeline":
         if ll["on"]:
+            ll["auto"] = False
             await lifeline_off()
         else:
+            # summoned by hand: a reconnect must not yank it away mid-read
+            ll["auto"] = False
             await lifeline_on()
 
 
@@ -1365,13 +1391,17 @@ async def heartbeat_loop(ws):
         await asyncio.sleep(delay)
 
 
-ws_state = {"connected": False}
+# down_since starts at import: "never connected since boot" counts as down,
+# so a cabinet that cannot reach the server surfaces lifeline without ever
+# having been online.
+ws_state = {"connected": False, "down_since": time.monotonic()}
 
 
 async def session(sess, on_connect):
     async with sess.ws_connect(WS_URL, heartbeat=None) as ws:
         log("connected to", WS_URL)
         ws_state["connected"] = True
+        ws_state["down_since"] = None
         on_connect()  # reset backoff on successful CONNECT, not clean exit
         hb_task = asyncio.create_task(heartbeat_loop(ws))
         try:
@@ -1437,6 +1467,8 @@ async def main():
                 log(f"link error: {e!r}; retry in ~{backoff:.1f}s")
             finally:
                 ws_state["connected"] = False
+                if ws_state["down_since"] is None:
+                    ws_state["down_since"] = time.monotonic()
             # lifeline = maximum reconnect aggression (spec §5.11): 1s cap
             cap = 1.0 if ll["on"] else BACKOFF_CAP
             await asyncio.sleep(min(backoff, cap) * random.uniform(0.8, 1.2))

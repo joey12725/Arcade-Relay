@@ -22,6 +22,72 @@ _proc = None
 _started = time.monotonic()
 
 
+HOME_SSID = os.environ.get("LIFELINE_HOME_SSID", "Panic! At The Cisco")
+HOTSPOT_SSID = os.environ.get("LIFELINE_HOTSPOT_SSID", "Mangdang")
+
+
+def wifi_hw():
+    """(iface, bus) of the first wireless NIC the kernel can see.
+
+    (None, None) means no radio exists as far as Linux is concerned — for a
+    USB dongle that is the "not plugged in / not detected" case the panel
+    must distinguish from "adapter fine, network absent".
+    """
+    try:
+        for dev in sorted(os.listdir("/sys/class/net")):
+            if os.path.isdir(f"/sys/class/net/{dev}/wireless"):
+                bus = ("usb" if "/usb" in os.path.realpath(f"/sys/class/net/{dev}")
+                       else "pci")
+                return dev, bus
+    except OSError:
+        pass
+    return None, None
+
+
+def _nmcli(args, timeout=4):
+    try:
+        p = subprocess.run(["nmcli", "-t"] + args, capture_output=True,
+                           text=True, timeout=timeout)
+        return p.stdout.splitlines() if p.returncode == 0 else []
+    except (OSError, subprocess.SubprocessError):
+        return []
+
+
+def wifi_report():
+    """Adapter + per-network status for the detail rows.
+
+    Wording is chosen for the doorway read: NOT DETECTED is a hardware/driver
+    problem, NOT SEEN is an SSID that is off/out of range, SEEN is in the last
+    scan but not joined, CONNECTED is carrying traffic.
+    """
+    iface, bus = wifi_hw()
+    rep = {"wifi_hw": f"{(bus or '').upper()} {iface}" if iface else "NOT DETECTED",
+           "active_net": "none", "home": "-", "hotspot": "-"}
+    active = {}
+    for line in _nmcli(["-f", "NAME,TYPE,DEVICE", "connection", "show",
+                        "--active"]):
+        parts = line.split(":")
+        if len(parts) >= 3:
+            active[parts[0]] = parts[2]
+    if active:
+        rep["active_net"] = ", ".join(f"{n} ({d})" for n, d in
+                                      sorted(active.items()))[:34]
+    # --rescan no reads the BSS cache: this runs on the 2s refresh loop and
+    # must not hammer the radio; NM rescans on its own schedule anyway.
+    seen = {s for s in _nmcli(["-f", "SSID", "dev", "wifi", "list",
+                               "--rescan", "no"]) if s}
+    for key, ssid in (("home", HOME_SSID), ("hotspot", HOTSPOT_SSID)):
+        if ssid in active:
+            rep[key] = "CONNECTED"
+        elif iface is None:
+            rep[key] = "NO RADIO"
+        elif ssid in seen:
+            rep[key] = "SEEN"
+        else:
+            rep[key] = "NOT SEEN"
+    return rep
+
+
 def checks(ws_connected, last_sync):
     """The §5.11 ladder: local net -> internet -> DNS -> server WS."""
     ip = None
@@ -40,7 +106,7 @@ def checks(ws_connected, last_sync):
         dns = True
     except OSError:
         dns = False
-    return {
+    st = {
         "network": ip is not None,
         "internet": ping,
         "dns": dns,
@@ -49,6 +115,8 @@ def checks(ws_connected, last_sync):
         "uptime_s": int(time.monotonic() - _started),
         "last_sync": last_sync or "never",
     }
+    st.update(wifi_report())
+    return st
 
 
 # --- recovery paths (spec §5.11: while lifeline is up, bring up every
@@ -249,8 +317,11 @@ def render(status, version="cabd/1.0"):
                        + f"{rem // 3600:02d}:{rem % 3600 // 60:02d}"),
             ("CABD", version),
             ("LAST SYNC", str(status.get("last_sync", "never"))),
-            ("RECONNECT", "1s MAX"),
-            ("SSH", "REACHABLE" if ssh_listening() else "DOWN")]
+            ("SSH", "REACHABLE" if ssh_listening() else "DOWN"),
+            ("WIFI ADAPTER", status.get("wifi_hw", "?")),
+            ("HOME WIFI", status.get("home", "?")),
+            ("HOTSPOT", status.get("hotspot", "?")),
+            ("ACTIVE NET", status.get("active_net", "?"))]
     rf = _font(round(LL_H * 0.028))
     vf = _font(round(LL_H * 0.030))
     row_h = (body_h - round(LL_H * 0.03)) / len(rows)
