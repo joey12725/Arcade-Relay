@@ -1347,10 +1347,13 @@ async def handle_req(ws, data):
                 f.write(f"{time.time()}\n")
             meta = await asyncio.to_thread(pegasus_gen.render_all,
                                            state["bundle"])
+            # --no-block: the RPC must answer inside the server's deadline;
+            # pegasus's own startup time is not this request's problem.
             await asyncio.to_thread(
                 subprocess.run,
-                ["systemctl", "--user", "restart", "pegasus.service"],
-                capture_output=True, timeout=30)
+                ["systemctl", "--user", "--no-block", "restart",
+                 "pegasus.service"],
+                capture_output=True, timeout=10)
             log(f"library rescan: {len(meta)} metadata files; pegasus restarted")
             result = {"rescanned": True, "metadata_files": len(meta)}
         elif method == "state.sync":
