@@ -1699,13 +1699,20 @@ VIEWS.rom = () => {
     <tbody>
     ${q.map((r) => h`<tr>
       <td><b>${esc(r.title)}</b></td>
-      <td>${badge(r.status, ROM_BADGE[r.status] || "#6a4a8a")}</td>
+      <td>${badge(r.status, ROM_BADGE[r.status] || "#6a4a8a")}${
+        r.status === "downloading" && r.bytes_done
+          ? h`<div class="note" style="font-size:10px;">${
+              (r.bytes_done / 1048576).toFixed(1)} MB${
+              r.bytes_total ? " / " + (r.bytes_total / 1048576).toFixed(1)
+              + " MB (" + Math.round(r.bytes_done * 100 / r.bytes_total)
+              + "%)" : ""}</div>` : ""}</td>
       <td><span style="font-family:ui-monospace,monospace; font-size:11px;">${esc(r.detail || "")}</span></td>
       <td><div class="row" style="gap:4px;">
         <button class="xs" data-act="rom-retry" data-id="${esc(r.id)}"
           ${["queued", "downloading", "delivering"].indexOf(r.status) >= 0 ? "disabled" : ""}>RETRY</button>
         <button class="xs danger" data-act="rom-cancel" data-id="${esc(r.id)}"
-          ${["downloading", "delivering"].indexOf(r.status) >= 0 ? "disabled" : ""}>DROP</button>
+          ${r.status === "delivering" ? "disabled" : ""}>${
+          r.status === "downloading" ? "CANCEL" : "DROP"}</button>
       </div></td></tr>`).join("")
       || h`<tr><td colspan="4" class="note" style="opacity:.7">queue is empty</td></tr>`}
     </tbody></table>`)}
