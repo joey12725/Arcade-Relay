@@ -1,0 +1,9 @@
+# One escalating recovery step per run when the gateway is unreachable
+# (see arcade-net-watchdog.sh). Driven by arcade-net-watchdog.timer.
+[Unit]
+Description=Arcade network self-healing watchdog
+
+[Service]
+Type=oneshot
+ExecStart=/opt/arcade/repo/cabinet/provision/arcade-net-watchdog.sh
+TimeoutStartSec=2min

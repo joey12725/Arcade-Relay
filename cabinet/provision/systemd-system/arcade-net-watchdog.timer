@@ -1,0 +1,12 @@
+# Check the network every 2 minutes, from 3 minutes after boot. Combined
+# with the escalation ladder in the watchdog script, a wedged NIC recovers
+# in at most ~8 minutes with no human involved.
+[Unit]
+Description=Periodic arcade network watchdog
+
+[Timer]
+OnBootSec=3min
+OnUnitActiveSec=2min
+
+[Install]
+WantedBy=timers.target

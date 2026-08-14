@@ -25,6 +25,7 @@ apt-get install -y --no-install-recommends \
     gstreamer1.0-plugins-good gstreamer1.0-libav \
     firmware-mediatek firmware-realtek firmware-atheros firmware-ralink \
     dosfstools parted rsync pciutils usbutils rfkill uuid-runtime unzip \
+    ethtool \
     pipewire pipewire-pulse wireplumber pulseaudio-utils \
     python3 python3-aiohttp python3-evdev python3-pil python3-yaml \
     udev curl ca-certificates procps
@@ -155,19 +156,45 @@ ARCADE_USER=$ARCADE_USER
 ARCADE_UPDATE_BRANCH=${ARCADE_UPDATE_BRANCH:-}
 EOF
     chmod 0644 /etc/arcade/provision.env
-    for unit in arcade-update.service arcade-update.timer; do
+    chmod +x "$SRC_DIR/provision/arcade-update.sh" \
+             "$SRC_DIR/provision/arcade-net-watchdog.sh" 2>/dev/null || true
+    for unit in arcade-update.service arcade-update.timer \
+                arcade-net-watchdog.service arcade-net-watchdog.timer; do
         install -m 0644 "$SRC_DIR/provision/systemd-system/$unit" \
             "/etc/systemd/system/$unit"
     done
     systemctl daemon-reload 2>/dev/null || true
     # `systemctl enable` works offline (it only writes symlinks), but fall
     # back to writing the symlink by hand rather than fail provisioning.
-    if ! systemctl enable arcade-update.timer 2>/dev/null; then
-        install -d /etc/systemd/system/timers.target.wants
-        ln -sf ../arcade-update.timer \
-            /etc/systemd/system/timers.target.wants/arcade-update.timer
-    fi
+    for t in arcade-update.timer arcade-net-watchdog.timer; do
+        if ! systemctl enable "$t" 2>/dev/null; then
+            install -d /etc/systemd/system/timers.target.wants
+            ln -sf "../$t" "/etc/systemd/system/timers.target.wants/$t"
+        fi
+        systemctl start "$t" 2>/dev/null || true
+    done
 fi
+
+# --- Intel I219 (e1000e) hang mitigation ---
+# The OptiPlex NIC is notorious for silent "hardware unit hangs" under
+# offload load; turning TSO/GSO off is the long-standing fix. Applied to
+# every ethernet device NM brings up, via a dispatcher hook.
+install -d /etc/NetworkManager/dispatcher.d
+cat > /etc/NetworkManager/dispatcher.d/50-arcade-ethtool <<'EOF'
+#!/bin/sh
+# e1000e hang mitigation: strip offloads when a wired link comes up
+[ "$2" = "up" ] || exit 0
+case "$(basename "$(readlink -f "/sys/class/net/$1/device/driver" 2>/dev/null)")" in
+    e1000e) ethtool -K "$1" tso off gso off gro off 2>/dev/null || true ;;
+esac
+exit 0
+EOF
+chmod 0755 /etc/NetworkManager/dispatcher.d/50-arcade-ethtool
+
+# a panicked kernel must reboot, not sit at a dead screen forever
+install -d /etc/sysctl.d
+echo "kernel.panic = 10" > /etc/sysctl.d/90-arcade-panic.conf
+sysctl -p /etc/sysctl.d/90-arcade-panic.conf 2>/dev/null || true
 
 # --- cores Debian does not package, and RetroArch joypad profiles ---
 # Network fetches, so best-effort: a cabinet being re-provisioned offline

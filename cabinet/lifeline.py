@@ -123,10 +123,16 @@ def checks(ws_connected, last_sync):
 # --- recovery paths (spec §5.11: while lifeline is up, bring up every
 # recovery path the cabinet can reach by itself). Each is idempotent, never
 # raises, and reports what it did so the status screen can show it.
-SSH_START = os.environ.get("LIFELINE_SSH_CMD", "systemctl start ssh")
+# sudo -n: cabd runs as the arcade user, and these are system services —
+# without root, polkit rejects them and every recovery silently failed.
+# The arcade user is NOPASSWD sudo on a provisioned cabinet; -n means a
+# misconfigured sudo fails fast instead of hanging on a password prompt.
+SSH_START = os.environ.get("LIFELINE_SSH_CMD", "sudo -n systemctl start ssh")
 TRANSPORT_START = os.environ.get("LIFELINE_TRANSPORT_CMD", "")   # e.g. tailscale up
-NET_RESTART = os.environ.get("LIFELINE_NET_RESTART_CMD",
-                             "systemctl restart NetworkManager")
+NET_RESTART = os.environ.get(
+    "LIFELINE_NET_RESTART_CMD",
+    "sudo -n /opt/arcade/repo/cabinet/provision/arcade-net-watchdog.sh; "
+    "sudo -n systemctl restart NetworkManager")
 
 
 def _sh(cmd, timeout=8):
