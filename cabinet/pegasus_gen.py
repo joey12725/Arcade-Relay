@@ -36,16 +36,22 @@ def _write(path, text):
     return path
 
 
-def art_lines(rom, indent="  "):
+def art_lines(rom):
     """`assets.boxFront` for a rom, when the server has delivered its art.
 
     Emitted only when the PNG actually exists: Pegasus renders a broken-image
     box for a boxFront it cannot load, which looks worse than the theme's own
     generated cover. Art arrives via arcaded's /art/push (file.fetch into
     /roms/art), so a cabinet that has never been warmed just gets no line.
+
+    NEVER indent metadata properties: in the Pegasus format a line with
+    leading whitespace is a continuation of the previous property's VALUE,
+    so an indented `file:`/`assets.boxFront:` silently disappears into the
+    game title (verified on the real frontend — art only rendered once the
+    indentation was removed).
     """
     png = os.path.join(ART_DIR, os.path.splitext(os.path.basename(rom))[0] + ".png")
-    return [f"{indent}assets.boxFront: {png}"] if os.path.exists(png) else []
+    return [f"assets.boxFront: {png}"] if os.path.exists(png) else []
 
 
 def gen_system_collections(bundle):
@@ -78,7 +84,7 @@ def gen_system_collections(bundle):
                 continue           # nothing to add beyond extension discovery
             lines.append("")
             lines.append(f"game: {os.path.splitext(rom)[0]}")
-            lines.append(f"  file: {os.path.join(d, rom)}")
+            lines.append(f"file: {os.path.join(d, rom)}")
             lines.extend(art)
         written.append(_write(
             os.path.join(d, "metadata.pegasus.txt"), "\n".join(lines) + "\n"))
@@ -99,7 +105,7 @@ def gen_favorites(bundle):
             lines.append(f"game: {rom}")
             lines.append(f"file: {os.path.join(ROMS_DIR, sys_name, rom)}")
             lines.append(f"launch: {CABD_LAUNCH} {sys_name} {{file.path}}")
-            lines.extend(art_lines(rom, indent=""))
+            lines.extend(art_lines(rom))
     return _write(os.path.join(ROMS_DIR, "favorites", "metadata.pegasus.txt"),
                   "\n".join(lines) + "\n")
 
@@ -155,7 +161,7 @@ def gen_steam(bundle):
         lines.append(f"file: {os.path.join(d, fname)}")
         lines.append(f"launch: {CABD_LAUNCH} steam {t['appid']}")
         # Steam art is keyed on appid (arcaded pulls it from Steam's CDN)
-        lines.extend(art_lines(str(t["appid"]), indent=""))
+        lines.extend(art_lines(str(t["appid"])))
     return _write(os.path.join(d, "metadata.pegasus.txt"),
                   "\n".join(lines) + "\n")
 
