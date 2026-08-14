@@ -67,11 +67,12 @@ def wifi_report():
     for line in _nmcli(["-f", "NAME,TYPE,DEVICE", "connection", "show",
                         "--active"]):
         parts = line.split(":")
-        if len(parts) >= 3:
+        # loopback is always active and only crowds the panel row
+        if len(parts) >= 3 and parts[1] != "loopback" and parts[2] != "lo":
             active[parts[0]] = parts[2]
     if active:
         rep["active_net"] = ", ".join(f"{n} ({d})" for n, d in
-                                      sorted(active.items()))[:34]
+                                      sorted(active.items()))[:26]
     # --rescan no reads the BSS cache: this runs on the 2s refresh loop and
     # must not hammer the radio; NM rescans on its own schedule anyway.
     seen = {s for s in _nmcli(["-f", "SSID", "dev", "wifi", "list",
