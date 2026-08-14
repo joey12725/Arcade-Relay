@@ -19,8 +19,12 @@ apt-get update
 apt-get install -y --no-install-recommends \
     xorg openbox xdotool wmctrl x11-utils x11vnc imagemagick \
     mpv retroarch libretro-core-info \
+    libretro-nestopia libretro-snes9x libretro-genesisplusgx \
+    libretro-mgba libretro-gambatte \
     libgstreamer1.0-0 libgstreamer-plugins-base1.0-0 libgstreamer-gl1.0-0 \
     gstreamer1.0-plugins-good gstreamer1.0-libav \
+    firmware-mediatek firmware-realtek firmware-atheros firmware-ralink \
+    dosfstools parted rsync pciutils usbutils rfkill uuid-runtime unzip \
     pipewire pipewire-pulse wireplumber pulseaudio-utils \
     python3 python3-aiohttp python3-evdev python3-pil python3-yaml \
     udev curl ca-certificates procps
@@ -162,6 +166,31 @@ EOF
         install -d /etc/systemd/system/timers.target.wants
         ln -sf ../arcade-update.timer \
             /etc/systemd/system/timers.target.wants/arcade-update.timer
+    fi
+fi
+
+# --- cores Debian does not package, and RetroArch joypad profiles ---
+# Network fetches, so best-effort: a cabinet being re-provisioned offline
+# keeps whatever it already has.
+LIBRETRO_DIR=/usr/lib/x86_64-linux-gnu/libretro
+for c in pcsx_rearmed mame2003_plus fbneo; do
+    [ -f "$LIBRETRO_DIR/${c}_libretro.so" ] && continue
+    if curl -fsSL -m 300 -o "/tmp/${c}.zip" \
+         "https://buildbot.libretro.com/nightly/linux/x86_64/latest/${c}_libretro.so.zip" \
+       && unzip -o -q -d /tmp "/tmp/${c}.zip"; then
+        install -m 0644 "/tmp/${c}_libretro.so" "$LIBRETRO_DIR/" \
+            && echo "core installed: $c"
+    else
+        echo "core fetch failed (offline?): $c — continuing"
+    fi
+done
+if [ ! -d /usr/share/libretro/autoconfig/udev ]; then
+    if git clone -q --depth 1 \
+         https://github.com/libretro/retroarch-joypad-autoconfig \
+         /tmp/joypad-autoconfig 2>/dev/null; then
+        install -d /usr/share/libretro/autoconfig
+        cp -r /tmp/joypad-autoconfig/udev /usr/share/libretro/autoconfig/
+        echo "joypad autoconfig profiles installed"
     fi
 fi
 

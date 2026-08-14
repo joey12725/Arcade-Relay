@@ -350,22 +350,45 @@ class EvdevSource:
         return self.devices
 
     async def run(self):
-        """asyncio reader over all key-capable devices."""
+        """asyncio reader over all key-capable devices, with hot-plug.
+
+        Devices are rescanned every few seconds: a controller that is
+        unplugged mid-session (or plugged in after boot — replugging into a
+        different port must Just Work on an arcade) starts feeding the combo
+        engine as soon as the kernel enumerates it, without a cabd restart.
+        """
         import asyncio
         import evdev
         from evdev import ecodes
-        if not self.open_devices():
-            return False
 
         async def reader(dev):
-            async for ev in dev.async_read_loop():
-                if ev.type != ecodes.EV_KEY or ev.value == 2:   # ignore repeat
-                    continue
-                code = ecodes.keys.get(ev.code) or ecodes.BTN.get(ev.code)
-                btn = resolve_button(code)
-                self.on_activity()
-                if btn:
-                    self.on_key(btn, ev.value == 1)
+            try:
+                async for ev in dev.async_read_loop():
+                    if ev.type != ecodes.EV_KEY or ev.value == 2:  # no repeats
+                        continue
+                    code = ecodes.keys.get(ev.code) or ecodes.BTN.get(ev.code)
+                    btn = resolve_button(code)
+                    self.on_activity()
+                    if btn:
+                        self.on_key(btn, ev.value == 1)
+            except OSError:
+                pass   # device unplugged; the rescan loop drops it
 
-        await asyncio.gather(*(reader(d) for d in self.devices))
-        return True
+        tasks = {}
+        while True:
+            try:
+                present = set(evdev.list_devices())
+            except OSError:
+                present = set()
+            for path in [p for p in tasks if p not in present
+                         or tasks[p].done()]:
+                tasks.pop(path).cancel()
+            for path in present - set(tasks):
+                try:
+                    dev = evdev.InputDevice(path)
+                    if ecodes.EV_KEY in dev.capabilities():
+                        tasks[path] = asyncio.create_task(reader(dev))
+                except OSError:
+                    continue
+            self.devices = list(tasks)
+            await asyncio.sleep(5)

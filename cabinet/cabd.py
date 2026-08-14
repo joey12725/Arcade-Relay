@@ -1339,11 +1339,20 @@ async def handle_req(ws, data):
                 result = {"png_b64": base64.b64encode(f.read()).decode()}
         elif method == "library.rescan":
             # sim frontend has no library; the marker is what test/accept
-            # assert, and real Pegasus gets a real rescan trigger here
+            # assert. Real Pegasus only reads metadata files at startup, so a
+            # rescan must re-render them from the current /roms contents AND
+            # bounce the frontend — otherwise a rom delivered by the web app
+            # is invisible until the next reboot.
             with open("/tmp/pegasus-rescan", "a") as f:
                 f.write(f"{time.time()}\n")
-            log("library rescan triggered")
-            result = {"rescanned": True}
+            meta = await asyncio.to_thread(pegasus_gen.render_all,
+                                           state["bundle"])
+            await asyncio.to_thread(
+                subprocess.run,
+                ["systemctl", "--user", "restart", "pegasus.service"],
+                capture_output=True, timeout=30)
+            log(f"library rescan: {len(meta)} metadata files; pegasus restarted")
+            result = {"rescanned": True, "metadata_files": len(meta)}
         elif method == "state.sync":
             bundle = params["bundle"]
             if not isinstance(bundle, dict):
@@ -1452,11 +1461,11 @@ async def main():
     evsrc = inputs.EvdevSource(
         on_key=_on_evdev_key,
         on_activity=lambda: activity.__setitem__("last", time.monotonic()))
-    if evsrc.open_devices():
-        asyncio.create_task(evsrc.run())
-        log(f"evdev sources: {len(evsrc.devices)} device(s)")
-    else:
-        log("no evdev devices (sim: FIFO source only)")
+    # Always run: the source hot-plugs, so a cabinet that boots with zero
+    # controllers still picks them up the moment they are connected.
+    asyncio.create_task(evsrc.run())
+    log(f"evdev source running (hot-plug): {len(evsrc.open_devices())} "
+        "device(s) at boot")
 
     async with aiohttp.ClientSession() as sess:
         while True:  # NET-2: reconnect forever

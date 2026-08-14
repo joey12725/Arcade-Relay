@@ -1,8 +1,12 @@
-# Stable identities for the panel's USB encoders across reboots (spec §5.5:
-# udev naming rules so devices keep identity). The vendor/product ids below
-# are the common "DragonRise" zero-delay encoder — ADJUST during hardware
-# bring-up (lsusb) and re-run: udevadm control --reload
-SUBSYSTEM=="input", ATTRS{idVendor}=="0079", ATTRS{idProduct}=="0006", ENV{ID_INPUT_JOYSTICK}=="1", SYMLINK+="input/arcade-p1", TAG+="uaccess"
-SUBSYSTEM=="input", ATTRS{idVendor}=="0079", ATTRS{idProduct}=="0011", ENV{ID_INPUT_JOYSTICK}=="1", SYMLINK+="input/arcade-p2", TAG+="uaccess"
+# Stable identities for the panel's controller boards across reboots
+# (spec §5.5). The cabinet's boards are Brook P4 encoders, which enumerate
+# under TWO identities depending on the mode they power up in:
+#   - PS4 mode:    0c12:0c30 "Brook P4 Wired Gamepad"   (hid-generic)
+#   - XInput mode: 045e:02ea "Microsoft X-Box One S pad" (xpad)
+# Cover both, and keep the old DragonRise ids for any future zero-delay
+# encoder. Re-run after edits: udevadm control --reload
+SUBSYSTEM=="input", ATTRS{idVendor}=="0c12", ATTRS{idProduct}=="0c30", ENV{ID_INPUT_JOYSTICK}=="1", MODE="0664", GROUP="input", TAG+="uaccess"
+SUBSYSTEM=="input", ATTRS{idVendor}=="045e", ATTRS{idProduct}=="02ea", ENV{ID_INPUT_JOYSTICK}=="1", MODE="0664", GROUP="input", TAG+="uaccess"
+SUBSYSTEM=="input", ATTRS{idVendor}=="0079", ENV{ID_INPUT_JOYSTICK}=="1", MODE="0664", GROUP="input", TAG+="uaccess"
 # Any joystick-class device: readable by the arcade session (evdev input layer)
 KERNEL=="event*", ENV{ID_INPUT_JOYSTICK}=="1", MODE="0664", GROUP="input"
