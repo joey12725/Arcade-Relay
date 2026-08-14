@@ -53,6 +53,8 @@ DEFAULTS = {
         "discovery_prefix": "homeassistant",
         "node_id": "arcade_cabinet",
         "device_name": "Arcade Cabinet",
+        # HA places the device here on first discovery (user moves win later)
+        "suggested_area": "",
         # REST is what produces the media_player entity; MQTT has no such
         # platform. Optional — the MQTT sensors work without it.
         "rest_url": "",
@@ -277,9 +279,12 @@ class HomeAssistantPublisher:
         return f"arcade/{self.node}/{leaf}"
 
     def _device(self):
-        return {"identifiers": [self.node],
-                "name": self.cfg.get("device_name") or "Arcade Cabinet",
-                "manufacturer": "arcade", "model": "CAB-01"}
+        dev = {"identifiers": [self.node],
+               "name": self.cfg.get("device_name") or "Arcade Cabinet",
+               "manufacturer": "arcade", "model": "CAB-01"}
+        if self.cfg.get("suggested_area"):
+            dev["suggested_area"] = self.cfg["suggested_area"]
+        return dev
 
     def _discovery(self):
         """(topic, payload) pairs describing every entity we expose.
