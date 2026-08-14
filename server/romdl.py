@@ -58,30 +58,23 @@ SYSTEM_TO_CONSOLE = {
 # into /roms/snes.
 NPS_CONSOLES = {"ps1", "psp", "ps3", "vita"}
 
-# Mirror — romdl's other source, and its only one for cartridge consoles —
-# shut down on 31 March 2026. https://mirror.invalid/files/ now serves a
-# closure notice instead of an autoindex, so its crawler parses zero
-# directories and every non-Sony search returns nothing. romdl reports that
-# as "no results", which is indistinguishable from a bad query, so name it
-# explicitly: a dead source should not look like a typo.
-DEAD_SOURCES = {"mirror": "retired 2026-03-31"}
+# Mirror the ORIGINAL host shut down 2026-03-31; the romdl `mirror`
+# source was repointed (a 2026-04 patch) at mirror.invalid,
+# a successor mirror with the same autoindex layout, so the source id
+# "mirror" lives on with a different upstream. If cartridge-console
+# searches go empty again, check that the deployed romdl venv still carries
+# that patch — a fresh image built from an unpatched romdl repo regresses to
+# the dead host.
+DEAD_SOURCES = {}
 
 
 def coverage(system):
     """Why a search for this system may come back empty, or None if it is
     expected to work. Advisory only — never blocks a search."""
-    sys_l = (system or "").lower()
-    console = SYSTEM_TO_CONSOLE.get(sys_l)
+    console = SYSTEM_TO_CONSOLE.get((system or "").lower())
     if console is None:
         return f"no ROMDL console mapping for {system!r}"
-    if console in NPS_CONSOLES:
-        return None
-    if any(e["system"] == sys_l for e in HOMEBREW_CATALOG):
-        return None    # the built-in homebrew source covers it
-    return ("ROMDL has no live source for this console: Mirror "
-            f"({DEAD_SOURCES['mirror']}) was its only non-PlayStation "
-            "source. PkgIndex covers ps1/psp/ps3/vita; the built-in "
-            "homebrew source covers the cabinet's cartridge consoles.")
+    return None
 
 # Reverse, for filing a download under a /roms dir.
 CONSOLE_TO_SYSTEM = {
@@ -93,55 +86,6 @@ CONSOLE_TO_SYSTEM = {
 
 class Cancelled(Exception):
     """A download stopped because the queue asked it to."""
-
-
-# Freely-redistributable homebrew, served straight from source (retrobrews
-# collections carry per-title distribution approval; mamedev.org/roms are
-# MAME's licensed-for-distribution sets; the rest are the authors' own
-# repos/releases). This is the adapter's OWN source: it fills the cartridge-
-# console hole Mirror's retirement left, entirely at this layer, so it works
-# whether or not the romdl CLI is installed. Regenerate with
-# tools in the repo history (catalog built from each repo's gamelist.xml so
-# titles are the real display names, not filename guesses).
-HOMEBREW_JSON = os.path.join(os.path.dirname(os.path.abspath(__file__)),
-                             "homebrew_catalog.json")
-try:
-    HOMEBREW_CATALOG = json.loads(
-        pathlib.Path(HOMEBREW_JSON).read_text())
-except (OSError, ValueError):
-    HOMEBREW_CATALOG = []
-
-
-def _score(query, title, filename):
-    """0-100 relevance without external deps (rapidfuzz lives in romdl's
-    venv, not this process)."""
-    import difflib
-    q = query.lower().strip()
-    t, f = title.lower(), filename.lower()
-    if not q:
-        return 50.0
-    if q == t:
-        return 100.0
-    base = difflib.SequenceMatcher(None, q, t).ratio() * 80
-    if q in t or q in f:
-        base = max(base, 90.0 - (len(t) - len(q)) * 0.5)
-    qtokens = set(q.split())
-    if qtokens and qtokens <= set(t.replace("-", " ").split()):
-        base = max(base, 85.0)
-    return round(max(base, 0.0), 1)
-
-
-def _search_homebrew(query, system, limit):
-    sys_l = (system or "").lower()
-    hits = []
-    for e in HOMEBREW_CATALOG:
-        if sys_l and e["system"] != sys_l:
-            continue
-        s = _score(query, e["title"], e["filename"])
-        if s >= 45:
-            hits.append((s, e))
-    hits.sort(key=lambda x: (-x[0], x[1]["title"]))
-    return [(s, e) for s, e in hits[:limit]]
 
 
 FAKE_CATALOG = [
@@ -241,33 +185,13 @@ def search(query, system=None, limit=10, deep=False):
     if console is None:
         raise ValueError(f"no romdl console mapping for system {system!r}")
 
+    args = ["search", console, query, "-n", str(limit)]
+    if deep:
+        args.append("--deep")
+    matches = _run_romdl(args, SEARCH_TIMEOUT)
+
     cache = _load_cache()
     out = []
-
-    # Built-in homebrew source first: it is local, instant, and the only
-    # live source for cartridge consoles.
-    for s, e in _search_homebrew(query, system, limit):
-        rid = _candidate_id(e["url"])
-        entry = {"id": rid, "title": e["title"], "system": e["system"],
-                 "console": console, "url": e["url"],
-                 "filename": e["filename"], "source": "homebrew",
-                 "score": s}
-        cache[rid] = entry
-        out.append({k: entry[k] for k in
-                    ("id", "title", "system", "source", "score")})
-
-    # The romdl CLI's sources (PkgIndex for Sony consoles; Mirror is
-    # dead upstream). A CLI failure must not take the homebrew hits down
-    # with it.
-    try:
-        args = ["search", console, query, "-n", str(limit)]
-        if deep:
-            args.append("--deep")
-        matches = _run_romdl(args, SEARCH_TIMEOUT)
-    except (RuntimeError, OSError, subprocess.SubprocessError):
-        if not out:
-            raise
-        matches = []
     for m in matches:
         url = m.get("url")
         if not url:
@@ -283,8 +207,7 @@ def search(query, system=None, limit=10, deep=False):
         out.append({k: entry[k] for k in
                     ("id", "title", "system", "source", "score")})
     _save_cache(cache)
-    out.sort(key=lambda r: -r["score"])
-    return out[:limit]
+    return out
 
 
 # ------------------------------------------------------------------ download
@@ -317,10 +240,9 @@ def download(rom_id, cancel=None, progress=None):
     real backend has no artwork source — arcaded fills that from artdb after
     delivery — so art_path is None there.
 
-    `cancel` is a threading.Event checked between chunks: the queue's cancel
-    endpoint sets it and the transfer stops with `Cancelled`, partial file
-    removed. `progress(done_bytes, total_bytes|None)` is called per chunk —
-    that is what the UI's transfer bar and "cancel after N bytes" both need.
+    `cancel` is a threading.Event checked between chunks: /roms/cancel sets
+    it, the transfer stops with `Cancelled`, and the partial is removed.
+    `progress(done, total|None)` runs per chunk for the UI's transfer bar.
     """
     if not using_real():
         return _download_fake(rom_id)
@@ -330,7 +252,7 @@ def download(rom_id, cancel=None, progress=None):
         raise KeyError(f"unknown rom id {rom_id} (search again to refresh it)")
 
     os.makedirs(STAGING, exist_ok=True)
-    fname = entry.get("filename") or _safe_filename(entry["title"])
+    fname = _safe_filename(entry["title"])
     rom_path = os.path.join(STAGING, fname)
     tmp = rom_path + ".part"
     h = hashlib.sha256()
