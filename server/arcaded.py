@@ -786,8 +786,12 @@ async def screensaver_cmd(request):
 
 # --------------------------------------------------------------- ROM queue
 
-rom_queue = []       # [{id, title, status, detail}]
+rom_queue = []       # [{id, title, status, detail, bytes_done?, bytes_total?}]
 rom_lock = asyncio.Lock()
+# id -> threading.Event for transfers in flight; set by /roms/cancel, checked
+# by romdl.download between chunks. Lives outside the queue entry because the
+# entry is JSON-serialized to the UI.
+rom_cancel_events = {}
 
 
 def _queue_entry(rid):
@@ -823,9 +827,17 @@ async def _deliver_art(files, dest_rom):
 
 async def rom_worker(entry):
     """request -> download (ROMDL) -> deliver over the tunnel -> rescan."""
+    import threading
+    cancel = rom_cancel_events.setdefault(entry["id"], threading.Event())
+
+    def progress(done, total):
+        entry["bytes_done"] = done
+        entry["bytes_total"] = total
+
     try:
         entry["status"] = "downloading"
-        files = await asyncio.to_thread(romdl.download, entry["id"])
+        files = await asyncio.to_thread(
+            romdl.download, entry["id"], cancel, progress)
         entry["status"] = "delivering"
         entry["system"] = files["system"]
         dest = f"/roms/{files['system']}/{files['filename']}"
@@ -841,10 +853,16 @@ async def rom_worker(entry):
         entry["status"] = "ready"
         entry["detail"] = dest + ("" if arted else "  (no cover art)")
         hub.log_event(f"ROM ready: {entry['title']} at {dest}")
+    except romdl.Cancelled as e:
+        entry["status"] = "canceled"
+        entry["detail"] = str(e)
+        hub.log_event(f"ROM canceled: {entry['title']} ({e})")
     except Exception as e:  # noqa: BLE001
         entry["status"] = "error"
         entry["detail"] = repr(e)
         hub.log_event(f"ROM failed: {entry['title']}: {e!r}")
+    finally:
+        rom_cancel_events.pop(entry["id"], None)
 
 
 async def roms_search(request):
@@ -1646,24 +1664,41 @@ async def roms_retry(request):
                 {"error": f"{rid} is already {entry['status']}"}, status=409)
         entry["status"] = "queued"
         entry["detail"] = ""
+        entry.pop("bytes_done", None)
+        entry.pop("bytes_total", None)
         asyncio.get_event_loop().create_task(rom_worker(entry))
     hub.log_event(f"ROM retry: {entry['title']}")
     return web.json_response(entry)
 
 
 async def roms_cancel(request):
-    """Drop a queue entry. An in-flight download is left to finish — the
-    worker owns it — so cancelling only removes terminal or queued rows."""
+    """Cancel a queue entry.
+
+    Queued/terminal rows are dropped immediately. A `downloading` entry is
+    cancelled cooperatively: its threading.Event is set, romdl.download
+    notices between chunks, removes the partial, and the worker marks the
+    row `canceled` (the design's CANCEL button, finally real). `delivering`
+    stays uninterruptible — that transfer is the cabinet's to finish and is
+    short."""
     rid = (await request.json())["id"]
     async with rom_lock:
         entry = _queue_entry(rid)
         if entry is None:
             return web.json_response({"error": f"no queue entry {rid}"},
                                      status=404)
-        if entry["status"] in ("downloading", "delivering"):
+        if entry["status"] == "downloading":
+            ev = rom_cancel_events.get(rid)
+            if ev is None:
+                return web.json_response(
+                    {"error": f"{rid} has no live worker; retry in a moment"},
+                    status=409)
+            ev.set()
+            hub.log_event(f"ROM cancel requested mid-download: {entry['title']}")
+            return web.json_response({"cancelled": rid, "was": "downloading"})
+        if entry["status"] == "delivering":
             return web.json_response(
-                {"error": f"{rid} is mid-transfer; let it finish or fail"},
-                status=409)
+                {"error": f"{rid} is delivering to the cabinet; "
+                          "let it finish or fail"}, status=409)
         rom_queue.remove(entry)
     hub.log_event(f"ROM queue entry dropped: {entry['title']}")
     return web.json_response({"cancelled": rid})
