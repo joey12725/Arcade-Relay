@@ -145,6 +145,17 @@ def _candidate_id(url):
     return hashlib.sha1(url.encode()).hexdigest()[:16]
 
 
+def remember_source(rom_id, metadata):
+    if not metadata:
+        return
+    with _cache_lock:
+        cache = _load_cache()
+        entry = cache.get(rom_id)
+        if entry and metadata.get("file_name") == entry["title"]:
+            entry["source_metadata"] = metadata
+            _save_cache(cache)
+
+
 def _safe_filename(name):
     """Mirror of romdl.util.safe_filename — kept local so the adapter does not
     need romdl importable in this process."""
@@ -319,7 +330,14 @@ def download(rom_id, cancel=None, progress=None):
     source_info = None
     source_path = rom_path + ".source"
     url = entry["url"]
-    if url.startswith("https://mirror.invalid/rom?"):
+    retained = entry.get("source_metadata")
+    reuse = bool(retained and os.path.isfile(rom_path)
+                 and os.path.getsize(rom_path) == retained["size"]
+                 and _hash_file(rom_path) == retained["sha256"])
+    if reuse:
+        source_info = retained
+        url = pathlib.Path(rom_path).as_uri()
+    elif url.startswith("https://mirror.invalid/rom?"):
         source_info = _fetch_torrent(entry, source_path, cancel, progress)
         url = pathlib.Path(source_path).as_uri()
     req = urllib.request.Request(url,
@@ -370,9 +388,15 @@ def download(rom_id, cancel=None, progress=None):
             pass
         raise
     finally:
-        if source_info is not None:
+        if source_info is not None and not reuse:
             pathlib.Path(source_path).unlink(missing_ok=True)
     os.replace(tmp, rom_path)
+    if source_info:
+        entry["source_metadata"] = source_info
+        with _cache_lock:
+            cache = _load_cache()
+            cache[rom_id] = entry
+            _save_cache(cache)
 
     # Cartridge ZIPs contain one launchable ROM; PS1 ZIPs contain a cue and
     # its tracks. Keep arcade ZIPs intact, as MAME uses the short set name.

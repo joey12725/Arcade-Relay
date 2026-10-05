@@ -68,3 +68,21 @@ def test_wrong_source_checksum_never_publishes(source, tmp_path):
         adapter.download("game")
     assert not (tmp_path / "game" / "Game (USA).zip").exists()
     assert not list(tmp_path.rglob("*.part"))
+
+
+def test_retained_verified_archive_reinstalls_without_source_network(source, tmp_path, monkeypatch):
+    candidate, data = source
+    candidate()
+    cache = adapter._load_cache()
+    cache["game"]["url"] = "https://mirror.invalid/rom?id=123"
+    cache["game"]["source_metadata"] = {"file_name": "Game (USA).zip", "size": len(data),
+                                        "sha256": hashlib.sha256(data).hexdigest()}
+    adapter._save_cache(cache)
+    (tmp_path / "game").mkdir()
+    (tmp_path / "game/Game (USA).zip").write_bytes(data)
+    def unexpected_fetch(*args):
+        raise AssertionError("verified retained archives must not need the source network")
+    monkeypatch.setattr(adapter, "_fetch_torrent", unexpected_fetch)
+    result = adapter.download("game")
+    assert result["filename"] == "Game (USA).nes"
+    assert result["source_metadata"]["sha256"] == hashlib.sha256(data).hexdigest()

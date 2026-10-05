@@ -793,6 +793,7 @@ rom_lock = asyncio.Lock()
 # by romdl.download between chunks. Lives outside the queue entry because the
 # entry is JSON-serialized to the UI.
 rom_cancel_events = {}
+rom_stopping = False
 rom_slots = asyncio.Semaphore(2)
 ROM_QUEUE_PATH = pathlib.Path(os.environ.get("ROM_QUEUE_PATH", os.path.join(romdl.STAGING, "queue.json")))
 
@@ -906,6 +907,7 @@ async def _rom_worker(entry):
         files = await asyncio.to_thread(
             romdl.download, entry.get("candidate_id", entry["id"]), cancel, progress)
         entry["status"] = "delivering"
+        entry["title"] = files["title"]
         entry["system"] = files["system"]
         dest = f"/roms/{files['system']}/{files['filename']}"
         save_rom_queue()
@@ -939,8 +941,8 @@ async def _rom_worker(entry):
         entry["detail"] = dest + ("" if arted else "  (no cover art)")
         hub.log_event(f"ROM ready: {entry['title']} at {dest}")
     except romdl.Cancelled as e:
-        entry["status"] = "canceled"
-        entry["detail"] = str(e)
+        entry["status"] = "queued" if rom_stopping else "canceled"
+        entry["detail"] = "resume after server restart" if rom_stopping else str(e)
         hub.log_event(f"ROM canceled: {entry['title']} ({e})")
     except Exception as e:  # noqa: BLE001
         entry["status"] = "error"
@@ -1308,6 +1310,7 @@ async def roms_sync(request):
     retried = []
     for entry in rom_queue:
         if entry["status"] == "ready":
+            romdl.remember_source(entry.get("candidate_id", entry["id"]), entry.get("source_metadata"))
             _register_installed_rom(entry)
     async with rom_lock:
         for entry in rom_queue:
@@ -2018,6 +2021,7 @@ async def _on_startup(app):
     if ROM_QUEUE_PATH.exists():
         rom_queue.extend(json.loads(ROM_QUEUE_PATH.read_text()))
         for entry in rom_queue:
+            romdl.remember_source(entry.get("candidate_id", entry["id"]), entry.get("source_metadata"))
             if entry["status"] in ("queued", "searching", "downloading", "delivering"):
                 entry["status"] = "queued"
                 asyncio.create_task(rom_worker(entry))
@@ -2030,6 +2034,10 @@ async def _on_startup(app):
 
 
 async def _on_cleanup(app):
+    global rom_stopping
+    rom_stopping = True
+    for event in rom_cancel_events.values():
+        event.set()
     if manager is not None:
         await asyncio.to_thread(manager.ha.disconnect)
 
