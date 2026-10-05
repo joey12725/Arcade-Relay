@@ -811,10 +811,16 @@ async def watchdog_loop():
         await asyncio.sleep(launcher.WATCHDOG_POLL_S)
 
 
-async def file_fetch(path, dest, sha256=None):
+async def file_fetch(path, dest, sha256=None, protect_existing=False):
     """ROM/media delivery over the tunnel (spec file.*): stream to .part,
     verify checksum, atomic rename."""
     import hashlib
+    if protect_existing and os.path.exists(dest):
+        with open(dest, "rb") as f:
+            existing = hashlib.file_digest(f, "sha256").hexdigest()
+        if sha256 and existing == sha256:
+            return {"dest": dest, "bytes": os.path.getsize(dest), "sha256": existing, "cached": True}
+        raise RuntimeError(f"refusing to replace existing game with different bytes: {dest}")
     os.makedirs(os.path.dirname(dest), exist_ok=True)
     tmo = aiohttp.ClientTimeout(total=None, sock_connect=15, sock_read=120)
     h = hashlib.sha256()
@@ -1327,7 +1333,7 @@ async def handle_req(ws, data):
             result = {"suppressed_for_s": secs}
         elif method == "file.fetch":
             result = await file_fetch(params["path"], params["dest"],
-                                      params.get("sha256"))
+                                      params.get("sha256"), params.get("protect_existing", False))
         elif method == "system.screenshot":
             import base64
             p = subprocess.run(

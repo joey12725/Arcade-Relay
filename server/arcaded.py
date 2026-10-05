@@ -11,6 +11,7 @@ Protocol (spec §7): JSON messages, req/res + events.
   cabinet -> server: {"id":uuid,"kind":"res","ok":true,"result":{...}}
 """
 import asyncio
+import hashlib
 import json
 import os
 import pathlib
@@ -113,7 +114,7 @@ class Hub:
             return False
         return (time.monotonic() - self.last_hb) <= self.hb_interval * MISSED_BEATS_OFFLINE
 
-    async def rpc(self, method, params):
+    async def rpc(self, method, params, timeout=None):
         if self.ws is None or self.ws.closed:
             raise web.HTTPServiceUnavailable(text="cabinet offline")
         msg_id = str(uuid.uuid4())
@@ -122,7 +123,7 @@ class Hub:
         try:
             await self.ws.send_json(
                 {"id": msg_id, "kind": "req", "method": method, "params": params})
-            return await asyncio.wait_for(fut, RPC_TIMEOUT)
+            return await asyncio.wait_for(fut, timeout or RPC_TIMEOUT)
         except asyncio.TimeoutError:
             raise web.HTTPGatewayTimeout(text=f"cabinet did not answer {method}")
         except ConnectionError:
@@ -792,6 +793,15 @@ rom_lock = asyncio.Lock()
 # by romdl.download between chunks. Lives outside the queue entry because the
 # entry is JSON-serialized to the UI.
 rom_cancel_events = {}
+rom_slots = asyncio.Semaphore(2)
+ROM_QUEUE_PATH = pathlib.Path(os.environ.get("ROM_QUEUE_PATH", os.path.join(romdl.STAGING, "queue.json")))
+
+
+def save_rom_queue():
+    ROM_QUEUE_PATH.parent.mkdir(parents=True, exist_ok=True)
+    tmp = ROM_QUEUE_PATH.with_suffix(".part")
+    tmp.write_text(json.dumps(rom_queue))
+    os.replace(tmp, ROM_QUEUE_PATH)
 
 
 def _queue_entry(rid):
@@ -826,6 +836,13 @@ async def _deliver_art(files, dest_rom):
 
 
 async def rom_worker(entry):
+    async with rom_slots:
+        if entry not in rom_queue:
+            return
+        await _rom_worker(entry)
+
+
+async def _rom_worker(entry):
     """request -> download (ROMDL) -> deliver over the tunnel -> rescan."""
     import threading
     cancel = rom_cancel_events.setdefault(entry["id"], threading.Event())
@@ -835,22 +852,51 @@ async def rom_worker(entry):
         entry["bytes_total"] = total
 
     try:
+        for _ in range(60):
+            if hub.online:
+                break
+            await asyncio.sleep(1)
+        if entry.get("query") and not entry.get("candidate_id"):
+            entry["status"] = "searching"
+            save_rom_queue()
+            cands = await asyncio.to_thread(romdl.search, entry["query"], entry["system"])
+            if not cands:
+                raise RuntimeError("no match")
+            entry["candidate_id"] = cands[0]["id"]
+            entry["title"] = cands[0]["title"]
+        if cancel.is_set():
+            raise romdl.Cancelled("canceled before download")
         entry["status"] = "downloading"
+        save_rom_queue()
         files = await asyncio.to_thread(
-            romdl.download, entry["id"], cancel, progress)
+            romdl.download, entry.get("candidate_id", entry["id"]), cancel, progress)
         entry["status"] = "delivering"
         entry["system"] = files["system"]
         dest = f"/roms/{files['system']}/{files['filename']}"
-        res = await hub.rpc("file.fetch", {
-            "path": f"/roms/files/{urllib.parse.quote(files['filename'])}",
-            "dest": dest, "sha256": files["sha256"]})
-        if not res.get("ok"):
-            raise RuntimeError(res.get("error", "delivery failed"))
+        save_rom_queue()
+        payloads = files.get("files") or [files]
+        # Install the launch descriptor last, after all disc tracks exist.
+        payloads = sorted(payloads, key=lambda f: f["filename"] == files["filename"])
+        for f in payloads:
+            staged = os.path.relpath(f["rom_path"], romdl.STAGING)
+            res = await hub.rpc("file.fetch", {
+                "path": f"/roms/files/{urllib.parse.quote(staged)}",
+                "dest": f"/roms/{files['system']}/{f['filename']}", "sha256": f["sha256"],
+                "protect_existing": True}, timeout=3600)
+            if not res.get("ok"):
+                raise RuntimeError(res.get("error", "delivery failed"))
         arted = await _deliver_art(files, dest)
         rescan = await hub.rpc("library.rescan", {})
         if not rescan.get("ok"):
             raise RuntimeError("rescan failed")
         entry["status"] = "ready"
+        entry["path"] = dest
+        entry["sha256"] = files["sha256"]
+        entry["files"] = [{"filename": f["filename"], "sha256": f["sha256"]} for f in payloads]
+        entry["source_url"] = files.get("source_url")
+        entry["source_bytes"] = files.get("bytes")
+        entry["source_metadata"] = files.get("source_metadata")
+        entry["display_title"] = files.get("display_title")
         entry["detail"] = dest + ("" if arted else "  (no cover art)")
         hub.log_event(f"ROM ready: {entry['title']} at {dest}")
     except romdl.Cancelled as e:
@@ -863,6 +909,7 @@ async def rom_worker(entry):
         hub.log_event(f"ROM failed: {entry['title']}: {e!r}")
     finally:
         rom_cancel_events.pop(entry["id"], None)
+        save_rom_queue()
 
 
 async def roms_search(request):
@@ -889,7 +936,8 @@ async def roms_search(request):
 
 async def roms_backend(request):
     """Which backend is live and which systems it can actually reach."""
-    systems = sorted(romdl.SYSTEM_TO_CONSOLE)
+    cfg = yaml.safe_load((pathlib.Path(STATE_DIR) / "cabinet.yaml").read_text()) or {}
+    systems = sorted(s for s in cfg.get("systems", []) if s in romdl.SYSTEM_TO_CONSOLE and cfg.get("emulators", {}).get(s, {}).get("core"))
     return web.json_response({
         "backend": romdl.backend_name(),
         "systems": systems,
@@ -907,26 +955,22 @@ async def roms_request(request):
     if body.get("id"):
         cand = {"id": body["id"], "title": body.get("title") or body["id"]}
     else:
-        try:
-            cands = await asyncio.to_thread(
-                romdl.search, body["query"], body.get("system"))
-        except ValueError as e:
-            return web.json_response({"error": str(e)}, status=400)
-        except (RuntimeError, OSError, subprocess.SubprocessError) as e:
-            return web.json_response({"error": f"romdl search failed: {e}"},
-                                     status=502)
-        if not cands:
-            return web.json_response({"error": "no match"}, status=404)
-        cand = cands[0]
+        if not body.get("query") or (romdl.using_real() and not body.get("system")):
+            return web.json_response({"error": "query and system are required"}, status=400)
+        key = (body.get("system", "") + ":" + body["query"].strip().lower()).encode()
+        cand = {"id": hashlib.sha256(key).hexdigest()[:16], "title": body["query"]}
     async with rom_lock:
         entry = _queue_entry(cand["id"])
-        if entry is None or entry["status"] == "error":
+        if entry is None or entry["status"] in ("error", "canceled"):
             if entry:
                 rom_queue.remove(entry)
             entry = {"id": cand["id"], "title": cand["title"],
                      "system": cand.get("system") or body.get("system") or "",
                      "status": "queued", "detail": ""}
             rom_queue.append(entry)
+            if not body.get("id"):
+                entry["query"] = body["query"]
+            save_rom_queue()
             asyncio.get_event_loop().create_task(rom_worker(entry))
     return web.json_response(entry)
 
@@ -937,7 +981,10 @@ async def roms_status(request):
 
 async def roms_file(request):
     fname = request.match_info["fname"]
-    path = os.path.join(romdl.STAGING, os.path.basename(fname))
+    root = pathlib.Path(romdl.STAGING).resolve()
+    path = (root / fname).resolve()
+    if not path.is_relative_to(root):
+        raise web.HTTPForbidden()
     if not os.path.exists(path):
         raise web.HTTPNotFound(text=f"no staged file {fname}")
     return web.FileResponse(path)
@@ -1659,13 +1706,14 @@ async def roms_retry(request):
         if entry is None:
             return web.json_response({"error": f"no queue entry {rid}"},
                                      status=404)
-        if entry["status"] in ("queued", "downloading", "delivering"):
+        if entry["status"] in ("queued", "searching", "downloading", "delivering"):
             return web.json_response(
                 {"error": f"{rid} is already {entry['status']}"}, status=409)
         entry["status"] = "queued"
         entry["detail"] = ""
         entry.pop("bytes_done", None)
         entry.pop("bytes_total", None)
+        save_rom_queue()
         asyncio.get_event_loop().create_task(rom_worker(entry))
     hub.log_event(f"ROM retry: {entry['title']}")
     return web.json_response(entry)
@@ -1686,7 +1734,7 @@ async def roms_cancel(request):
         if entry is None:
             return web.json_response({"error": f"no queue entry {rid}"},
                                      status=404)
-        if entry["status"] == "downloading":
+        if entry["status"] in ("searching", "downloading"):
             ev = rom_cancel_events.get(rid)
             if ev is None:
                 return web.json_response(
@@ -1700,6 +1748,7 @@ async def roms_cancel(request):
                 {"error": f"{rid} is delivering to the cabinet; "
                           "let it finish or fail"}, status=409)
         rom_queue.remove(entry)
+        save_rom_queue()
     hub.log_event(f"ROM queue entry dropped: {entry['title']}")
     return web.json_response({"cancelled": rid})
 
@@ -1910,6 +1959,12 @@ async def _publish_presence():
 
 
 async def _on_startup(app):
+    if ROM_QUEUE_PATH.exists():
+        rom_queue.extend(json.loads(ROM_QUEUE_PATH.read_text()))
+        for entry in rom_queue:
+            if entry["status"] in ("queued", "searching", "downloading", "delivering"):
+                entry["status"] = "queued"
+                asyncio.create_task(rom_worker(entry))
     global manager
     manager = integrations.Manager(STATE_DIR, hub.log_event,
                                    _integration_command)
@@ -1982,7 +2037,7 @@ app.add_routes([
     web.get("/roms/backend", roms_backend),
     web.post("/roms/request", roms_request),
     web.get("/roms/status", roms_status),
-    web.get("/roms/files/{fname}", roms_file),
+    web.get("/roms/files/{fname:.*}", roms_file),
     web.get("/volume", volume_get),
     web.post("/volume/set", volume_set),
     web.get("/favorites", favorites_list),

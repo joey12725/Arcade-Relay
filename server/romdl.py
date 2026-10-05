@@ -29,13 +29,18 @@ import pathlib
 import shutil
 import subprocess
 import urllib.request
+import zipfile
+import threading
+import time
+import signal
 
 STAGING = os.environ.get("ROMDL_STAGING", "/tmp/romdl-staging")
 BACKEND = os.environ.get("ROMDL_BACKEND", "auto").lower()
 ROMDL_BIN = os.environ.get("ROMDL_BIN", "romdl")
-SEARCH_TIMEOUT = int(os.environ.get("ROMDL_SEARCH_TIMEOUT", "180"))
+SEARCH_TIMEOUT = int(os.environ.get("ROMDL_SEARCH_TIMEOUT", "45"))
 DOWNLOAD_TIMEOUT = int(os.environ.get("ROMDL_DOWNLOAD_TIMEOUT", "3600"))
-USER_AGENT = "arcaded/1.0 (+romdl adapter)"
+USER_AGENT = "Mozilla/5.0 (compatible; arcaded/1.1; +https://github.com/joey12725/Arcade-Relay)"
+_cache_lock = threading.RLock()
 
 # Our /roms directory name -> the console token romdl's fuzzy matcher wants.
 # Both of its sources keep their own alias tables; these are the spellings
@@ -149,6 +154,55 @@ def _safe_filename(name):
     return (name[:180].rstrip() or "file")
 
 
+def _hash_file(path):
+    with open(path, "rb") as f:
+        return hashlib.file_digest(f, "sha256").hexdigest()
+
+
+def _fetch_torrent(entry, path, cancel, progress):
+    import tempfile
+    log = tempfile.TemporaryFile(mode="w+")
+    proc = subprocess.Popen([ROMDL_BIN, "--json", "fetch", entry["url"], "--out", path],
+                            stdout=subprocess.PIPE, stderr=log, text=True,
+                            start_new_session=True)
+    try:
+        deadline = time.monotonic() + DOWNLOAD_TIMEOUT
+        offset = 0
+        while proc.poll() is None:
+            log.seek(offset)
+            for line in log:
+                try:
+                    event = json.loads(line)
+                    if progress:
+                        progress(event["done"], event["total"])
+                except (ValueError, KeyError):
+                    pass
+            offset = log.tell()
+            if cancel is not None and cancel.is_set():
+                raise Cancelled("torrent download canceled")
+            if time.monotonic() > deadline:
+                raise RuntimeError("torrent download deadline exceeded")
+            time.sleep(.2)
+        out, _ = proc.communicate()
+        log.seek(0)
+        err = log.read()
+        if proc.returncode:
+            raise RuntimeError(f"romdl fetch failed: {err[-1800:]}")
+        info = json.loads(out)
+        if info["file_name"] != entry["title"]:
+            raise RuntimeError("source identity differs from selected candidate")
+        return info
+    finally:
+        if proc.poll() is None:
+            os.killpg(proc.pid, signal.SIGTERM)
+            try:
+                proc.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                os.killpg(proc.pid, signal.SIGKILL)
+                proc.wait()
+        log.close()
+
+
 # -------------------------------------------------------------------- search
 
 def _run_romdl(args, timeout):
@@ -185,7 +239,7 @@ def search(query, system=None, limit=10, deep=False):
     if console is None:
         raise ValueError(f"no romdl console mapping for system {system!r}")
 
-    args = ["search", console, query, "-n", str(limit)]
+    args = ["search", console, query, "-n", str(limit), "--sources", "mirror"]
     if deep:
         args.append("--deep")
     matches = _run_romdl(args, SEARCH_TIMEOUT)
@@ -200,13 +254,17 @@ def search(query, system=None, limit=10, deep=False):
             continue
         rid = _candidate_id(url)
         entry = {"id": rid, "title": m.get("title") or url.rsplit("/", 1)[-1],
-                 "system": system.lower(), "console": console, "url": url,
+                 "system": CONSOLE_TO_SYSTEM[console], "console": console, "url": url,
+                 "extra": m.get("extra", {}),
                  "source": m.get("source", "?"),
                  "score": round(float(m.get("score", 0)), 1)}
         cache[rid] = entry
         out.append({k: entry[k] for k in
                     ("id", "title", "system", "source", "score")})
-    _save_cache(cache)
+    with _cache_lock:
+        merged = _load_cache()
+        merged.update(cache)
+        _save_cache(merged)
     return out
 
 
@@ -253,10 +311,18 @@ def download(rom_id, cancel=None, progress=None):
 
     os.makedirs(STAGING, exist_ok=True)
     fname = _safe_filename(entry["title"])
-    rom_path = os.path.join(STAGING, fname)
+    directory = pathlib.Path(STAGING) / rom_id
+    directory.mkdir(exist_ok=True)
+    rom_path = str(directory / fname)
     tmp = rom_path + ".part"
     h = hashlib.sha256()
-    req = urllib.request.Request(entry["url"],
+    source_info = None
+    source_path = rom_path + ".source"
+    url = entry["url"]
+    if url.startswith("https://mirror.invalid/rom?"):
+        source_info = _fetch_torrent(entry, source_path, cancel, progress)
+        url = pathlib.Path(source_path).as_uri()
+    req = urllib.request.Request(url,
                                  headers={"User-Agent": USER_AGENT})
     done = 0
     try:
@@ -278,6 +344,24 @@ def download(rom_id, cancel=None, progress=None):
                 done += len(chunk)
                 if progress is not None:
                     progress(done, total)
+            if total is not None and done != total:
+                raise RuntimeError(f"source length mismatch: expected {total}, received {done}")
+            if done == 0:
+                raise RuntimeError("source returned an empty file")
+            if entry.get("sha256") and h.hexdigest() != entry["sha256"]:
+                raise RuntimeError("source checksum mismatch")
+            if fname.lower().endswith(".zip"):
+                f.flush()
+                with zipfile.ZipFile(tmp) as z:
+                    bad = z.testzip()
+                    if bad:
+                        raise RuntimeError(f"archive CRC mismatch: {bad}")
+                    if entry["system"] == "arcade":
+                        members = {i.filename: i for i in z.infolist()}
+                        for rom in entry.get("extra", {}).get("roms", []):
+                            i = members.get(rom["name"])
+                            if i is None or i.file_size != int(rom["size"]) or (rom.get("crc") and i.CRC != int(rom["crc"], 16)):
+                                raise RuntimeError(f"MAME2003-plus ROM mismatch: {rom['name']}")
     except BaseException:
         # never leave a partial behind for the delivery step to pick up
         try:
@@ -285,10 +369,43 @@ def download(rom_id, cancel=None, progress=None):
         except FileNotFoundError:
             pass
         raise
+    finally:
+        if source_info is not None:
+            pathlib.Path(source_path).unlink(missing_ok=True)
     os.replace(tmp, rom_path)
+
+    # Cartridge ZIPs contain one launchable ROM; PS1 ZIPs contain a cue and
+    # its tracks. Keep arcade ZIPs intact, as MAME uses the short set name.
+    files = []
+    if fname.lower().endswith(".zip") and entry["system"] != "arcade":
+        target = pathlib.Path(STAGING) / rom_id
+        target.mkdir(exist_ok=True)
+        with zipfile.ZipFile(rom_path) as z:
+            for i in z.infolist():
+                p = pathlib.PurePosixPath(i.filename)
+                if p.is_absolute() or ".." in p.parts or len(p.parts) != 1:
+                    raise RuntimeError(f"unsupported archive path: {i.filename}")
+                if i.is_dir():
+                    continue
+                z.extract(i, target)
+                files.append({"filename": i.filename, "rom_path": str(target / i.filename),
+                              "sha256": _hash_file(target / i.filename)})
+        exts = {"nes": {".nes"}, "snes": {".sfc", ".smc"}, "gb": {".gb"},
+                "gba": {".gba"}, "genesis": {".md", ".gen", ".bin"},
+                "psx": {".cue", ".chd"}}
+        launch = [f for f in files if pathlib.Path(f["filename"]).suffix.lower() in exts.get(entry["system"], set())]
+        if len(launch) != 1:
+            raise RuntimeError(f"archive must contain one launchable game, found {len(launch)}")
+        rom_path, fname = launch[0]["rom_path"], launch[0]["filename"]
+        digest = _hash_file(rom_path)
+    else:
+        digest = h.hexdigest()
 
     system = entry.get("system") or CONSOLE_TO_SYSTEM.get(
         entry.get("console", ""), "unknown")
     return {"rom_path": rom_path, "art_path": None,
-            "sha256": h.hexdigest(), "system": system,
-            "filename": fname, "title": entry["title"]}
+            "sha256": digest, "system": system,
+            "filename": fname, "title": entry["title"], "files": files,
+            "source_url": entry["url"], "bytes": done,
+            "source_metadata": source_info,
+            "display_title": entry.get("extra", {}).get("display_title")}

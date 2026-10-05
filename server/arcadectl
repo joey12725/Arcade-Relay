@@ -18,12 +18,13 @@ BASE = os.environ.get("ARCADED_URL", "http://localhost:8000")
 
 def call(method, path, body=None):
     req = urllib.request.Request(BASE + path, method=method)
+    req.add_header("User-Agent", "Mozilla/5.0 (compatible; arcadectl/1.1; +https://github.com/joey12725/Arcade-Relay)")
     data = None
     if body is not None:
         data = json.dumps(body).encode()
         req.add_header("Content-Type", "application/json")
     try:
-        with urllib.request.urlopen(req, data=data, timeout=30) as r:
+        with urllib.request.urlopen(req, data=data, timeout=60) as r:
             return json.loads(r.read() or "{}")
     except urllib.error.HTTPError as e:
         print(f"arcadectl: {e.code} {e.read().decode(errors='replace')}",

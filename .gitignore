@@ -8,3 +8,4 @@ sim/.data/
 soak/.data/
 .pytest_cache/
 sim/media/**/*.mkv
+.runtime/

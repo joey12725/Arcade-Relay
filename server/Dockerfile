@@ -27,7 +27,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # SKIPPED rather than failing the whole build: romdl.py's default `auto`
 # backend is `shutil.which(romdl)`, so a missing CLI degrades to the fake
 # catalog instead of taking the daemon down with it.
-ARG ROMDL_REF=master
+ARG ROMDL_REF=667838d
 RUN --mount=type=secret,id=romdl_key,required=false \
     set -eu; \
     if [ -s /run/secrets/romdl_key ]; then \

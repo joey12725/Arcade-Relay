@@ -1716,7 +1716,7 @@ VIEWS.rom = () => {
       </div></td></tr>`).join("")
       || h`<tr><td colspan="4" class="note" style="opacity:.7">queue is empty</td></tr>`}
     </tbody></table>`)}
-  <div id="romSearch"></div></div>`;
+  <div id="romSearch">${S.rom.searchHtml || ""}</div></div>`;
 };
 
 ACTIONS["rom-q"] = (el) => { S.rom.query = el.value; };
@@ -1724,15 +1724,15 @@ ACTIONS["rom-sys"] = (el) => { S.rom.system = el.value; paint(); };
 ACTIONS["rom-search"] = async () => {
   const query = S.rom.query.trim();
   if (!query) return toast("✖ type something to search for", "err");
-  const host = document.getElementById("romSearch");
-  host.innerHTML = h`<div class="note">searching sources — this can take a minute...</div>`;
+  const show = (html) => { S.rom.searchHtml = html; if (S.view === "rom" || document.getElementById("romSearch")) paint(); };
+  show(h`<div class="note">searching sources...</div>`);
   try {
     const qs = "q=" + encodeURIComponent(query) +
       (S.rom.system ? "&system=" + encodeURIComponent(S.rom.system) : "");
     const r = await api("GET", "/roms/search?" + qs);
     const list = Array.isArray(r) ? r : (r.results || []);
     const note = (r && r.note) || "";
-    host.innerHTML = panel("p-lime", "SOURCE MATCHES (" + list.length + ")", h`
+    show(panel("p-lime", "SOURCE MATCHES (" + list.length + ")", h`
       ${note ? h`<div class="gap"><b>NOTHING TO SEARCH</b><br>${esc(note)}</div>` : ""}
       <table><thead><tr><th>SCORE</th><th>TITLE</th><th>SOURCE</th><th>SYSTEM</th><th></th></tr></thead><tbody>
       ${list.map((c) => h`<tr>
@@ -1744,9 +1744,9 @@ ACTIONS["rom-search"] = async () => {
               data-title="${esc(c.title || "")}" data-sys="${esc(c.system || "")}">QUEUE THIS</button></td>
       </tr>`).join("")
         || (note ? "" : h`<tr><td colspan="5" class="note" style="opacity:.7">no source matched</td></tr>`)}
-      </tbody></table>`);
+      </tbody></table>`));
   } catch (e) {
-    host.innerHTML = panel("p-red", "SEARCH FAILED", h`<div class="note">${esc(e.message)}</div>`);
+    show(panel("p-red", "SEARCH FAILED", h`<div class="note">${esc(e.message)}</div>`));
   }
 };
 /* Queue the exact candidate that was picked, by id — not a second
