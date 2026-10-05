@@ -8,7 +8,8 @@
 #
 # Deliberately conservative:
 #   - a fetch failure is not an error (the cabinet is often offline)
-#   - nothing happens at all when the tree is already up to date
+#   - nothing is redeployed when the tree is already up to date (only the
+#     T3 pin is checked; see sync_t3_pin)
 #   - an in-progress game defers the update to the next tick; the arcade is
 #     never interrupted to install code
 set -uo pipefail
@@ -20,6 +21,28 @@ BRANCH=${ARCADE_UPDATE_BRANCH:-}
 KEY=${ARCADE_DEPLOY_KEY:-/etc/arcade/deploy_key}
 
 log() { echo "[arcade-update] $*"; }
+
+# T3 rides along without the rest of devtools: the t3-code unit is held to
+# cabinet/provision/t3-version, re-pinned and restarted when they differ.
+# Checked every tick, not only on a new commit: this script is replaced
+# mid-run by its own pull, so the commit that changes the pin may run under
+# the previous copy. A restart drops any live agent session, so it only
+# happens when the pin actually moved (or the unit was hand-edited).
+sync_t3_pin() {
+    local unit pin uid
+    unit="$(getent passwd "$ARCADE_USER" | cut -d: -f6)/.config/systemd/user/t3-code.service"
+    pin=$(tr -d '[:space:]' < "$REPO_DIR/cabinet/provision/t3-version" 2>/dev/null)
+    [ -f "$unit" ] && [ -n "$pin" ] || return 0
+    grep -q -- "--yes t3@${pin} serve" "$unit" && return 0
+    sed -i -E "s#--yes t3@[^ ]+ serve#--yes t3@${pin} serve#" "$unit"
+    uid=$(id -u "$ARCADE_USER")
+    runuser -u "$ARCADE_USER" -- env XDG_RUNTIME_DIR="/run/user/$uid" \
+        systemctl --user daemon-reload 2>/dev/null || true
+    runuser -u "$ARCADE_USER" -- env XDG_RUNTIME_DIR="/run/user/$uid" \
+        systemctl --user restart t3-code.service 2>/dev/null \
+        && log "t3-code re-pinned to ${pin} and restarted" \
+        || log "t3-code re-pinned to ${pin}; restart it by hand"
+}
 
 [ -d "$REPO_DIR/.git" ] || { log "no checkout at $REPO_DIR — nothing to do"; exit 0; }
 
@@ -50,6 +73,7 @@ LOCAL=$(git rev-parse HEAD)
 REMOTE=$(git rev-parse FETCH_HEAD)
 if [ "$LOCAL" = "$REMOTE" ]; then
     log "already at ${LOCAL:0:8} — nothing to do"
+    sync_t3_pin
     exit 0
 fi
 
@@ -97,20 +121,5 @@ runuser -u "$ARCADE_USER" -- env XDG_RUNTIME_DIR="/run/user/$UID_N" \
     && log "cabd + pegasus restarted" \
     || log "could not restart user units (no session?) — restart at next boot"
 
-# T3 rides along without the rest of devtools: when t3-version moved, re-pin
-# the existing unit and restart it. Only a commit to t3-version does this, so
-# a restart (which drops any live agent session) is always deliberate.
-T3_UNIT="$(getent passwd "$ARCADE_USER" | cut -d: -f6)/.config/systemd/user/t3-code.service"
-T3_PIN=$(tr -d '[:space:]' < "$REPO_DIR/cabinet/provision/t3-version" 2>/dev/null)
-if [ -f "$T3_UNIT" ] && [ -n "$T3_PIN" ] \
-   && ! grep -q -- "--yes t3@${T3_PIN} serve" "$T3_UNIT"; then
-    sed -i -E "s#--yes t3@[^ ]+ serve#--yes t3@${T3_PIN} serve#" "$T3_UNIT"
-    runuser -u "$ARCADE_USER" -- env XDG_RUNTIME_DIR="/run/user/$UID_N" \
-        systemctl --user daemon-reload 2>/dev/null || true
-    runuser -u "$ARCADE_USER" -- env XDG_RUNTIME_DIR="/run/user/$UID_N" \
-        systemctl --user restart t3-code.service 2>/dev/null \
-        && log "t3-code re-pinned to ${T3_PIN} and restarted" \
-        || log "t3-code re-pinned to ${T3_PIN}; restart it by hand"
-fi
-
+sync_t3_pin
 log "done"
