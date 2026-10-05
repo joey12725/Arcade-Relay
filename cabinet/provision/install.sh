@@ -27,7 +27,7 @@ apt-get install -y --no-install-recommends \
     dosfstools parted rsync pciutils usbutils rfkill uuid-runtime unzip \
     ethtool \
     pipewire pipewire-pulse wireplumber pulseaudio-utils \
-    python3 python3-aiohttp python3-evdev python3-pil python3-yaml \
+    python3 python3-aiohttp python3-evdev python3-pil python3-yaml python3-paho-mqtt \
     udev curl ca-certificates procps systemd-timesyncd
 
 # --- clock: T3 Connect rejects DPoP proofs dated >5 s ahead of this clock,
@@ -60,6 +60,7 @@ install -m 0755 "$SRC_DIR/provision/openbox-autostart" \
 install -d /opt/arcade
 rm -rf /opt/arcade/cabinet
 cp -r "$SRC_DIR" /opt/arcade/cabinet
+install -m 0644 "$SRC_DIR/../server/integrations.py" /opt/arcade/cabinet/integrations.py
 install -d /roms /saves /var/cache/arcade /var/cache/arcade-clips
 
 # --- systemd user units; linger so they run from boot, not first login ---

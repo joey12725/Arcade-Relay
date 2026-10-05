@@ -26,6 +26,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import audio  # noqa: E402
 import inputs  # noqa: E402
 import panels  # noqa: E402
+import ha_local  # noqa: E402
 import pegasus_gen  # noqa: E402
 import launcher  # noqa: E402
 import lifeline  # noqa: E402
@@ -1420,6 +1421,19 @@ async def handle_req(ws, data):
                             "error": repr(e)})
 
 
+def cabinet_snapshot():
+    return {"running": game["rom"], "system": game["system"],
+            "started_at": game["started_at"], "elapsed_s": elapsed_s(),
+            "screensaver": ss["on"], "lifeline": ll["on"]}
+
+
+async def ha_dispatch(method):
+    class Reply:
+        async def send_json(self, response):
+            log(f"local Home Assistant: {method} ok={response.get('ok')}")
+    await handle_req(Reply(), {"method": method})
+
+
 async def heartbeat_loop(ws):
     # Absolute-time scheduling: send time must not stretch the period, or
     # delivered-beat counts drift below expectation over long windows.
@@ -1496,6 +1510,9 @@ async def main():
     asyncio.create_task(clips_sync_loop())
     asyncio.create_task(saves_backup_loop())
     asyncio.create_task(metrics_loop())
+    asyncio.create_task(ha_local.run(
+        lambda: state["bundle"].get("integrations.yaml", {}),
+        cabinet_snapshot, health_report, ha_dispatch, log))
     asyncio.create_task(lifeline_loop(ws_state))
 
     # real hardware: evdev devices feed the same combo engine (A-17)
