@@ -34,6 +34,7 @@ apt-get install -y --no-install-recommends \
     ripgrep jq unzip zip \
     tmux vim nano less openssh-server \
     python3-pip python3-venv \
+    bubblewrap \
   || note_fail "base dev tools"
 
 # SSH is how you reach the cabinet for agentic work (and lifeline's recovery
@@ -105,9 +106,9 @@ else
 fi
 
 step "T3 Code (remote dev server)"
-# T3 is run via `npx t3@latest` rather than installed, so the service
-# always resolves the current release (docs/t3-setup.md §13). We install
-# the systemd USER unit here.
+# T3 is run via `npx t3@<pin>` rather than installed; the pin comes from
+# t3-version (see T3_PKG above), so updating T3 means committing a new
+# version there. We install the systemd USER unit here.
 #
 # Remote access is T3 Connect, not Tailscale Serve: T3 Connect carries its
 # own relay, so the cabinet needs no tailnet membership and no open port to
