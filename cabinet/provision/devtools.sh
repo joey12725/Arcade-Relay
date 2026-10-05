@@ -13,10 +13,11 @@ set -uo pipefail
 
 ARCADE_USER=${ARCADE_USER:-arcade}
 NODE_MAJOR=${NODE_MAJOR:-24}
-# T3 release the service runs. The server must match the desktop app that
-# connects to it (a version gap fails silently: the relay stays up, the app
-# just can't reach it), so the version is pinned in t3-version and
-# arcade-update.sh re-pins + restarts the service whenever that file changes.
+# T3 release the service runs. Keep it in step with the desktop app that
+# connects to it, so the version is pinned in t3-version and arcade-update.sh
+# re-pins + restarts the service whenever that file changes. (If the app says
+# "not connected" while the relay is healthy, check the clock first: see the
+# timesyncd note in install.sh.)
 T3_PIN=$(tr -d '[:space:]' < "$(dirname "$0")/t3-version" 2>/dev/null)
 T3_PKG=${T3_PKG:-t3@${T3_PIN:-latest}}
 HOME_DIR=$(getent passwd "$ARCADE_USER" | cut -d: -f6)
