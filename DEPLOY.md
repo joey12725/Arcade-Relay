@@ -59,6 +59,10 @@ Cabinet agents can submit requests to the server directly. The **ROMs**
 project is `/roms`; provision installs its `README.md`, `AGENTS.md`,
 `ROM-DOWNLOADS.md`, and `skills/arcade-roms/SKILL.md` (linked as root
 `SKILL.md` and through project-local `.agents`/`.claude` skill directories).
+The same skill is installed user-wide for Claude Code (`~/.claude/skills`),
+Codex (`~/.agents/skills`, plus legacy `~/.codex/skills`), and OpenCode
+(`~/.config/opencode/skills`). Start a new agent session to load it; restart
+OpenCode after skill installation.
 
 `/usr/local/bin/arcadectl` reads `/etc/arcade/cabinet.env`'s `CABD_MEDIA_BASE`
 outside interactive shells. The provisioner seeds that URL only when the

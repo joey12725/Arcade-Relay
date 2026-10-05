@@ -5,7 +5,8 @@ description: Request, download, verify, retry, reinstall, or launch games from t
 
 # Cabinet-side ROM download workflow
 
-You are in the cabinet's `/roms` project. Read `/roms/ROM-DOWNLOADS.md` for
+The cabinet's installed library and ROMs project are at `/roms`. This skill
+also works from other cabinet projects. Read `/roms/ROM-DOWNLOADS.md` for
 details. The installed `arcadectl` automatically reads the server address
 from `/etc/arcade/cabinet.env`; noninteractive agent sessions need no export.
 Use `/usr/local/bin/arcadectl` if PATH does not find it.

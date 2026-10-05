@@ -68,6 +68,19 @@ def main():
                       args.roms / ".claude", args.roms / ".claude/skills"):
         os.chown(directory, account.pw_uid, account.pw_gid)
 
+    # Native user-wide discovery for Claude Code, current/legacy Codex,
+    # and OpenCode. Real files also work with loaders that don't follow links.
+    home = Path(account.pw_dir)
+    for relative in (".claude/skills", ".agents/skills", ".codex/skills", ".config/opencode/skills"):
+        directory = home / relative / "arcade-roms"
+        for parent in reversed((directory, *directory.parents)):
+            if parent == home or home not in parent.parents:
+                continue
+            if not parent.exists():
+                parent.mkdir()
+                os.chown(parent, account.pw_uid, account.pw_gid)
+        install(skill / "SKILL.md", directory / "SKILL.md", 0o644, (account.pw_uid, account.pw_gid))
+
     config = Path("/etc/arcade/cabinet.env")
     if args.server and not config.exists():
         config.parent.mkdir(parents=True, exist_ok=True)
