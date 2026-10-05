@@ -13,8 +13,12 @@ set -uo pipefail
 
 ARCADE_USER=${ARCADE_USER:-arcade}
 NODE_MAJOR=${NODE_MAJOR:-24}
-# T3 release the service tracks; pin a nightly here when the desktop app runs one
-T3_PKG=${T3_PKG:-t3@latest}
+# T3 release the service runs. The server must match the desktop app that
+# connects to it (a version gap fails silently: the relay stays up, the app
+# just can't reach it), so the version is pinned in t3-version and
+# arcade-update.sh re-pins + restarts the service whenever that file changes.
+T3_PIN=$(tr -d '[:space:]' < "$(dirname "$0")/t3-version" 2>/dev/null)
+T3_PKG=${T3_PKG:-t3@${T3_PIN:-latest}}
 HOME_DIR=$(getent passwd "$ARCADE_USER" | cut -d: -f6)
 FAILED=()
 
@@ -143,7 +147,7 @@ EOF
         "$HOME_DIR/.config/systemd/user/default.target.wants/t3-code.service"
     chown -h "$ARCADE_USER:$ARCADE_USER" \
         "$HOME_DIR/.config/systemd/user/default.target.wants/t3-code.service"
-    echo "t3-code.service installed (starts once tailscale is up)"
+    echo "t3-code.service installed (${T3_PKG}; starts once T3 Connect is linked)"
 else
     note_fail "t3-code service (no npx)"
 fi

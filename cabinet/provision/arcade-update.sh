@@ -97,4 +97,20 @@ runuser -u "$ARCADE_USER" -- env XDG_RUNTIME_DIR="/run/user/$UID_N" \
     && log "cabd + pegasus restarted" \
     || log "could not restart user units (no session?) — restart at next boot"
 
+# T3 rides along without the rest of devtools: when t3-version moved, re-pin
+# the existing unit and restart it. Only a commit to t3-version does this, so
+# a restart (which drops any live agent session) is always deliberate.
+T3_UNIT="$(getent passwd "$ARCADE_USER" | cut -d: -f6)/.config/systemd/user/t3-code.service"
+T3_PIN=$(tr -d '[:space:]' < "$REPO_DIR/cabinet/provision/t3-version" 2>/dev/null)
+if [ -f "$T3_UNIT" ] && [ -n "$T3_PIN" ] \
+   && ! grep -q -- "--yes t3@${T3_PIN} serve" "$T3_UNIT"; then
+    sed -i -E "s#--yes t3@[^ ]+ serve#--yes t3@${T3_PIN} serve#" "$T3_UNIT"
+    runuser -u "$ARCADE_USER" -- env XDG_RUNTIME_DIR="/run/user/$UID_N" \
+        systemctl --user daemon-reload 2>/dev/null || true
+    runuser -u "$ARCADE_USER" -- env XDG_RUNTIME_DIR="/run/user/$UID_N" \
+        systemctl --user restart t3-code.service 2>/dev/null \
+        && log "t3-code re-pinned to ${T3_PIN} and restarted" \
+        || log "t3-code re-pinned to ${T3_PIN}; restart it by hand"
+fi
+
 log "done"
