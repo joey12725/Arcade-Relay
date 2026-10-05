@@ -1246,8 +1246,8 @@ async def handle_req(ws, data):
     params = data.get("params") or {}
     try:
         if method == "system.exec":
-            p = subprocess.run(["/bin/sh", "-c", params["cmd"]],
-                               capture_output=True, text=True, timeout=30)
+            p = await asyncio.to_thread(subprocess.run, ["/bin/sh", "-c", params["cmd"]],
+                                        capture_output=True, text=True, timeout=30)
             result = {"rc": p.returncode, "stdout": p.stdout, "stderr": p.stderr}
         elif method == "game.launch":
             result = await game_launch(params["system"], params["path"],

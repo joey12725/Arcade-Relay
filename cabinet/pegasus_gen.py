@@ -64,14 +64,19 @@ def gen_system_collections(bundle):
     """
     systems = (bundle.get("cabinet.yaml") or {}).get("systems") or []
     emulators = (bundle.get("cabinet.yaml") or {}).get("emulators") or {}
+    installed = bundle.get("library/downloads.yaml") or {}
     written = []
     for sys_name in sorted(set(systems) | set(emulators)):
         ext = SYSTEM_EXTENSIONS.get(sys_name, "bin")
         lines = [f"collection: {sys_name.upper()}",
                  f"shortname: {sys_name}",
                  f"extensions: {ext}",
-                 f"launch: {CABD_LAUNCH} {sys_name} {{file.path}}"]
+                 f'launch: {CABD_LAUNCH} {sys_name} "{{file.path}}"']
         d = os.path.join(ROMS_DIR, sys_name)
+        companions = {f for gid, info in installed.items() if gid.startswith(sys_name + "/")
+                      for f in info.get("files", []) if f != gid.split("/", 1)[1]}
+        for f in sorted(companions):
+            lines.append(f"ignore-file: {os.path.join(d, f)}")
         roms = []
         if os.path.isdir(d):
             roms = sorted(f for f in os.listdir(d)
@@ -79,11 +84,14 @@ def gen_system_collections(bundle):
                           and f != "metadata.pegasus.txt"
                           and not f.endswith(".tmp"))
         for rom in roms:
+            if rom in companions:
+                continue
             art = art_lines(rom)
-            if not art:
+            info = installed.get(sys_name + "/" + rom, {})
+            if not art and not info:
                 continue           # nothing to add beyond extension discovery
             lines.append("")
-            lines.append(f"game: {os.path.splitext(rom)[0]}")
+            lines.append(f"game: {info.get('title') or os.path.splitext(rom)[0]}")
             lines.append(f"file: {os.path.join(d, rom)}")
             lines.extend(art)
         written.append(_write(
@@ -104,7 +112,7 @@ def gen_favorites(bundle):
         if sys_name and rom:
             lines.append(f"game: {rom}")
             lines.append(f"file: {os.path.join(ROMS_DIR, sys_name, rom)}")
-            lines.append(f"launch: {CABD_LAUNCH} {sys_name} {{file.path}}")
+            lines.append(f'launch: {CABD_LAUNCH} {sys_name} "{{file.path}}"')
             lines.extend(art_lines(rom))
     return _write(os.path.join(ROMS_DIR, "favorites", "metadata.pegasus.txt"),
                   "\n".join(lines) + "\n")

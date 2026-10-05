@@ -207,7 +207,7 @@ async def events(request):
 
 async def cab_exec(request):
     body = await request.json()
-    res = await hub.rpc("system.exec", {"cmd": body["cmd"]})
+    res = await hub.rpc("system.exec", {"cmd": body["cmd"]}, timeout=45)
     if not res.get("ok"):
         return web.json_response(res, status=500)
     return web.json_response(res["result"])
@@ -808,6 +808,39 @@ def _queue_entry(rid):
     return next((e for e in rom_queue if e["id"] == rid), None)
 
 
+def _rom_system(system):
+    if not romdl.using_real():
+        return system
+    console = romdl.SYSTEM_TO_CONSOLE.get((system or "").lower())
+    canonical = romdl.CONSOLE_TO_SYSTEM.get(console)
+    cfg = yaml.safe_load((pathlib.Path(STATE_DIR) / "cabinet.yaml").read_text()) or {}
+    if canonical not in cfg.get("systems", []) or not cfg.get("emulators", {}).get(canonical, {}).get("core"):
+        raise ValueError(f"system {system!r} has no configured cabinet emulator")
+    return canonical
+
+
+def _installed_roms():
+    p = pathlib.Path(STATE_DIR) / "library/downloads.yaml"
+    return (yaml.safe_load(p.read_text()) or {}) if p.exists() else {}
+
+
+def _register_installed_rom(entry):
+    if not entry.get("path"):
+        return
+    installed = _installed_roms()
+    gid = entry["system"] + "/" + pathlib.Path(entry["path"]).name
+    value = {"title": entry.get("display_title") or pathlib.Path(entry["title"]).stem,
+             "sha256": entry["sha256"],
+             "files": [f["filename"] for f in entry.get("files", [])]}
+    if installed.get(gid) == value:
+        return
+    installed[gid] = value
+    p = pathlib.Path(STATE_DIR) / "library/downloads.yaml"
+    p.parent.mkdir(exist_ok=True)
+    p.write_text(yaml.safe_dump(installed))
+    git_commit(f"arcadectl: register installed ROM {gid}")
+
+
 async def _deliver_art(files, dest_rom):
     """Put cover art next to a freshly delivered ROM. Never fatal.
 
@@ -862,6 +895,8 @@ async def _rom_worker(entry):
             cands = await asyncio.to_thread(romdl.search, entry["query"], entry["system"])
             if not cands:
                 raise RuntimeError("no match")
+            if romdl.using_real() and cands[0].get("score", 0) < 100:
+                raise RuntimeError("no high-confidence title match; search and select an exact candidate")
             entry["candidate_id"] = cands[0]["id"]
             entry["title"] = cands[0]["title"]
         if cancel.is_set():
@@ -886,10 +921,6 @@ async def _rom_worker(entry):
             if not res.get("ok"):
                 raise RuntimeError(res.get("error", "delivery failed"))
         arted = await _deliver_art(files, dest)
-        rescan = await hub.rpc("library.rescan", {})
-        if not rescan.get("ok"):
-            raise RuntimeError("rescan failed")
-        entry["status"] = "ready"
         entry["path"] = dest
         entry["sha256"] = files["sha256"]
         entry["files"] = [{"filename": f["filename"], "sha256": f["sha256"]} for f in payloads]
@@ -897,6 +928,14 @@ async def _rom_worker(entry):
         entry["source_bytes"] = files.get("bytes")
         entry["source_metadata"] = files.get("source_metadata")
         entry["display_title"] = files.get("display_title")
+        _register_installed_rom(entry)
+        synced = await hub.rpc("state.sync", {"bundle": build_bundle()}, timeout=45)
+        if not synced.get("ok"):
+            raise RuntimeError("installed game metadata sync failed")
+        rescan = await hub.rpc("library.rescan", {})
+        if not rescan.get("ok"):
+            raise RuntimeError("rescan failed")
+        entry["status"] = "ready"
         entry["detail"] = dest + ("" if arted else "  (no cover art)")
         hub.log_event(f"ROM ready: {entry['title']} at {dest}")
     except romdl.Cancelled as e:
@@ -918,7 +957,7 @@ async def roms_search(request):
     try:
         res = await asyncio.to_thread(
             romdl.search, request.query.get("q", ""),
-            request.query.get("system"),
+            _rom_system(request.query.get("system")),
             min(int(request.query.get("limit", 10)), 50),
             request.query.get("deep") in ("1", "true"))
     except ValueError as e:
@@ -949,6 +988,11 @@ async def roms_backend(request):
 
 async def roms_request(request):
     body = await request.json()
+    if romdl.using_real():
+        try:
+            body["system"] = _rom_system(body.get("system"))
+        except ValueError as e:
+            return web.json_response({"error": str(e)}, status=400)
     # An explicit id skips the search entirely — that is how the UI queues a
     # specific candidate the user picked out of a result list, rather than
     # trusting "best match" a second time.
@@ -1063,11 +1107,18 @@ async def _game_index():
     if not res.get("ok"):
         raise web.HTTPBadGateway(text=res.get("error", "library.list failed"))
     favs = set(load_favorites())
+    installed = _installed_roms()
+    companion_files = {sys + "/" + f for gid, meta in installed.items()
+                       for sys in [gid.split("/", 1)[0]] for f in meta.get("files", [])
+                       if sys + "/" + f != gid}
     items = []
     for sys_name, files in sorted(res["result"]["systems"].items()):
         for f in files:
             gid = f"{sys_name}/{f}"
+            if gid in companion_files:
+                continue
             items.append({"id": gid, "system": sys_name, "file": f,
+                          "title": installed.get(gid, {}).get("title", os.path.splitext(f)[0]),
                           "path": f"/roms/{sys_name}/{f}",
                           "favorite": gid in favs})
     return items
@@ -1077,7 +1128,7 @@ def _match_games(items, query, exact):
     if exact:
         return [g for g in items if query in (g["id"], g["file"])]
     q = query.lower()
-    hits = [g for g in items if q in g["id"].lower()]
+    hits = [g for g in items if q in g["id"].lower() or q in g.get("title", "").lower()]
     if len(hits) > 1:   # prefer exact-ish hits before declaring ambiguity
         narrowed = [g for g in hits
                     if q in (g["id"].lower(), g["file"].lower(),
@@ -1255,6 +1306,9 @@ async def roms_sync(request):
     """Re-drive the delivery pipeline: retry failed queue entries and ask the
     cabinet to rescan its library."""
     retried = []
+    for entry in rom_queue:
+        if entry["status"] == "ready":
+            _register_installed_rom(entry)
     async with rom_lock:
         for entry in rom_queue:
             if entry["status"] == "error":
@@ -1262,6 +1316,8 @@ async def roms_sync(request):
                 entry["detail"] = ""
                 asyncio.get_event_loop().create_task(rom_worker(entry))
                 retried.append(entry["id"])
+    save_rom_queue()
+    await hub.rpc("state.sync", {"bundle": build_bundle()}, timeout=45)
     res = await hub.rpc("library.rescan", {})
     hub.log_event(f"roms sync: retried {len(retried)}, rescan ok={res.get('ok')}")
     return web.json_response({"retried": retried,
