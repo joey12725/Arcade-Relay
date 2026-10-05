@@ -28,7 +28,12 @@ apt-get install -y --no-install-recommends \
     ethtool \
     pipewire pipewire-pulse wireplumber pulseaudio-utils \
     python3 python3-aiohttp python3-evdev python3-pil python3-yaml \
-    udev curl ca-certificates procps
+    udev curl ca-certificates procps systemd-timesyncd
+
+# --- clock: T3 Connect rejects DPoP proofs dated >5 s ahead of this clock,
+# and a minimal Debian ships with no NTP client. 12 s of drift made every
+# laptop->cabinet T3 connection fail with a bare 401.
+systemctl enable --now systemd-timesyncd 2>/dev/null || true
 
 # --- auto-login on tty1 (no display manager, spec §5.1) ---
 useradd -m -s /bin/bash "$ARCADE_USER" 2>/dev/null || true
