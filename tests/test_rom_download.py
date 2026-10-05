@@ -86,3 +86,15 @@ def test_retained_verified_archive_reinstalls_without_source_network(source, tmp
     result = adapter.download("game")
     assert result["filename"] == "Game (USA).nes"
     assert result["source_metadata"]["sha256"] == hashlib.sha256(data).hexdigest()
+    assert result["source_reused"] is True
+
+
+def test_search_refresh_preserves_verified_source_metadata(source, monkeypatch):
+    _, data = source
+    url = "https://mirror.invalid/rom?id=123#Game.zip"
+    rid = adapter._candidate_id(url)
+    metadata = {"file_name": "Game (USA).zip", "size": len(data), "sha256": hashlib.sha256(data).hexdigest()}
+    adapter._save_cache({rid: {"title": "Game (USA).zip", "source_metadata": metadata}})
+    monkeypatch.setattr(adapter, "_run_romdl", lambda *args: [{"title": "Game (USA).zip", "url": url, "score": 135}])
+    adapter.search("Game", "nes")
+    assert adapter._load_cache()[rid]["source_metadata"] == metadata

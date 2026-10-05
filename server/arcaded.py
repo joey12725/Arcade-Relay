@@ -929,6 +929,7 @@ async def _rom_worker(entry):
         entry["source_url"] = files.get("source_url")
         entry["source_bytes"] = files.get("bytes")
         entry["source_metadata"] = files.get("source_metadata")
+        entry["source_reused"] = files.get("source_reused", False)
         entry["display_title"] = files.get("display_title")
         _register_installed_rom(entry)
         synced = await hub.rpc("state.sync", {"bundle": build_bundle()}, timeout=45)

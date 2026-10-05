@@ -264,7 +264,7 @@ def search(query, system=None, limit=10, deep=False):
         if (m.get("source") == "pkgindex" and console not in NPS_CONSOLES):
             continue
         rid = _candidate_id(url)
-        entry = {"id": rid, "title": m.get("title") or url.rsplit("/", 1)[-1],
+        entry = {**cache.get(rid, {}), "id": rid, "title": m.get("title") or url.rsplit("/", 1)[-1],
                  "system": CONSOLE_TO_SYSTEM[console], "console": console, "url": url,
                  "extra": m.get("extra", {}),
                  "source": m.get("source", "?"),
@@ -432,4 +432,5 @@ def download(rom_id, cancel=None, progress=None):
             "filename": fname, "title": entry["title"], "files": files,
             "source_url": entry["url"], "bytes": done,
             "source_metadata": source_info,
+            "source_reused": reuse,
             "display_title": entry.get("extra", {}).get("display_title")}
