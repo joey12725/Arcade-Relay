@@ -5,6 +5,10 @@ Description=Pegasus frontend
 
 [Service]
 Environment=DISPLAY=:0
+# Pegasus owns a Qt window, not an SDL window. SDL otherwise suppresses
+# controller events even while the visible Qt frontend has focus.
+Environment=SDL_JOYSTICK_ALLOW_BACKGROUND_EVENTS=1
+EnvironmentFile=-/opt/arcade/cabinet/provision/controllers/pegasus.env
 ExecStart=/usr/local/bin/pegasus-fe
 Restart=always
 RestartSec=2

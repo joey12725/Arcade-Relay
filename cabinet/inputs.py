@@ -28,6 +28,7 @@ EVDEV_BUTTON_MAP = {
     "BTN_WEST": "y", "BTN_Y": "y",
     "BTN_START": "start", "BTN_SELECT": "select",
     "BTN_TL": "l", "BTN_TR": "r",
+    "BTN_TL2": "l2", "BTN_TR2": "r2",
     "BTN_DPAD_UP": "up", "BTN_DPAD_DOWN": "down",
     "BTN_DPAD_LEFT": "left", "BTN_DPAD_RIGHT": "right",
     "KEY_UP": "up", "KEY_DOWN": "down", "KEY_LEFT": "left", "KEY_RIGHT": "right",
@@ -327,9 +328,10 @@ class EvdevSource:
     raw activity notifications. Requires /dev/input/event* devices (panel
     encoder / gamepads) — enumeration validated on hardware (A-17)."""
 
-    def __init__(self, on_key, on_activity):
+    def __init__(self, on_key, on_activity, ignore_device=None):
         self.on_key = on_key
         self.on_activity = on_activity
+        self.ignore_device = ignore_device or (lambda dev: False)
         self.devices = []
 
     def open_devices(self):
@@ -342,6 +344,9 @@ class EvdevSource:
         for path in evdev.list_devices():
             try:
                 dev = evdev.InputDevice(path)
+                if self.ignore_device(dev):
+                    dev.close()
+                    continue
                 caps = dev.capabilities()
                 if ecodes.EV_KEY in caps:
                     self.devices.append(dev)
@@ -361,18 +366,61 @@ class EvdevSource:
         import evdev
         from evdev import ecodes
 
+        held_counts = {}
+
         async def reader(dev):
+            held = set()
+
+            def emit(button, down):
+                # Releasing/unplugging one panel must not release a button
+                # still held on the other panel.
+                if down == (button in held):
+                    return
+                if down:
+                    held.add(button)
+                    held_counts[button] = held_counts.get(button, 0) + 1
+                    if held_counts[button] == 1:
+                        self.on_key(button, True)
+                else:
+                    held.remove(button)
+                    held_counts[button] -= 1
+                    if not held_counts[button]:
+                        self.on_key(button, False)
+
+            # Brook's generic PS4 HID descriptor numbers buttons sequentially;
+            # Linux's BTN_* names do not describe their physical positions.
+            brook = (dev.info.vendor, dev.info.product) == (0x0c12, 0x0c30)
+            brook_buttons = dict(enumerate(
+                ("y", "b", "a", "x", "l", "r", "l2", "r2",
+                 "select", "start", "l3", "r3"), 304))
+            hats = {ecodes.ABS_HAT0X: 0, ecodes.ABS_HAT0Y: 0}
             try:
                 async for ev in dev.async_read_loop():
+                    if ev.type == ecodes.EV_ABS:
+                        self.on_activity()
+                        if ev.code in hats:
+                            names = ("left", "right") if ev.code == ecodes.ABS_HAT0X else ("up", "down")
+                            old = hats[ev.code]
+                            if old != ev.value:
+                                if old:
+                                    emit(names[old > 0], False)
+                                if ev.value:
+                                    emit(names[ev.value > 0], True)
+                                hats[ev.code] = ev.value
+                        continue
                     if ev.type != ecodes.EV_KEY or ev.value == 2:  # no repeats
                         continue
                     code = ecodes.keys.get(ev.code) or ecodes.BTN.get(ev.code)
-                    btn = resolve_button(code)
+                    btn = brook_buttons.get(ev.code) if brook else resolve_button(code)
                     self.on_activity()
                     if btn:
-                        self.on_key(btn, ev.value == 1)
+                        emit(btn, ev.value == 1)
             except OSError:
                 pass   # device unplugged; the rescan loop drops it
+            finally:
+                for button in list(held):
+                    emit(button, False)
+                dev.close()
 
         tasks = {}
         while True:
@@ -386,8 +434,13 @@ class EvdevSource:
             for path in present - set(tasks):
                 try:
                     dev = evdev.InputDevice(path)
+                    if self.ignore_device(dev):
+                        dev.close()
+                        continue
                     if ecodes.EV_KEY in dev.capabilities():
                         tasks[path] = asyncio.create_task(reader(dev))
+                    else:
+                        dev.close()
                 except OSError:
                     continue
             self.devices = list(tasks)

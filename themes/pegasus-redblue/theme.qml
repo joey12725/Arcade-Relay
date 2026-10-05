@@ -105,6 +105,7 @@ FocusScope {
         Keys.onPressed: (event) => {
             if (api.keys.isAccept(event)) {
                 event.accepted = true;
+                if (event.isAutoRepeat) return;
                 if (currentItem) currentCollection.games.get(grid.currentIndex).launch();
             } else if (api.keys.isNextPage(event) ||
                        event.key === Qt.Key_Right && grid.currentIndex % 3 === 2) {

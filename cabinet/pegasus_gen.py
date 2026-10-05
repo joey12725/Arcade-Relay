@@ -16,7 +16,7 @@ ROMS_DIR = os.environ.get("CABD_ROMS_DIR", "/roms")
 CABD_LAUNCH = os.environ.get(
     "CABD_LAUNCH",
     "python3 " + os.path.join(os.path.dirname(os.path.abspath(__file__)),
-                              "cabd-launch"))
+                              "cabd-launch") + " --wait")
 
 SYSTEM_EXTENSIONS = {
     "nes": "nes", "snes": "sfc,smc", "genesis": "md,bin,gen",

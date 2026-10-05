@@ -25,6 +25,7 @@ import aiohttp
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import audio  # noqa: E402
 import inputs  # noqa: E402
+import panels  # noqa: E402
 import pegasus_gen  # noqa: E402
 import launcher  # noqa: E402
 import lifeline  # noqa: E402
@@ -341,9 +342,30 @@ async def input_text(text):
     return {"typed": len(text)}
 
 
+_input_wake_task = None
+
+
+async def _wake_on_input():
+    # Input can arrive while the playlist/window is still being created.
+    while ss["starting"]:
+        await asyncio.sleep(0.05)
+    await screensaver_off()
+
+
+def _on_input_activity():
+    """Real devices must wake the screen, just like the simulation FIFO."""
+    global _input_wake_task
+    activity["last"] = time.monotonic()
+    if (ss["on"] or ss["starting"]) and (_input_wake_task is None or _input_wake_task.done()):
+        _input_wake_task = asyncio.create_task(_wake_on_input())
+
+
 def _on_evdev_key(button, is_down):
     """Real-hardware key events fan out to both engines: cabinet hotkeys and
     user combo/hold bindings are detected independently and can overlap."""
+    events_buf.append((time.monotonic(), f"{button} {'down' if is_down else 'up'}"))
+    if ll["on"] and button == "a" and is_down:
+        asyncio.create_task(lifeline_restart_network())
     if combo_engine is not None:
         combo_engine.key_event(button, is_down)
     if binding_engine is not None:
@@ -353,6 +375,20 @@ def _on_evdev_key(button, is_down):
 combo_engine = None   # built in main() once state (hotkeys) is loaded
 binding_engine = None  # user combo/hold bindings from controllers/*
 virtual_pad = inputs.VirtualPad()
+panel_bridge = None
+
+
+def _on_panel_key(player, button, down):
+    events_buf.append((time.monotonic(), f"player{player}.{button} {'down' if down else 'up'}"))
+
+
+async def run_panel_bridge():
+    while True:
+        try:
+            await panel_bridge.run()
+        except OSError as exc:
+            log(f"panel bridge unavailable: {exc}; retrying")
+            await asyncio.sleep(2)
 
 
 async def on_binding(target, kind):
@@ -453,6 +489,8 @@ def build_binding_engine(system=None, rom_path=None):
     per-game layers only make sense relative to what is running."""
     global binding_engine
     entries = collect_bindings(system, rom_path)
+    if panel_bridge is not None:
+        panel_bridge.configure(entries)
     binding_engine = inputs.BindingEngine(
         entries,
         lambda target, kind: asyncio.create_task(on_binding(target, kind)))
@@ -1461,9 +1499,16 @@ async def main():
     asyncio.create_task(lifeline_loop(ws_state))
 
     # real hardware: evdev devices feed the same combo engine (A-17)
+    global panel_bridge
+    if os.environ.get("CABD_PANEL_BRIDGE") == "1":
+        panel_bridge = panels.PanelBridge(
+            collect_bindings(), lambda name: asyncio.create_task(on_action(name)),
+            _on_panel_key, _on_input_activity, log)
+        asyncio.create_task(run_panel_bridge())
     evsrc = inputs.EvdevSource(
         on_key=_on_evdev_key,
-        on_activity=lambda: activity.__setitem__("last", time.monotonic()))
+        on_activity=_on_input_activity,
+        ignore_device=panel_bridge.is_managed if panel_bridge else None)
     # Always run: the source hot-plugs, so a cabinet that boots with zero
     # controllers still picks them up the moment they are connected.
     asyncio.create_task(evsrc.run())

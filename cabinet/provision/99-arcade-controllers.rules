@@ -10,3 +10,7 @@ SUBSYSTEM=="input", ATTRS{idVendor}=="045e", ATTRS{idProduct}=="02ea", ENV{ID_IN
 SUBSYSTEM=="input", ATTRS{idVendor}=="0079", ENV{ID_INPUT_JOYSTICK}=="1", MODE="0664", GROUP="input", TAG+="uaccess"
 # Any joystick-class device: readable by the arcade session (evdev input layer)
 KERNEL=="event*", ENV{ID_INPUT_JOYSTICK}=="1", MODE="0664", GROUP="input"
+# Raw boards are consumed by the calibrated bridge; only its stable player
+# pads should occupy RetroArch ports. Both remain readable by cabd.
+SUBSYSTEM=="input", ATTRS{idVendor}=="0c12", ATTRS{idProduct}=="0c30", ENV{ID_INPUT_JOYSTICK}="0", ENV{ID_INPUT}="0", MODE="0660", GROUP="input"
+KERNEL=="uinput", SUBSYSTEM=="misc", MODE="0660", GROUP="input", OPTIONS+="static_node=uinput"

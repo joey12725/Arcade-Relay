@@ -226,10 +226,20 @@ if [ ! -d /usr/share/libretro/autoconfig/udev ]; then
     fi
 fi
 
+# Cabinet-specific profiles are not present in the upstream database.
+install -D -m 0644 "$SRC_DIR/provision/controllers/Brook_P4_Wired_Gamepad.cfg" \
+    /usr/share/libretro/autoconfig/udev/Brook_P4_Wired_Gamepad.cfg
+for profile in "$SRC_DIR"/provision/controllers/Arcade_*_Panel.cfg; do
+    install -m 0644 "$profile" /usr/share/libretro/autoconfig/udev/
+done
+
 # --- stable controller identities across reboots (spec §5.5) ---
 install -D -m 0644 "$SRC_DIR/provision/99-arcade-controllers.rules" \
     /etc/udev/rules.d/99-arcade-controllers.rules
+printf 'uinput\n' > /etc/modules-load.d/arcade-input.conf
+modprobe uinput
 udevadm control --reload 2>/dev/null || true
+udevadm trigger --subsystem-match=misc --sysname-match=uinput
 
 # re-provisioning a live machine: pick up updated unit files immediately
 # (first install: no user manager yet -> harmless no-op)

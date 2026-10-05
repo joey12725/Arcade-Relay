@@ -406,8 +406,15 @@ FocusScope {
         Keys.onPressed: (event) => {
             if (api.keys.isAccept(event)) {
                 event.accepted = true;
+                if (event.isAutoRepeat) return;
                 if (currentCollection && gameCount > 0)
                     currentCollection.games.get(grid.currentIndex).launch();
+            } else if (event.key === Qt.Key_Left) {
+                event.accepted = true;
+                if (gameCount > 0) grid.decrementCurrentIndex();
+            } else if (event.key === Qt.Key_Right) {
+                event.accepted = true;
+                if (gameCount > 0) grid.incrementCurrentIndex();
             } else if (event.key === Qt.Key_Down || api.keys.isNextPage(event)) {
                 event.accepted = true;
                 root.moveSystem(1);
