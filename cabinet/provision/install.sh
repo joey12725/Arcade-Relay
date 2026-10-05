@@ -61,6 +61,7 @@ install -d /opt/arcade
 rm -rf /opt/arcade/cabinet
 cp -r "$SRC_DIR" /opt/arcade/cabinet
 install -d /roms /saves /var/cache/arcade /var/cache/arcade-clips
+python3 "$SRC_DIR/provision/install-rom-client.py" --server "https://$SERVER_HOST"
 
 # --- systemd user units; linger so they run from boot, not first login ---
 install -d "$HOME_DIR/.config/systemd/user/default.target.wants"

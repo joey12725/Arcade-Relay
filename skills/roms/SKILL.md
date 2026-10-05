@@ -1,3 +1,8 @@
+---
+name: roms
+description: Request, download, verify, retry, or launch games on the arcade cabinet using arcadectl and the server's verified server-side ROM pipeline.
+---
+
 # Skill: roms
 
 **Purpose:** get games onto the cabinet with one command. Flow:
@@ -7,19 +12,32 @@ cabinet over the tunnel -> art alongside -> frontend library rescan.
 ## Commands
 
 ```
-arcadectl roms search "metal slug"     # candidates from ROMDL
-arcadectl roms request "metal slug 3"  # queue it; returns the queue entry
-arcadectl roms status                  # queued|downloading|delivering|ready|error
+arcadectl --json roms search "Gunstar Heroes" --system genesis
+arcadectl --json roms request "Gunstar Heroes" --system genesis
+arcadectl --json roms status            # queued|searching|downloading|delivering|ready|error
 ```
 
-## Worked example — "get Metal Slug 3 on the cabinet"
+## From the cabinet itself
+
+The cabinet's T3 Code **ROMs** project is `/roms`. Its `AGENTS.md`,
+`ROM-DOWNLOADS.md`, and `skills/arcade-roms/SKILL.md` describe the workflow.
+`/usr/local/bin/arcadectl` automatically reads `CABD_MEDIA_BASE` from
+`/etc/arcade/cabinet.env`, so cabinet-side tasks need no laptop/server SSH,
+environment export, or torrent client. The server handles downloading and
+retention; finished files arrive on the cabinet automatically.
+
+## Worked example — "get Gunstar Heroes on the cabinet"
 
 ```
-$ arcadectl roms request "metal slug 3"
-$ arcadectl roms status                # poll until "ready"; detail = cabinet path
-$ arcadectl games launch --system arcade --path /roms/arcade/Metal_Slug_3.bin
+$ arcadectl --json roms request "Gunstar Heroes" --system genesis
+$ arcadectl --json roms status         # wait for this job's status = ready
+$ arcadectl --json games launch --system genesis --path "/roms/genesis/Gunstar Heroes (USA).md"
 ```
 
-An `error` entry (e.g. link dropped mid-delivery) is re-queued by simply
-requesting the same title again — delivery is checksum-verified, so a
-half-transferred file can never be installed.
+Use full titles and an explicit supported system (`nes`, `snes`, `genesis`,
+`gb`, `gba`, `psx`, `arcade`). For ambiguity, search then request the exact
+candidate with `roms request --id <candidate-id> --system <system>`.
+Inspect `detail` on errors and use `roms retry <job-id>`. Explicit retry can
+reinstall from a retained verified archive; existing identical cabinet ROMs
+are not rewritten. Verify local hashes against the completed job, and launch
+only when the user asks to play. Preserve existing games, saves, and jobs.

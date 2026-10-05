@@ -8,12 +8,28 @@ Exit: 0 ok, 1 remote command failed (rc!=0), 2 usage, 3 server unreachable,
 import argparse
 import json
 import os
+import pathlib
 import sys
 import urllib.error
 import urllib.parse
 import urllib.request
 
-BASE = os.environ.get("ARCADED_URL", "http://localhost:8000")
+def server_url(config_path="/etc/arcade/cabinet.env"):
+    """Cabinet agents are noninteractive: don't depend on shell profiles."""
+    if os.environ.get("ARCADED_URL"):
+        return os.environ["ARCADED_URL"].rstrip("/")
+    if os.environ.get("CABD_MEDIA_BASE"):
+        return os.environ["CABD_MEDIA_BASE"].rstrip("/")
+    config = pathlib.Path(config_path)
+    if config.exists():
+        for line in config.read_text().splitlines():
+            key, sep, value = line.strip().partition("=")
+            if sep and key == "CABD_MEDIA_BASE":
+                return value.strip().strip("\"'").rstrip("/")
+    return "http://localhost:8000"
+
+
+BASE = server_url()
 
 
 def call(method, path, body=None):

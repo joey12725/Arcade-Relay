@@ -46,11 +46,38 @@ If your Jellyfin is already set up, either let arcaded use the
 
 ### 1.2 ROM pipeline
 
-`roms search/request` ships against the ROMDL contract (ASSUMPTIONS A-5) with
-a built-in fake catalog. Wire your real downloader by replacing
-`/opt/arcade/server/romdl.py`'s `search()`/`download()` — the interface is
-documented at the top of that file. Everything downstream (staging, checksum,
-tunnel delivery, rescan, `roms status`) is already real and soak-tested.
+The production pipeline uses the pinned ROMDL package, server-side
+download client's dedicated `arcade-roms` category, source-hash verification,
+archive extraction, verified cabinet delivery, and Pegasus rescan. See
+`docs/rom-download-verification-2026-10-05/README.md` for the deployed setup,
+sample verification, and retention architecture. The sim explicitly uses a
+fake backend; production does not need a hand-written replacement adapter.
+
+### 1.3 Cabinet-side T3 ROMs project
+
+Cabinet agents can submit requests to the server directly. The **ROMs**
+project is `/roms`; provision installs its `README.md`, `AGENTS.md`,
+`ROM-DOWNLOADS.md`, and `skills/arcade-roms/SKILL.md` (linked as root
+`SKILL.md` and through project-local `.agents`/`.claude` skill directories).
+
+`/usr/local/bin/arcadectl` reads `/etc/arcade/cabinet.env`'s `CABD_MEDIA_BASE`
+outside interactive shells. The provisioner seeds that URL only when the
+file does not already exist; `ARCADED_URL` remains an explicit override.
+No download client secrets or torrent client are needed on the cabinet.
+
+For an existing cabinet, install just the client and documentation from an
+updated checkout, without restarting services or running full provisioning:
+
+```sh
+sudo python3 cabinet/provision/install-rom-client.py
+cd /roms
+arcadectl --json status
+arcadectl --json roms request "Gunstar Heroes" --system genesis
+arcadectl --json roms status
+```
+
+Differing previous documentation/client files are backed up, and existing
+skill entries are preserved. The installer does not modify game/save files.
 
 ## 2. Cloudflare Tunnel (one-time, interactive)
 
