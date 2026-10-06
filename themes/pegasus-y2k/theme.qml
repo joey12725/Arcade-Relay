@@ -21,6 +21,11 @@ import "assets/gif-index.js" as GifIndex
 
 FocusScope {
     id: root
+    // Compensate for the cabinet display's horizontal overscan.
+    transform: Scale {
+        origin.x: root.width / 2; origin.y: root.height / 2
+        xScale: 0.90; yScale: 0.96
+    }
     focus: true
 
     // --- design canvas. Every size below is written in mockup pixels and

@@ -12,6 +12,7 @@ EnvironmentFile=-/opt/arcade/cabinet/provision/controllers/pegasus.env
 ExecStart=/usr/local/bin/pegasus-fe
 Restart=always
 RestartSec=2
+TimeoutStopSec=3
 
 [Install]
 WantedBy=default.target

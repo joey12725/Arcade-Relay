@@ -13,6 +13,15 @@ CONFIG = json.loads(PROFILE.read_text())
 
 
 class PanelTests(unittest.TestCase):
+    def test_unchanged_state_sync_preserves_hold(self):
+        p, events, _, _, now = self.make(2)
+        p.event(1,308,1); p.event(1,310,1)
+        now[0] = 1
+        p.configure(BINDINGS)
+        now[0] = 2.1
+        p.poll()
+        self.assertIn((1,313,1), events)
+
     def make(self, player):
         events, actions, monitor, now = [], [], [], [0.]
         panel = Panel(CONFIG['panels'][player-1], CONFIG['buttons'],

@@ -5,6 +5,7 @@ RetroArch never swaps players. Chords are evaluated separately per panel and
 Start/Select are emitted on that player's pad, not an unused third controller.
 """
 import asyncio
+import copy
 import json
 from pathlib import Path
 import time
@@ -26,8 +27,14 @@ class Panel:
         self.down = set()
         self.pulses = {}
         self.engine = BindingEngine([], self.fire, now=now)
+        self.binding_entries = None
 
     def configure(self, entries):
+        # ROM deliveries sync the whole state. An unchanged binding must
+        # not erase an in-progress Start/Select/Home hold.
+        if entries == self.binding_entries:
+            return
+        self.binding_entries = copy.deepcopy(entries)
         self.engine = BindingEngine(entries, self.fire, now=self.now)
 
     def fire(self, target, kind):

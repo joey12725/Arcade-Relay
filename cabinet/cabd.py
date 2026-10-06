@@ -850,10 +850,16 @@ async def watchdog_loop():
         await asyncio.sleep(launcher.WATCHDOG_POLL_S)
 
 
-async def file_fetch(path, dest, sha256=None):
+async def file_fetch(path, dest, sha256=None, protect_existing=False):
     """ROM/media delivery over the tunnel (spec file.*): stream to .part,
     verify checksum, atomic rename."""
     import hashlib
+    if protect_existing and os.path.exists(dest):
+        with open(dest, "rb") as f:
+            existing = hashlib.file_digest(f, "sha256").hexdigest()
+        if sha256 and existing == sha256:
+            return {"dest": dest, "bytes": os.path.getsize(dest), "sha256": existing, "cached": True}
+        raise RuntimeError(f"refusing to replace existing game with different bytes: {dest}")
     os.makedirs(os.path.dirname(dest), exist_ok=True)
     tmo = aiohttp.ClientTimeout(total=None, sock_connect=15, sock_read=120)
     h = hashlib.sha256()
@@ -954,7 +960,19 @@ async def audio_loop():
         await asyncio.sleep(1)   # pactl died (pipewire restart?) — reattach
 
 
-frontend = {"proc": None}
+frontend = {"proc": None, "reload_pending": False, "last_rescan": 0}
+
+
+async def frontend_reload_loop():
+    # Coalesce deliveries and never replace Pegasus while a game owns the screen.
+    while True:
+        await asyncio.sleep(2)
+        if (frontend["reload_pending"] and not game_lock.locked()
+                and time.monotonic() - frontend["last_rescan"] >= 10):
+            async with game_lock:
+                if game["session"] is None:
+                    frontend["reload_pending"] = False
+                    await frontend_restart()
 
 
 async def frontend_loop():
@@ -1279,8 +1297,8 @@ async def handle_req(ws, data):
     params = data.get("params") or {}
     try:
         if method == "system.exec":
-            p = subprocess.run(["/bin/sh", "-c", params["cmd"]],
-                               capture_output=True, text=True, timeout=30)
+            p = await asyncio.to_thread(subprocess.run, ["/bin/sh", "-c", params["cmd"]],
+                                        capture_output=True, text=True, timeout=30)
             result = {"rc": p.returncode, "stdout": p.stdout, "stderr": p.stderr}
         elif method == "game.launch":
             result = await game_launch(params["system"], params["path"],
@@ -1366,7 +1384,7 @@ async def handle_req(ws, data):
             result = {"suppressed_for_s": secs}
         elif method == "file.fetch":
             result = await file_fetch(params["path"], params["dest"],
-                                      params.get("sha256"))
+                                      params.get("sha256"), params.get("protect_existing", False))
         elif method == "system.screenshot":
             import base64
             p = subprocess.run(
@@ -1388,13 +1406,11 @@ async def handle_req(ws, data):
                                            state["bundle"])
             # --no-block: the RPC must answer inside the server's deadline;
             # pegasus's own startup time is not this request's problem.
-            await asyncio.to_thread(
-                subprocess.run,
-                ["systemctl", "--user", "--no-block", "restart",
-                 "pegasus.service"],
-                capture_output=True, timeout=10)
-            log(f"library rescan: {len(meta)} metadata files; pegasus restarted")
-            result = {"rescanned": True, "metadata_files": len(meta)}
+            frontend["reload_pending"] = True
+            frontend["last_rescan"] = time.monotonic()
+            log(f"library rescan: {len(meta)} metadata files; menu reload queued")
+            result = {"rescanned": True, "metadata_files": len(meta),
+                      "frontend_reload_pending": True}
         elif method == "state.sync":
             bundle = params["bundle"]
             if not isinstance(bundle, dict):
@@ -1503,6 +1519,7 @@ async def main():
     init_input_fifo()
     await local_server()
     asyncio.create_task(frontend_loop())
+    asyncio.create_task(frontend_reload_loop())
     asyncio.create_task(watchdog_loop())
     asyncio.create_task(audio_loop())
     asyncio.create_task(fifo_reader())
