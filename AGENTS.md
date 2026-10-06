@@ -23,6 +23,7 @@ arcadectl status                          # online? what's running?
 arcadectl games launch --system snes --path /roms/snes/x.sfc | kill | running
 arcadectl volume get | set --master 70 | set --class trailers --mute
 arcadectl screensaver status|on|off | set --brightness 60 --idle 300
+arcadectl screensaver set --subtitles on|off # English subs, best track auto
 arcadectl screensaver sources | enable-source <id> | disable-source <id>
 arcadectl screensaver disable --for 2h
 arcadectl screensaver remove-source <id>  # off the rotation board entirely

@@ -158,7 +158,11 @@ game = {"session": None, "rom": None, "system": None,
 # lifeline all contend for the same display. Separate locks let an in-flight
 # screensaver start land on top of a lifeline that had just come up.
 game_lock = asyncio.Lock()
-ss = {"on": False, "suppress_until": 0.0, "starting": False}
+ss = {"on": False, "suppress_until": 0.0, "starting": False,
+      # screensaver.set values with their arrival time: one that lands
+      # while a start is in flight is re-applied once mpv is up (the start
+      # used the playlist's older snapshot)
+      "live": {}}
 ll = {"on": False, "last_sync": None, "recovery": {}}
 
 
@@ -507,7 +511,7 @@ async def clips_sync_loop():
         await asyncio.sleep(15)
 
 
-async def screensaver_on(playlist, brightness):
+async def screensaver_on(playlist, brightness, subtitles=False):
     async with game_lock:   # never fight a game launch for the screen
         if game["session"] is not None:
             return {"screensaver": False, "note": "game running"}
@@ -522,10 +526,27 @@ async def screensaver_on(playlist, brightness):
         # never worth stalling a player's launch. If the window shows up
         # later the watchdog's heal path picks it up; if it never does,
         # start() kills it.
-        ok = await asyncio.to_thread(screensaver.start, playlist, brightness, 4)
+        t0 = time.monotonic()
+        ok = await asyncio.to_thread(screensaver.start, playlist, brightness, 4,
+                                     subtitles=bool(subtitles))
         ss["on"] = bool(ok)
+        if ok:
+            await _apply_raced_settings(t0)
         log(f"screensaver on -> {ss['on']}")
         return {"screensaver": ss["on"]}
+
+
+async def _apply_raced_settings(since):
+    for key, (at, value) in list(ss["live"].items()):
+        if at < since:
+            continue
+        try:
+            if key == "brightness":
+                await asyncio.to_thread(screensaver.set_brightness, value)
+            elif key == "subtitles":
+                await asyncio.to_thread(screensaver.set_subtitles, value)
+        except (OSError, TimeoutError) as e:
+            log(f"screensaver: {key} change during start not applied: {e!r}")
 
 
 async def screensaver_dim_clock(brightness):
@@ -618,7 +639,8 @@ async def _start_screensaver_now():
             await screensaver_dim_clock(cfg.get("brightness", 80))
         elif clips:
             log(f"idle: {why}; local clips fallback")
-            await screensaver_on(clips, cfg.get("brightness", 80))
+            await screensaver_on(clips, cfg.get("brightness", 80),
+                                 cfg.get("subtitles", False))
         else:
             log(f"idle: {why}; no fallback available")
             await asyncio.sleep(5)
@@ -630,7 +652,8 @@ async def _start_screensaver_now():
                              + "/screensaver/playlist") as r:
                 pl = await r.json()
         if pl.get("playlist"):
-            await screensaver_on(pl["playlist"], pl.get("brightness", 80))
+            await screensaver_on(pl["playlist"], pl.get("brightness", 80),
+                                 pl.get("subtitles", False))
         else:
             # A reachable server with zero enabled sources returns an EMPTY
             # playlist. That used to fall through silently: nothing started,
@@ -1263,7 +1286,8 @@ async def handle_req(ws, data):
             result = {"devices": await asyncio.to_thread(inputs.list_devices)}
         elif method == "screensaver.on":
             result = await screensaver_on(params.get("playlist", []),
-                                          params.get("brightness", 80))
+                                          params.get("brightness", 80),
+                                          params.get("subtitles", False))
         elif method == "screensaver.on_fallback":
             # Forced on with no server playlist: same decision the idle path
             # makes — including honoring the `fallback:` config key, which
@@ -1279,18 +1303,30 @@ async def handle_req(ws, data):
                 result = {"screensaver": False, "note": "fallback is 'off'"}
             elif clips:
                 result = await screensaver_on(clips,
-                                              params.get("brightness", 80))
+                                              params.get("brightness", 80),
+                                              params.get("subtitles", False))
                 log("screensaver forced on from local clips (no sources)")
             else:
                 result = {"screensaver": False, "note": "no cached clips"}
         elif method == "screensaver.off":
             result = await screensaver_off()
         elif method == "screensaver.set":
-            if ss["on"]:
-                await asyncio.to_thread(screensaver.set_brightness,
-                                        params["brightness"])
-            result = {"screensaver": ss["on"],
-                      "brightness": params["brightness"]}
+            # either key alone is a valid request: the server sends only
+            # what changed
+            result = {"screensaver": ss["on"]}
+            for key in ("brightness", "subtitles"):
+                if key in params:
+                    ss["live"][key] = (time.monotonic(), params[key])
+            if "brightness" in params:
+                if ss["on"]:
+                    await asyncio.to_thread(screensaver.set_brightness,
+                                            params["brightness"])
+                result["brightness"] = params["brightness"]
+            if "subtitles" in params:
+                if ss["on"]:
+                    await asyncio.to_thread(screensaver.set_subtitles,
+                                            params["subtitles"])
+                result["subtitles"] = bool(params["subtitles"])
         elif method == "lifeline.on":
             result = await lifeline_on()
         elif method == "lifeline.off":
