@@ -12,6 +12,8 @@ Env:
   CABD_BACKOFF_CAP    default 10 (seconds; sim uses 2 for fast tests)
 """
 import asyncio
+import contextlib
+import glob
 import json
 import os
 import random
@@ -161,6 +163,9 @@ game = {"session": None, "rom": None, "system": None,
 # screensaver start land on top of a lifeline that had just come up.
 game_lock = asyncio.Lock()
 ss = {"on": False, "suppress_until": 0.0, "starting": False,
+      # active playlist (server's stored name, None = default rotation) the
+      # running screensaver was started from; see recheck_screensaver_playlist
+      "playlist": None,
       # screensaver.set values with their arrival time: one that lands
       # while a start is in flight is re-applied once mpv is up (the start
       # used the playlist's older snapshot)
@@ -504,6 +509,32 @@ def build_binding_engine(system=None, rom_path=None):
             + "; ".join(binding_engine.errors[:3]))
     return binding_engine
 CLIPS_DIR = os.environ.get("CABD_CLIPS_DIR", "/var/cache/arcade-clips")
+# Bumped whenever the cache is cleared, so a download that started before the
+# clear (from the previous playlist) is discarded instead of landing after it.
+clips_gen = {"n": 0}
+
+
+def playlist_cache_key(bundle):
+    """What the offline clips depend on: the active playlist's name and
+    members, or None for the default rotation (whose source toggles have
+    never invalidated the cache)."""
+    cfg = bundle.get("screensaver.yaml")
+    name = active_playlist_name(bundle)
+    if name is None:
+        return None
+    members = ha_local.integrations.normalize_playlists(cfg.get("playlists"))[name]
+    return (name.lower(), tuple(sorted(members["sources"])))
+
+
+def active_playlist_name(bundle):
+    return ha_local.integrations.resolve_active(bundle.get("screensaver.yaml"))
+
+
+def clear_clip_cache():
+    clips_gen["n"] += 1
+    for f in glob.glob(os.path.join(CLIPS_DIR, "clip-*")):
+        with contextlib.suppress(OSError):
+            os.unlink(f)
 
 
 def local_clips():
@@ -522,6 +553,7 @@ async def clips_sync_loop():
     while True:
         try:
             if len(local_clips()) < 2:
+                gen = clips_gen["n"]
                 tmo = aiohttp.ClientTimeout(total=None, sock_connect=10,
                                             sock_read=60)
                 async with aiohttp.ClientSession(timeout=tmo) as s:
@@ -542,7 +574,14 @@ async def clips_sync_loop():
                         async with s.get(screensaver.MEDIA_BASE + path) as up:
                             with open(dst + ".part", "wb") as f:
                                 async for chunk in up.content.iter_chunked(65536):
+                                    if clips_gen["n"] != gen:
+                                        break   # leaving the request stops the transcode
                                     f.write(chunk)
+                        if clips_gen["n"] != gen:
+                            with contextlib.suppress(OSError):
+                                os.unlink(dst + ".part")
+                            log("clips sync: playlist changed mid-download; discarded")
+                            break
                         os.replace(dst + ".part", dst)
                         log(f"clip cached: {dst} ({os.path.getsize(dst)} bytes)")
         except Exception as e:  # noqa: BLE001
@@ -550,10 +589,20 @@ async def clips_sync_loop():
         await asyncio.sleep(15)
 
 
-async def screensaver_on(playlist, brightness, subtitles=False):
+def _restart_unwanted(only_if_on):
+    """For a restart (only_if_on): the screensaver was turned off or
+    suppressed while the new playlist was being fetched. Caller holds
+    game_lock, which off/disable also take, so this can't race them."""
+    return only_if_on and (not ss["on"] or time.monotonic() < ss["suppress_until"])
+
+
+async def screensaver_on(playlist, brightness, subtitles=False,
+                         playlist_name=None, only_if_on=False):
     async with game_lock:   # never fight a game launch for the screen
         if game["session"] is not None:
             return {"screensaver": False, "note": "game running"}
+        if _restart_unwanted(only_if_on):
+            return {"screensaver": False, "note": "not running"}
         if ll["on"]:
             # §5.11: lifeline is the ONLY on-cabinet repair surface. Attract
             # video stacking on top of it during an outage is exactly when
@@ -570,6 +619,7 @@ async def screensaver_on(playlist, brightness, subtitles=False):
                                      subtitles=bool(subtitles))
         ss["on"] = bool(ok)
         if ok:
+            ss["playlist"] = playlist_name
             await _apply_raced_settings(t0)
         log(f"screensaver on -> {ss['on']}")
         return {"screensaver": ss["on"]}
@@ -588,15 +638,19 @@ async def _apply_raced_settings(since):
             log(f"screensaver: {key} change during start not applied: {e!r}")
 
 
-async def screensaver_dim_clock(brightness):
+async def screensaver_dim_clock(brightness, playlist_name=None, only_if_on=False):
     """`fallback: dim_clock`: same lifecycle/flag as media playback."""
     async with game_lock:
         if game["session"] is not None:
             return {"screensaver": False, "note": "game running"}
         if ll["on"]:
             return {"screensaver": False, "note": "lifeline active"}
+        if _restart_unwanted(only_if_on):
+            return {"screensaver": False, "note": "not running"}
         ok = await asyncio.to_thread(screensaver.start_dim_clock, brightness)
         ss["on"] = bool(ok)
+        if ok:
+            ss["playlist"] = playlist_name
         log(f"screensaver dim clock -> {ss['on']}")
         return {"screensaver": ss["on"], "mode": "dim_clock"}
 
@@ -639,7 +693,7 @@ async def idle_loop():
         await start_screensaver_now()
 
 
-async def start_screensaver_now():
+async def start_screensaver_now(only_if_on=False):
     """Shared by idle timeout and the force combo/CLI: playlist over the
     tunnel, local clip fallback when unreachable (prime directive 6).
 
@@ -652,12 +706,35 @@ async def start_screensaver_now():
         return {"screensaver": False, "note": "already starting"}
     ss["starting"] = True
     try:
-        return await _start_screensaver_now()
+        return await _start_screensaver_now(only_if_on)
     finally:
         ss["starting"] = False
 
 
-async def _start_screensaver_now():
+async def recheck_screensaver_playlist(settle_s=20):
+    """After a state.sync switches playlists, make sure a running screensaver
+    shows the new one. The server restarts it itself when its heartbeat says
+    the screensaver is on — but a start still in flight, or one that began
+    after the last heartbeat, is invisible to it. Waiting a while lets the
+    server's restart land first, so the normal path restarts only once."""
+    await asyncio.sleep(settle_s)
+    for _ in range(30):
+        if not ss["starting"]:
+            break
+        await asyncio.sleep(1)
+    want = active_playlist_name(state["bundle"])
+    if ss["on"] and not ss["starting"] and ss["playlist"] != want:
+        log(f"screensaver: playing playlist {ss['playlist']!r}, state says "
+            f"{want!r}; restarting")
+        await start_screensaver_now(only_if_on=True)
+        if ss["on"] and ss["playlist"] != want:
+            # the new playlist gave nothing to play: leaving the old one on
+            # screen would contradict the switch (the server does the same)
+            log("screensaver: new playlist has nothing to play; stopping")
+            await screensaver_off()
+
+
+async def _start_screensaver_now(only_if_on=False):
     cfg = state["bundle"].get("screensaver.yaml") or {}
 
     async def use_local_clips(why):
@@ -670,16 +747,17 @@ async def _start_screensaver_now():
         cfg = state["bundle"].get("screensaver.yaml") or {}
         fallback = cfg.get("fallback", "local_clips")
         clips = local_clips()
+        name = active_playlist_name(state["bundle"])
         if fallback == "off":
             log(f"idle: {why}; fallback is 'off', staying on the frontend")
             await asyncio.sleep(5)
         elif fallback == "dim_clock":
             log(f"idle: {why}; dim clock fallback")
-            await screensaver_dim_clock(cfg.get("brightness", 80))
+            await screensaver_dim_clock(cfg.get("brightness", 80), name, only_if_on)
         elif clips:
             log(f"idle: {why}; local clips fallback")
             await screensaver_on(clips, cfg.get("brightness", 80),
-                                 cfg.get("subtitles", False))
+                                 cfg.get("subtitles", False), name, only_if_on)
         else:
             log(f"idle: {why}; no fallback available")
             await asyncio.sleep(5)
@@ -692,7 +770,8 @@ async def _start_screensaver_now():
                 pl = await r.json()
         if pl.get("playlist"):
             await screensaver_on(pl["playlist"], pl.get("brightness", 80),
-                                 pl.get("subtitles", False))
+                                 pl.get("subtitles", False),
+                                 pl.get("active_playlist"), only_if_on)
         else:
             # A reachable server with zero enabled sources returns an EMPTY
             # playlist. That used to fall through silently: nothing started,
@@ -1338,8 +1417,12 @@ async def handle_req(ws, data):
         elif method == "screensaver.on":
             result = await screensaver_on(params.get("playlist", []),
                                           params.get("brightness", 80),
-                                          params.get("subtitles", False))
+                                          params.get("subtitles", False),
+                                          params.get("active_playlist"),
+                                          bool(params.get("only_if_on")))
         elif method == "screensaver.on_fallback":
+            name = active_playlist_name(state["bundle"])
+            only_if_on = bool(params.get("only_if_on"))
             # Forced on with no server playlist: same decision the idle path
             # makes — including honoring the `fallback:` config key, which
             # this branch previously ignored (it played clips even when the
@@ -1347,15 +1430,18 @@ async def handle_req(ws, data):
             cfg = state["bundle"].get("screensaver.yaml") or {}
             fallback = cfg.get("fallback", "local_clips")
             clips = local_clips()
-            if fallback == "dim_clock":
+            if only_if_on and not ss["on"]:
+                result = {"screensaver": False, "note": "not running"}
+            elif fallback == "dim_clock":
                 result = await screensaver_dim_clock(
-                    params.get("brightness", 80))
+                    params.get("brightness", 80), name, only_if_on)
             elif fallback == "off":
                 result = {"screensaver": False, "note": "fallback is 'off'"}
             elif clips:
                 result = await screensaver_on(clips,
                                               params.get("brightness", 80),
-                                              params.get("subtitles", False))
+                                              params.get("subtitles", False),
+                                              name, only_if_on)
                 log("screensaver forced on from local clips (no sources)")
             else:
                 result = {"screensaver": False, "note": "no cached clips"}
@@ -1452,7 +1538,18 @@ async def handle_req(ws, data):
             if not isinstance(bundle, dict):
                 raise ValueError(f"bundle must be a dict, got {type(bundle).__name__}")
             save_state_cache(bundle)
+            before = playlist_cache_key(state["bundle"])
+            after = playlist_cache_key(bundle)
+            switched = active_playlist_name(state["bundle"]) != active_playlist_name(bundle)
             state["bundle"] = bundle
+            if switched:
+                asyncio.create_task(recheck_screensaver_playlist())
+            if before != after:
+                # the offline clips came from the old playlist; drop them so
+                # the next sync refills from the new one instead of showing
+                # e.g. anime on a Christmas-only cabinet during an outage
+                clear_clip_cache()
+                log(f"screensaver playlist {before!r} -> {after!r}: clip cache cleared")
             ll["last_sync"] = time.strftime("%H:%M:%SZ", time.gmtime())
             build_combo_engine()   # hotkeys may have changed
             meta = await asyncio.to_thread(pegasus_gen.render_all, bundle)
@@ -1477,6 +1574,19 @@ def cabinet_snapshot():
     return {"running": game["rom"], "system": game["system"],
             "started_at": game["started_at"], "elapsed_s": elapsed_s(),
             "screensaver": ss["on"], "lifeline": ll["on"]}
+
+
+async def ha_select_playlist(name):
+    """Home Assistant picked a screensaver playlist. Playlists live on the
+    server, so hand the choice there; the new state syncs back to us."""
+    try:
+        tmo = aiohttp.ClientTimeout(total=10)
+        async with aiohttp.ClientSession(timeout=tmo) as s:
+            async with s.post(screensaver.MEDIA_BASE + "/screensaver/playlists/select",
+                              json={"name": name}) as r:
+                log(f"local Home Assistant: playlist {name!r} -> HTTP {r.status}")
+    except Exception as e:  # noqa: BLE001 — server unreachable; nothing to do
+        log(f"local Home Assistant: playlist {name!r} failed: {e!r}")
 
 
 async def ha_dispatch(method):
@@ -1565,7 +1675,9 @@ async def main():
     asyncio.create_task(metrics_loop())
     asyncio.create_task(ha_local.run(
         lambda: state["bundle"].get("integrations.yaml", {}),
-        cabinet_snapshot, health_report, ha_dispatch, log))
+        cabinet_snapshot, health_report, ha_dispatch, log,
+        lambda: state["bundle"].get("screensaver.yaml") or {},
+        ha_select_playlist))
     asyncio.create_task(lifeline_loop(ws_state))
 
     # real hardware: evdev devices feed the same combo engine (A-17)

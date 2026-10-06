@@ -27,6 +27,8 @@ arcadectl screensaver set --subtitles on|off # English subs, best track auto
 arcadectl screensaver sources | enable-source <id> | disable-source <id>
 arcadectl screensaver disable --for 2h
 arcadectl screensaver remove-source <id>  # off the rotation board entirely
+arcadectl screensaver playlists list | select <name>|all   # christmas, nsfw...
+arcadectl screensaver playlists create <n> --source <id> | add|remove <n> <id>... | delete <n>
 arcadectl controls map --scope system:snes --set a=b | save-preset <n> | load-preset <n>
 arcadectl controls bindings --scope global | unbind --scope global <btn>
 arcadectl controls scopes | devices       # what can be bound, and on what

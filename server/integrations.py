@@ -101,7 +101,8 @@ class Snapshot:
     """What the cabinet is doing, in the shape both publishers want."""
 
     __slots__ = ("online", "running", "system", "title", "started_at",
-                 "elapsed_s", "screensaver", "lifeline", "art_url")
+                 "elapsed_s", "screensaver", "lifeline", "art_url",
+                 "playlist", "playlists")
 
     def __init__(self, **kw):
         for k in self.__slots__:
@@ -128,7 +129,62 @@ class Snapshot:
             "state": self.state}
 
 
-def snapshot_from(cab_state, online, base_url=None, art_path=None):
+ALL_SHOWS = "All shows"     # the select option meaning "no playlist"
+
+
+def normalize_playlists(raw):
+    """screensaver.yaml `playlists:` as {str name: {"sources": [str id]}}.
+
+    Shared by the server and the cabinet, which both read a file the owner
+    may hand-edit: a bare list (or single id) is taken as the member list,
+    names are trimmed, and anything unusable becomes empty, not a crash.
+    """
+    if not isinstance(raw, dict):
+        return {}
+    out = {}
+    for name, value in raw.items():
+        name = "" if name is None else str(name).strip()
+        if not name:
+            continue
+        members = value.get("sources") if isinstance(value, dict) else value
+        if isinstance(members, (str, int)) and not isinstance(members, bool):
+            members = [members]
+        entry = dict(value) if isinstance(value, dict) else {}
+        entry["sources"] = ([str(m) for m in members if m is not None]
+                            if isinstance(members, list) else [])
+        # names are case-insensitive, so " Xmas" and "xmas" are one playlist:
+        # merge rather than let a later write drop one of them
+        same = next((k for k in out if k.lower() == name.lower()), None)
+        if same is None:
+            out[name] = entry
+        else:
+            out[same]["sources"] = list(dict.fromkeys(
+                out[same]["sources"] + entry["sources"]))
+    return out
+
+
+def resolve_active(screensaver_cfg):
+    """Stored name of the active playlist, or None for the default rotation
+    (unset, or naming a playlist that doesn't exist). The one resolver both
+    the server and the cabinet use, so they never disagree on what plays."""
+    cfg = screensaver_cfg if isinstance(screensaver_cfg, dict) else {}
+    want = cfg.get("active_playlist")
+    want = "" if want is None else str(want).strip().lower()
+    if not want:
+        return None
+    return next((n for n in normalize_playlists(cfg.get("playlists"))
+                 if n.lower() == want), None)
+
+
+def playlist_fields(screensaver_cfg):
+    """(active label, option labels) for the Home Assistant playlist select."""
+    cfg = screensaver_cfg if isinstance(screensaver_cfg, dict) else {}
+    names = sorted(normalize_playlists(cfg.get("playlists")), key=str.lower)
+    return resolve_active(cfg) or ALL_SHOWS, [ALL_SHOWS] + names
+
+
+def snapshot_from(cab_state, online, base_url=None, art_path=None,
+                  screensaver_cfg=None):
     running = cab_state.get("running")
     title = system = None
     if running:
@@ -140,7 +196,9 @@ def snapshot_from(cab_state, online, base_url=None, art_path=None):
     art = None
     if base_url and art_path:
         art = base_url.rstrip("/") + art_path
+    playlist, playlists = playlist_fields(screensaver_cfg)
     return Snapshot(online=online, running=running, system=system, title=title,
+                    playlist=playlist, playlists=playlists,
                     started_at=cab_state.get("started_at"),
                     elapsed_s=cab_state.get("elapsed_s"),
                     screensaver=bool(cab_state.get("screensaver")),
@@ -263,6 +321,7 @@ class HomeAssistantPublisher:
         self.on_command = on_command
         self.client = None
         self._announced = False
+        self.playlist_options = [ALL_SHOWS]
 
     @property
     def enabled(self):
@@ -319,6 +378,18 @@ class HomeAssistantPublisher:
              "value_template": "{{ 'ON' if value_json.screensaver else 'OFF' }}",
              "command_topic": self.topic("screensaver/set"),
              "icon": "mdi:television-shimmer"},
+        ))
+        # Which playlist the screensaver draws from; options track the
+        # playlists defined on the server (see publish()).
+        out.append((
+            f"{self.prefix}/select/{self.node}/playlist/config",
+            {"name": "Screensaver playlist", "unique_id": f"{self.node}_playlist",
+             "device": dev, "availability": avail,
+             "state_topic": state_t,
+             "value_template": "{{ value_json.playlist }}",
+             "command_topic": self.topic("playlist/set"),
+             "options": list(self.playlist_options),
+             "icon": "mdi:playlist-play"},
         ))
         for key, name, unit, icon, cls in (
             ("title", "Now playing", None, "mdi:gamepad-variant", None),
@@ -388,6 +459,7 @@ class HomeAssistantPublisher:
         self._announced = False
         client.subscribe(self.topic("command"))
         client.subscribe(self.topic("screensaver/set"))
+        client.subscribe(self.topic("playlist/set"))
         client.subscribe(f"{self.prefix}/status")
         client.publish(self.topic("availability"), "online", qos=1, retain=True)
         self.log("home assistant: MQTT connected")
@@ -409,7 +481,8 @@ class HomeAssistantPublisher:
         except Exception:  # noqa: BLE001
             return
         leaf = msg.topic.rsplit("/", 1)[-1]
-        kind = "screensaver" if msg.topic.endswith("screensaver/set") else "media"
+        kind = ("screensaver" if msg.topic.endswith("screensaver/set")
+                else "playlist" if msg.topic.endswith("playlist/set") else "media")
         self.on_command(kind, payload, leaf)
 
     def announce(self):
@@ -423,6 +496,11 @@ class HomeAssistantPublisher:
     def publish(self, snap, health=None):
         if self.client is None:
             return
+        if snap.playlists and snap.playlists != self.playlist_options:
+            # a playlist was added or removed: re-announce so HA's dropdown
+            # gets the new option list
+            self.playlist_options = list(snap.playlists)
+            self._announced = False
         self.announce()
         m = ((health or {}).get("metrics") or {}).get("current") or {}
         mem_pct = None

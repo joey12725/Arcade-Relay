@@ -68,6 +68,11 @@ update() {
 # Catch up before serving, so a restart for any reason lands on current code.
 update || true
 
+# The image bakes arcadectl in at build time, so without this the CLI inside
+# the container lags the checkout until the next image rebuild.
+install -m 0755 "$SRC/server/arcadectl" /usr/local/bin/arcadectl \
+    || log "WARNING: could not refresh /usr/local/bin/arcadectl from the checkout"
+
 if [ "${ARCADE_AUTO_UPDATE:-1}" != "0" ]; then
     log "watching origin/$BRANCH every ${INTERVAL}s"
     (

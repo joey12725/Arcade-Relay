@@ -20,6 +20,7 @@ import re
 import subprocess
 import tempfile
 import time
+import urllib.error
 import urllib.parse
 import uuid
 
@@ -568,6 +569,11 @@ def load_screensaver():
     # media_proxy chooses the track (server/subtitles.py), the cabinet
     # shows or hides it
     d.setdefault("subtitles", False)
+    # Named sets of shows/movies ("christmas", "halloween", "sfw"...). With
+    # `active_playlist` unset the rotation is every enabled source, as ever;
+    # with one active, the rotation is exactly that playlist's members.
+    d["playlists"] = integrations.normalize_playlists(d.get("playlists"))
+    d["active_playlist"] = integrations.resolve_active(d)
     return d
 
 
@@ -575,6 +581,25 @@ def source_id(s):
     """Sources were keyed by `jellyfin_id` before the Plex migration; accept
     either so an existing state repo keeps working."""
     return s.get("plex_id") or s.get("jellyfin_id")
+
+
+def find_playlist(cfg, name):
+    """Canonical stored name for `name` (case-insensitive), or None."""
+    want = str(name or "").strip().lower()
+    for stored in cfg["playlists"]:
+        if stored.lower() == want:
+            return stored
+    return None
+
+
+def playlist_members(cfg, name):
+    return list((cfg["playlists"].get(name) or {}).get("sources") or [])
+
+
+def active_playlist(cfg):
+    """The active playlist's stored name, or None for the default rotation
+    (also None if it names a playlist that no longer exists)."""
+    return integrations.resolve_active(cfg)
 
 
 async def screensaver_sources(request):
@@ -615,19 +640,41 @@ async def screensaver_set_source(request):
     return web.json_response(cfg)
 
 
-async def screensaver_playlist(request):
+_reported_missing_sources = set()
+
+
+async def screensaver_playlist(request=None):
     """Stream URLs (via our /media proxy) for all enabled sources, 480p cap.
     The cabinet reaches these through the same tunnel path as everything
     else (SCR-1)."""
     cfg = load_screensaver()
     lib = {i["id"]: i for i in (await plex.items())}
     entries = []
-    for si, src in enumerate(cfg["sources"]):
-        if not src.get("enabled"):
-            continue
-        sid = source_id(src)
+    active = active_playlist(cfg)
+    if active:
+        # A playlist is self-contained: its members play whether or not they
+        # are switched on in the default rotation, so a Christmas movie never
+        # has to be "enabled" (and leak into everyday shuffle) to be in one.
+        chosen = playlist_members(cfg, active)
+    else:
+        chosen = [source_id(s) for s in cfg["sources"] if s.get("enabled")]
+    for si, sid in enumerate(chosen):
         meta = lib.get(sid) or {}
-        for idx, vid in enumerate(await plex.episodes_of(sid)):
+        try:
+            vids = await plex.episodes_of(sid)
+        except urllib.error.HTTPError as e:
+            # A title deleted from Plex must not take the whole rotation down
+            # with it; any other Plex trouble still fails the request, as it
+            # always has. Reported once per id: the cabinet polls every 15 s.
+            if e.code != 404:
+                raise
+            if sid not in _reported_missing_sources:
+                _reported_missing_sources.add(sid)
+                hub.log_event(f"screensaver: skipped source {sid} — not found "
+                              "in Plex (reported once)")
+            continue
+        _reported_missing_sources.discard(sid)
+        for idx, vid in enumerate(vids):
             entries.append({"id": f"/media/{vid}", "source_id": sid,
                             "source_type": meta.get("type", "Series"),
                             "index": idx, "source_index": si})
@@ -639,6 +686,7 @@ async def screensaver_playlist(request):
     out = shuffle.order(entries, policy,
                         movies_as_series=bool(cfg.get("movies_as_series", True)))
     return web.json_response({"playlist": out,
+                              "active_playlist": active,
                               "brightness": cfg["brightness"],
                               "mode": cfg["mode"],
                               "shuffle": policy,
@@ -878,39 +926,261 @@ async def screensaver_disable(request):
     return web.json_response(res["result"])
 
 
+async def screensaver_start(request=None, only_if_on=False):
+    """Start the screensaver from the current playlist. Returns
+    (cabinet result, None) or (None, error response). `only_if_on` makes it a
+    restart: the cabinet declines (note "not running") if the screensaver was
+    turned off or suppressed while the playlist was being built."""
+    pl = json.loads((await screensaver_playlist(request)).text)
+    if only_if_on:
+        pl["only_if_on"] = True
+    if not pl.get("playlist"):
+        # No enabled sources. The cabinet's idle path falls back to its
+        # local clip cache here, so forcing it on must too — otherwise
+        # the same state gives attract mode on idle but an error from
+        # the button, which is just confusing. cabd reports whether the
+        # fallback actually had clips.
+        res = await hub.rpc("screensaver.on_fallback", pl)
+        if res.get("ok") and not res["result"].get("screensaver") \
+                and res["result"].get("note") != "not running":
+            # cabd says WHY it declined (game running, lifeline up,
+            # fallback disabled, no clips); relaying its own note beats
+            # a canned "enable a source" that may fix nothing.
+            note = res["result"].get("note", "")
+            hint = ("no enabled screensaver sources and no cached clips"
+                    if note == "no cached clips" else
+                    f"screensaver not started: {note}")
+            active = pl.get("active_playlist")
+            if note in ("no cached clips", "") and active:
+                what = ("has nothing Plex can play (its ids are no longer in "
+                         "the library)"
+                         if playlist_members(load_screensaver(), active)
+                         else "is empty")
+                hint = (f"playlist {active!r} {what} — add to it with "
+                        f"`arcadectl screensaver playlists add {active} <id>` "
+                        "or `playlists select all`")
+            elif note in ("no cached clips", ""):
+                hint += (" — enable one with `arcadectl screensaver "
+                         "enable-source <id>`")
+            return None, web.json_response({"error": hint}, status=400)
+        return res, None
+    return await hub.rpc("screensaver.on", pl), None
+
+
 async def screensaver_cmd(request):
     action = request.match_info["action"]
     if action not in ("on", "off"):
         return web.json_response({"error": "on|off"}, status=400)
     if action == "on":
-        pl = json.loads((await screensaver_playlist(request)).text)
-        if not pl.get("playlist"):
-            # No enabled sources. The cabinet's idle path falls back to its
-            # local clip cache here, so forcing it on must too — otherwise
-            # the same state gives attract mode on idle but an error from
-            # the button, which is just confusing. cabd reports whether the
-            # fallback actually had clips.
-            res = await hub.rpc("screensaver.on_fallback", pl)
-            if res.get("ok") and not res["result"].get("screensaver"):
-                # cabd says WHY it declined (game running, lifeline up,
-                # fallback disabled, no clips); relaying its own note beats
-                # a canned "enable a source" that may fix nothing.
-                note = res["result"].get("note", "")
-                hint = ("no enabled screensaver sources and no cached clips"
-                        if note == "no cached clips" else
-                        f"screensaver not started: {note}")
-                if note in ("no cached clips", ""):
-                    hint += (" — enable one with `arcadectl screensaver "
-                             "enable-source <id>`")
-                return web.json_response({"error": hint}, status=400)
-        else:
-            res = await hub.rpc("screensaver.on", pl)
+        async with _restart_lock:   # never interleave with a playlist switch
+            res, err = await screensaver_start(request)
+        if err is not None:
+            return err
     else:
         res = await hub.rpc("screensaver.off", {})
     if not res.get("ok"):
         return web.json_response(res, status=500)
     hub.log_event(f"screensaver {action}")
     return web.json_response(res["result"])
+
+
+# ------------------------------------------------------ screensaver playlists
+
+# "all"/"default" mean the default rotation; the rest are values Home
+# Assistant's select renders as a missing state rather than an option.
+RESERVED_PLAYLIST_NAMES = ("all", "all shows", "default", "none", "unknown",
+                           "unavailable")
+
+
+def _playlist_view(cfg, names):
+    active = active_playlist(cfg)
+    return {"active": active,
+            "playlists": [
+                {"name": n,
+                 "active": n == active,
+                 "sources": [{"id": sid, "name": names.get(sid)}
+                             for sid in playlist_members(cfg, n)]}
+                for n in sorted(cfg["playlists"], key=str.lower)]}
+
+
+async def _source_names():
+    try:
+        return {i["id"]: i.get("name") for i in await plex.items()}
+    except Exception:  # noqa: BLE001 — Plex down: still list playlists, by id
+        return {}
+
+
+async def screensaver_playlists_get(request):
+    return web.json_response(
+        _playlist_view(load_screensaver(), await _source_names()))
+
+
+def _clean_ids(v):
+    if not isinstance(v, list) or not all(isinstance(i, (str, int)) for i in v):
+        raise ValueError("must be a list of source ids")
+    return [str(i) for i in v]
+
+
+async def _json_object(request):
+    try:
+        body = await request.json()
+    except ValueError:
+        body = None
+    if not isinstance(body, dict):
+        raise web.HTTPBadRequest(text="body must be a JSON object")
+    return body
+
+
+async def screensaver_playlists_save(request):
+    """Create a playlist or edit one. `create: true` makes a new one (409 if
+    the name is taken); otherwise the playlist must exist and `sources`
+    replaces its members while `add` / `remove` adjust them."""
+    body = await _json_object(request)
+    name = str(body.get("name") or "").strip()
+    if not name or len(name) > 40:
+        return web.json_response(
+            {"error": "name is required (40 characters max)"}, status=400)
+    if name.lower() in RESERVED_PLAYLIST_NAMES:
+        return web.json_response(
+            {"error": f"{name!r} is a reserved name; "
+                      "all / all shows / default mean the default rotation"},
+            status=400)
+    try:
+        replace = _clean_ids(body["sources"]) if "sources" in body else None
+        add = _clean_ids(body.get("add") or [])
+        remove = _clean_ids(body.get("remove") or [])
+    except ValueError as e:
+        return web.json_response({"error": str(e)}, status=400)
+    create = body.get("create") is True
+    cfg = load_screensaver()
+    stored = find_playlist(cfg, name)
+    if create and stored is not None:
+        # a second "create" must never silently empty a playlist
+        return web.json_response(
+            {"error": f"playlist {stored!r} already exists; use add/remove "
+                      "to change it", "existing": stored}, status=409)
+    if not create and stored is None:
+        return web.json_response(
+            {"error": f"no playlist {name!r}; create it first",
+             "available": sorted(cfg["playlists"], key=str.lower)}, status=404)
+    stored = stored or name
+    before = playlist_members(cfg, stored)
+    members = replace if replace is not None else before
+    members = [m for m in members if m not in remove]
+    members += [a for a in add if a not in members]
+    members = list(dict.fromkeys(members))
+    if create or members != before:   # a no-op edit would be an empty commit
+        cfg["playlists"][stored] = {**(cfg["playlists"].get(stored) or {}),
+                                    "sources": members}
+        _write_yaml(SCREENSAVER_REL, cfg)
+        git_commit(f"arcadectl: screensaver playlist "
+                   f"{'create' if create else 'edit'} {stored}")
+        push_state_soon()
+        hub.log_event(f"screensaver playlist {stored}: {len(members)} source(s)")
+    names = await _source_names()
+    out = _playlist_view(cfg, names)
+    unknown = [m for m in (replace or []) + add if names and m not in names]
+    if unknown:
+        out["warning"] = (f"not in the Plex library (skipped at play time): "
+                          f"{', '.join(unknown)}")
+    return web.json_response(out, status=201 if create else 200)
+
+
+_restart_lock = asyncio.Lock()
+
+
+def _empty_rotation_note(cfg):
+    return {"dim_clock": "the dim clock will show",
+            "off": "nothing will play (fallback is off)"}.get(
+        cfg.get("fallback"),
+        "nothing will play until you add sources (the offline clips are "
+        "cleared on every switch)")
+
+
+async def _restart_screensaver_if_on():
+    """A running screensaver keeps playing the old list until told
+    otherwise, so a switch restarts it. Best effort: the switch is already
+    committed, so failures come back as a warning, never an error. Returns
+    the warning text or None."""
+    async with _restart_lock:   # back-to-back switches: the last one wins
+        if not ((hub.cab_state or {}).get("screensaver") and hub.online):
+            return None
+        try:
+            res, err = await screensaver_start(only_if_on=True)
+            if err is None and res.get("ok") and (
+                    res["result"].get("screensaver")
+                    or res["result"].get("note") == "not running"):
+                return None
+            # Nothing new could start (e.g. an empty playlist with no
+            # fallback clips). Leaving the previous playlist on screen
+            # would contradict the switch, so stop it.
+            await hub.rpc("screensaver.off", {})
+            why = (json.loads(err.text)["error"] if err is not None else
+                   res.get("error") or (res.get("result") or {}).get("note")
+                   or "the cabinet could not start the new playlist")
+            hub.log_event(f"screensaver: stopped instead of switching: {why}")
+            return f"screensaver stopped: {why}"
+        except Exception as e:  # noqa: BLE001
+            reason = e.reason if isinstance(e, web.HTTPException) else repr(e)
+            hub.log_event(f"screensaver: restart on new playlist failed: {reason}")
+            return f"switched, but restarting the screensaver failed: {reason}"
+
+
+async def screensaver_playlists_delete(request):
+    name = (await _json_object(request)).get("name")
+    cfg = load_screensaver()
+    stored = find_playlist(cfg, name)
+    if stored is None:
+        return web.json_response({"error": f"no playlist {name!r}"}, status=404)
+    was_active = active_playlist(cfg) == stored
+    del cfg["playlists"][stored]
+    if was_active:
+        cfg["active_playlist"] = None
+    _write_yaml(SCREENSAVER_REL, cfg)
+    git_commit(f"arcadectl: screensaver playlist delete {stored}")
+    push_state_soon()
+    hub.log_event(f"screensaver playlist deleted: {stored}")
+    warning = await _restart_screensaver_if_on() if was_active else None
+    out = _playlist_view(cfg, await _source_names())
+    if warning:
+        out["warning"] = warning
+    return web.json_response(out)
+
+
+async def select_playlist(name):
+    """Switch the active playlist; returns (payload, http status). `name`
+    None / "all" / "all shows" / "default" returns to the default rotation
+    (every enabled source)."""
+    cfg = load_screensaver()
+    if name is None or str(name).strip().lower() in ("", "all", "all shows", "default"):
+        chosen = None
+    else:
+        chosen = find_playlist(cfg, name)
+        if chosen is None:
+            return {"error": f"no playlist {name!r}",
+                    "available": sorted(cfg["playlists"], key=str.lower)}, 404
+    warnings = []
+    if chosen and not playlist_members(cfg, chosen):
+        warnings.append(f"playlist {chosen!r} is empty — "
+                        + _empty_rotation_note(cfg))
+    if cfg.get("active_playlist") != chosen:
+        cfg["active_playlist"] = chosen
+        _write_yaml(SCREENSAVER_REL, cfg)
+        git_commit(f"arcadectl: screensaver playlist select {chosen or 'all'}")
+        push_state_soon()
+        hub.log_event(f"screensaver playlist -> {chosen or 'all'}")
+        restart = await _restart_screensaver_if_on()
+        if restart:
+            warnings.append(restart)
+    out = _playlist_view(cfg, {})
+    if warnings:
+        out["warning"] = "; ".join(warnings)
+    return out, 200
+
+
+async def screensaver_playlists_select(request):
+    out, status = await select_playlist((await _json_object(request)).get("name"))
+    return web.json_response(out, status=status)
 
 
 # --------------------------------------------------------------- ROM queue
@@ -2034,6 +2304,12 @@ async def _integration_command(kind, payload, leaf):
     """A command arriving from Home Assistant over MQTT."""
     cmd = (payload or "").strip().lower()
     try:
+        if kind == "playlist":
+            out, status = await select_playlist(payload.strip())
+            hub.log_event(f"home assistant: playlist {payload.strip()!r} "
+                          + (out.get("error", "failed") if status != 200
+                             else out.get("warning", "ok")))
+            return
         if kind == "screensaver":
             await hub.rpc("screensaver.on" if cmd in ("on", "true", "1")
                           else "screensaver.off", {})
@@ -2069,8 +2345,13 @@ def _snapshot():
         if len(parts) >= 2:
             art_path = ("/art/" + urllib.parse.quote(parts[-2]) + "/"
                         + urllib.parse.quote(parts[-1]))
+    try:
+        ss_cfg = load_screensaver()
+    except Exception:  # noqa: BLE001 — a broken screensaver.yaml must not
+        ss_cfg = None  # silence presence/telemetry along with it
     return integrations.snapshot_from(
-        cab, hub.online, cfg.get("public_base_url"), art_path)
+        cab, hub.online, cfg.get("public_base_url"), art_path,
+        screensaver_cfg=ss_cfg)
 
 
 async def integrations_get(request):
@@ -2222,6 +2503,10 @@ app.add_routes([
     # NB: must precede the /screensaver/{action} catch-all below — aiohttp
     # resolves in registration order, so a later literal route never wins.
     web.post("/screensaver/remove-source", screensaver_remove_source),
+    web.get("/screensaver/playlists", screensaver_playlists_get),
+    web.post("/screensaver/playlists/save", screensaver_playlists_save),
+    web.post("/screensaver/playlists/delete", screensaver_playlists_delete),
+    web.post("/screensaver/playlists/select", screensaver_playlists_select),
     web.get("/screensaver/playlist", screensaver_playlist),
     web.post("/screensaver/disable", screensaver_disable),
     web.post("/screensaver/{action}", screensaver_cmd),
