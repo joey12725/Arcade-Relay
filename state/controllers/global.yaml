@@ -1,8 +1,23 @@
-# Global scope (spec §5.7 layer 1): physical panel -> logical pad.
+bindings:
+- buttons:
+  - button4
+  - button8
+  hold_ms: 2000
+  target: start
+- buttons:
+  - button3
+  - button7
+  hold_ms: 2000
+  target: select
+- buttons:
+  - button1
+  - button5
+  hold_ms: 2000
+  target: home
 buttons:
   a: a
   b: b
+  select: select
+  start: start
   x: x
   y: y
-  start: start
-  select: select

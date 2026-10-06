@@ -21,6 +21,11 @@ import "assets/gif-index.js" as GifIndex
 
 FocusScope {
     id: root
+    // Compensate for the cabinet display's horizontal overscan.
+    transform: Scale {
+        origin.x: root.width / 2; origin.y: root.height / 2
+        xScale: 0.90; yScale: 0.96
+    }
     focus: true
 
     // --- design canvas. Every size below is written in mockup pixels and
@@ -406,8 +411,15 @@ FocusScope {
         Keys.onPressed: (event) => {
             if (api.keys.isAccept(event)) {
                 event.accepted = true;
+                if (event.isAutoRepeat) return;
                 if (currentCollection && gameCount > 0)
                     currentCollection.games.get(grid.currentIndex).launch();
+            } else if (event.key === Qt.Key_Left) {
+                event.accepted = true;
+                if (gameCount > 0) grid.decrementCurrentIndex();
+            } else if (event.key === Qt.Key_Right) {
+                event.accepted = true;
+                if (gameCount > 0) grid.incrementCurrentIndex();
             } else if (event.key === Qt.Key_Down || api.keys.isNextPage(event)) {
                 event.accepted = true;
                 root.moveSystem(1);

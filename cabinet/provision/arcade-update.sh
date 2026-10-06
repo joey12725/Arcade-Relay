@@ -85,8 +85,16 @@ if pgrep -u "$ARCADE_USER" -x retroarch >/dev/null 2>&1 \
     exit 0
 fi
 
+if ! git diff --quiet || ! git diff --cached --quiet; then
+    log "local tracked changes — leaving cabinet repairs intact"
+    exit 0
+fi
+if ! git merge-base --is-ancestor "$LOCAL" "$REMOTE"; then
+    log "local commits are not on origin/$BRANCH — leaving cabinet repairs intact"
+    exit 0
+fi
 log "updating ${LOCAL:0:8} -> ${REMOTE:0:8} on $BRANCH"
-git reset --hard --quiet "$REMOTE" || { log "reset failed"; exit 1; }
+git merge --ff-only --quiet "$REMOTE" || { log "fast-forward failed"; exit 1; }
 
 # SERVER_HOST is required by install.sh. It was baked at first provision and
 # is recorded here so unattended re-provisioning does not need it passed in.

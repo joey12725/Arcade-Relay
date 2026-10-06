@@ -5,6 +5,7 @@ Description=arcade cabinet daemon (cabd)
 
 [Service]
 Environment=DISPLAY=:0
+Environment=CABD_PANEL_BRIDGE=1
 Environment=SERVER_WS_URL=wss://@SERVER_HOST@/cab
 Environment=CABD_MEDIA_BASE=https://@SERVER_HOST@
 Environment=RETROARCH_BIN=/usr/bin/retroarch

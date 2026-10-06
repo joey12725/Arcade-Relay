@@ -1,0 +1,9 @@
+{
+  "vendor": 3090,
+  "product": 3120,
+  "buttons": {"1": 304, "2": 307, "3": 309, "4": 308, "5": 305, "6": 306, "7": 311, "8": 310},
+  "panels": [
+    {"player": 1, "name": "Arcade Left Panel", "usb_port": "8.4.1", "axes": {"16": [16, -1], "17": [17, -1]}},
+    {"player": 2, "name": "Arcade Right Panel", "usb_port": "8.4.4", "axes": {"16": [17, 1], "17": [16, 1]}}
+  ]
+}
