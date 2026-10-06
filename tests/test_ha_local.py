@@ -14,8 +14,8 @@ class LocalHATests(unittest.TestCase):
         pub = ha_local.integrations.HomeAssistantPublisher(
             {'homeassistant': {'node_id': 'arcade_cabinet'}}, lambda _: None)
         entries = pub._discovery()
-        self.assertEqual(len(entries), 11)
-        self.assertEqual(len({p['unique_id'] for _, p in entries}), 11)
+        self.assertEqual(len(entries), 12)
+        self.assertEqual(len({p['unique_id'] for _, p in entries}), 12)
         for _, payload in entries:
             self.assertEqual(payload['device']['identifiers'], ['arcade_cabinet'])
 

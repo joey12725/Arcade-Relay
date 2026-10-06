@@ -256,7 +256,10 @@ state change (which is pinned at launch and would report a couple of seconds).
 
 **Home Assistant** needs two transports, because neither alone is enough:
 
-- **MQTT discovery** for a screensaver switch, a stop-game button, a
+- **MQTT discovery** for a screensaver switch, a **Screensaver playlist**
+  select (options: `All shows` + every playlist; the option list is
+  re-announced when playlists are added or removed; commands arrive on
+  `.../playlist/set`), a stop-game button, a
   connectivity binary sensor, and sensors for title, system, play time, CPU,
   GPU, memory, CPU temperature and disk. Real entities, controllable, retained
   so they survive an HA restart, with availability on an MQTT last-will.

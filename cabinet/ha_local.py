@@ -18,12 +18,18 @@ def command_method(kind, payload):
     return {"turn_off": "game.kill", "stop": "game.kill"}.get(payload)
 
 
-async def run(get_config, get_state, get_health, dispatch, log):
+async def run(get_config, get_state, get_health, dispatch, log,
+              get_screensaver=lambda: {}, select_playlist=None):
     loop = asyncio.get_running_loop()
     publisher = None
     previous = None
 
     def on_command(kind, payload, leaf):
+        if kind == "playlist":
+            if select_playlist:
+                loop.call_soon_threadsafe(
+                    lambda: asyncio.create_task(select_playlist(payload)))
+            return
         method = command_method(kind, payload)
         if method:
             loop.call_soon_threadsafe(lambda: asyncio.create_task(dispatch(method)))
@@ -44,7 +50,8 @@ async def run(get_config, get_state, get_health, dispatch, log):
                     if publisher.client is None:
                         await asyncio.to_thread(publisher.connect)
                     snap = integrations.snapshot_from(get_state(), True,
-                                                      cfg.get("public_base_url"))
+                                                      cfg.get("public_base_url"),
+                                                      screensaver_cfg=get_screensaver())
                     health = await asyncio.to_thread(get_health)
                     await asyncio.to_thread(publisher.publish, snap, health)
             except Exception as exc:

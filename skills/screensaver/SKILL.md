@@ -14,11 +14,16 @@ arcadectl screensaver status                    # current config
 arcadectl screensaver set --brightness 60 --idle 300 --mode shuffle_episodes
 arcadectl screensaver set --subtitles on        # English subtitles (on|off)
 arcadectl screensaver sources                   # every series/movie + enabled flag
-arcadectl screensaver enable-source <jellyfin-id>
-arcadectl screensaver disable-source <jellyfin-id>
+arcadectl screensaver enable-source <source-id>
+arcadectl screensaver disable-source <source-id>
 arcadectl screensaver on | off                  # force (SCR-6)
 arcadectl screensaver disable --for 2h          # party mode: suppress idle start
 arcadectl screensaver playlist                  # resolved stream list (debug)
+arcadectl screensaver playlists list            # named playlists + which is active
+arcadectl screensaver playlists create halloween --source <id> --source <id>
+arcadectl screensaver playlists add halloween <id>...   # also: remove, delete
+arcadectl screensaver playlists select halloween        # switch what plays
+arcadectl screensaver playlists select all              # back to default rotation
 ```
 
 ## Worked example — "make the screensaver dimmer and disable Redline"
@@ -32,8 +37,50 @@ $ arcadectl --json screensaver sources          # confirm enabled:false
 ```
 
 Brightness applies live (<500ms) if the screensaver is running. Sources take
-effect on the next playlist fetch. If the cabinet is offline it converges on
+effect on the next playlist fetch — **for the default rotation only**: if
+`arcadectl --json screensaver playlists list` shows an active playlist that
+contains the id, also run `arcadectl screensaver playlists remove <name> <id>`
+(or `select all`), because an active playlist ignores the board. If the cabinet is offline it converges on
 reconnect (state is pushed on connect).
+
+## Playlists (anime / christmas / halloween / sfw / nsfw ...)
+
+A playlist is a named set of sources. `select <name>` makes the screensaver
+play exactly that set; `select all` returns to the default rotation (every
+source switched ON in the rotation board). Switching takes effect
+immediately if the screensaver is already running.
+
+```
+$ arcadectl --json screensaver sources                 # find ids (Plex rating keys)
+$ arcadectl screensaver playlists create christmas --source 4821 --source 977
+$ arcadectl screensaver playlists select christmas     # Christmas movies only
+$ arcadectl screensaver playlists select all           # back to anime
+```
+
+- Playlist members play whether or not they are ON in the rotation board, so
+  a seasonal or NSFW title need not be enabled (and leak into the default
+  shuffle) to live in a playlist. **To keep something NSFW off the screen,
+  leave it OFF the board and only put it in an NSFW playlist.** Likewise a
+  family-safe playlist is just one that does not contain it.
+- Names are case-insensitive. `all`, `all shows` and `default` mean the
+  default rotation; those and `none` / `unknown` / `unavailable` can't be
+  used as names. `create` on an existing name fails (exit 4, HTTP 409) —
+  use `add` / `remove` to change a playlist.
+- **While a playlist is active, the rotation board (enable/disable-source)
+  does not change what plays** — it only shapes the default rotation. Check
+  `playlists list` first; use `playlists remove` or `select all`.
+- Selecting an empty playlist stops the screensaver (unless `fallback:
+  dim_clock`) — the response carries a `warning`. Ids that Plex no longer
+  has are skipped at play time; `create`/`add` warn about them.
+- `playlists select` is also what Home Assistant calls: the cabinet device
+  has a **Screensaver playlist** select entity whose options are
+  `All shows` plus every playlist.
+- Stored in `state/screensaver.yaml` as `playlists: {name: {sources: [...]}}`
+  and `active_playlist: name|null`. Every change is a commit; ids are
+  strings (quote them when hand-editing, though bare numbers are coerced).
+- Switching playlists, or editing the active playlist's members, clears the
+  cabinet's offline clip cache (an in-flight download is discarded too), so
+  a link outage doesn't fall back to clips from the previous playlist.
 
 ## Subtitles
 

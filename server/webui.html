@@ -330,7 +330,7 @@ const S = {
   ov: null, alerts: [], health: null,
   audio: null, audioDirty: false, audioState: "",
   saver: null, saverDirty: false, saverState: "",
-  sources: null, srcLoading: false, srcQuery: "", poolFilter: "",
+  sources: null, srcLoading: false, srcQuery: "", poolFilter: "", plName: "",
   stream: null,
   remap: { scope: "global", scopes: ["global"], devices: null, bindings: {},
            combos: [], targets: {}, combo: [], hold: 0,
@@ -548,7 +548,12 @@ async function refresh() {
     S.online = false;
   }
   try { S.alerts = (await api("GET", "/alerts?limit=8")).alerts; } catch (_) { /* non-fatal */ }
-  paint();
+  // An open native <select> dies with its element, so the poll must not
+  // re-render the view out from under the "+ playlist…" picker (its handler
+  // blurs it once a choice is made).
+  const a = document.activeElement;
+  if (a && a.matches && a.matches('select[data-change="pl-add"]')) paintChrome();
+  else paint();
 }
 
 /* Tab-scoped loads. Kept off the 3s poll so it never drags a Plex library
@@ -931,6 +936,48 @@ VIEWS.saver = () => {
     <input type="number" min="0" style="width:90px" value="${val == null ? 0 : val}"
            data-change="sv" data-sk="${k}" data-k="sv-${k}"><b style="font-size:11px">${suffix}</b></span>`;
 
+  // playlists come from the overview (not S.saver) so editing the policy form
+  // never freezes them
+  const ovs = (S.ov && S.ov.screensaver) || {};
+  const plists = ovs.playlists || {};
+  const plNames = Object.keys(plists).sort((a, b) => a.toLowerCase().localeCompare(b.toLowerCase()));
+  const plActive = ovs.active_playlist && plNames.find((n) => n.toLowerCase() === String(ovs.active_playlist).toLowerCase());
+  const plAdd = (sid) => plNames.length ? h`<select class="sm" data-change="pl-add" data-sid="${esc(sid)}"
+      style="max-width:150px;"><option value="">+ playlist…</option>
+      ${plNames.map((n) => h`<option value="${esc(n)}" ${(plists[n].sources || []).map(String).indexOf(String(sid)) >= 0 ? "disabled" : ""}>${esc(n)}</option>`).join("")}
+    </select>` : "";
+  const plName = (id) => (byId.get(String(id)) || {}).name || id;
+
+  const playlists = panel("p-hot", "PLAYLISTS &mdash; NOW PLAYING: " + esc(plActive || "ALL SHOWS"), h`<div class="col" style="gap:10px;">
+      <div class="note">A playlist is a named set of shows or movies (anime, christmas, halloween, sfw, nsfw…).
+        Pick one and the screensaver plays <b>only</b> that set, switching right away if it is already
+        running. <b>ALL SHOWS</b> is the normal rotation board below. Members play even when they are OFF
+        on the board, so keep anything you only want sometimes <b>off the board</b> and in a playlist.
+        Home Assistant and <code>arcadectl screensaver playlists</code> switch the same thing.</div>
+      <div class="row" style="gap:8px;">
+        <button class="sm ${plActive ? "grey" : "lime"}" data-act="pl-select" data-name="">ALL SHOWS${plActive ? "" : " ✓"}</button>
+        ${plNames.map((n) => h`<button class="sm ${n === plActive ? "lime" : "grey"}" data-act="pl-select"
+          data-name="${esc(n)}">${esc(n)}${n === plActive ? " ✓" : ""}</button>`).join("")}
+      </div>
+      <div class="row">
+        <input type="text" placeholder="new playlist name…" value="${esc(S.plName)}" maxlength="40"
+               data-input="pl-name" data-k="pl-name" style="min-width:200px;">
+        <button class="sm" data-act="pl-create" ${S.plName.trim() ? "" : "disabled"}>+ CREATE</button>
+      </div>
+      ${plNames.map((n) => h`<div style="border:3px solid ${n === plActive ? "var(--lime)" : "#d3b8ff"};
+          border-radius:10px; padding:8px 10px;">
+        <div class="row"><b style="flex:1; font-size:13px;">${esc(n)}
+          <span style="font-size:10px; opacity:.7;">· ${(plists[n].sources || []).length} item(s)</span></b>
+          <button class="xs danger" data-act="pl-delete" data-name="${esc(n)}">DELETE</button></div>
+        <div style="display:flex; flex-wrap:wrap; gap:6px; margin-top:6px;">
+          ${(plists[n].sources || []).map((id) => h`<span style="border:2px solid #d3b8ff; border-radius:8px;
+              padding:3px 6px; font-size:11px; font-weight:bold;">${esc(plName(id))}
+              <a href="#" data-act="pl-remove" data-name="${esc(n)}" data-sid="${esc(id)}"
+                 style="color:#c0307a; text-decoration:none;" title="remove from playlist">✕</a></span>`).join("")
+            || h`<span style="font-size:11px; opacity:.7;">empty &mdash; add shows from the search or the board using “+ playlist…”</span>`}
+        </div></div>`).join("")}
+    </div>`);
+
   const policy = panel("p-purp", "SCREENSAVER POLICY", h`<div class="col" style="gap:10px;">
       <div class="row">
         <div style="width:150px; font-size:12px; font-weight:bold;">Brightness</div>
@@ -999,6 +1046,7 @@ VIEWS.saver = () => {
             <div style="font-size:10.5px; font-weight:bold; opacity:.7;">${esc(i.type || "")}
               · ${on ? "already on the board (" + (added.get(i.id).enabled ? "ON" : "OFF") + ")"
                           : "not added yet"}</div></div>
+          ${plAdd(i.id)}
           <button class="sm lime" data-act="src-add" data-sid="${esc(i.id)}" ${on ? "disabled" : ""}>
             ${on ? "ON BOARD ✓" : "+ ADD"}</button></div>`;
       }).join("")}
@@ -1031,13 +1079,14 @@ VIEWS.saver = () => {
         <button class="sm ${p.air ? "lime" : "grey"}" data-act="src-toggle"
                 data-sid="${esc(p.id)}" data-on="${p.air ? "" : "1"}">${p.air ? "ON" : "OFF"}</button>
       </div>
+      <div style="margin-top:8px;">${plAdd(p.id)}</div>
       <button class="xs danger" style="width:100%; margin-top:8px;" data-act="src-remove"
               data-sid="${esc(p.id)}" data-name="${esc(p.meta.name)}">REMOVE</button>
     </div>`).join("")}</div>
     ${pool.length ? "" : h`<div class="note" style="opacity:.7; padding:10px 0;">
       Pool is empty &mdash; search above and add something ✨</div>`}`);
 
-  return h`<div class="col"><div class="grid g-half">${policy}${search}</div>${board}</div>`;
+  return h`<div class="col">${playlists}<div class="grid g-half">${policy}${search}</div>${board}</div>`;
 };
 
 ACTIONS["sv-bright"] = (el) => {
@@ -1074,6 +1123,43 @@ ACTIONS["sv-suppress"] = (el) => {
   op(s ? "suppress screensaver " + s + "s" : "resume screensaver",
      () => api("POST", "/screensaver/disable", { seconds: s }));
 };
+ACTIONS["pl-name"] = (el) => { S.plName = el.value; paint(); };
+ACTIONS["pl-select"] = (el) => {
+  const label = el.dataset.name || "all shows";
+  op("playlist " + label, async () => {
+    const r = await api("POST", "/screensaver/playlists/select", { name: el.dataset.name || null });
+    if (r && r.warning) toast("⚠ " + r.warning, "warn");
+    else toast("✔ now playing: " + label, "ok");
+    return r;
+  }, null).catch(() => {});
+};
+ACTIONS["pl-create"] = async () => {
+  const name = S.plName.trim();
+  if (!name) return;
+  try {
+    await op("create playlist", () => api("POST", "/screensaver/playlists/save",
+      { name, create: true, sources: [] }), "✔ created “" + name + "” — add shows with “+ playlist…”");
+    S.plName = ""; paint();
+  } catch (_) { /* op already toasted why (e.g. the name exists) */ }
+};
+ACTIONS["pl-delete"] = async (el) => {
+  if (await ask("Delete playlist " + el.dataset.name + "? The shows themselves are untouched."))
+    op("delete playlist", async () => {
+      const r = await api("POST", "/screensaver/playlists/delete", { name: el.dataset.name });
+      if (r && r.warning) toast("⚠ " + r.warning, "warn");
+      return r;
+    }).catch(() => {});
+};
+ACTIONS["pl-add"] = (el) => {
+  const name = el.value;
+  el.blur();   // let the poll repaint again (see refresh)
+  if (!name) return;
+  op("add to playlist", () => api("POST", "/screensaver/playlists/save",
+    { name, add: [el.dataset.sid] }), "✔ added to “" + name + "”").catch(() => {});
+};
+ACTIONS["pl-remove"] = (el) =>
+  op("remove from playlist", () => api("POST", "/screensaver/playlists/save",
+    { name: el.dataset.name, remove: [el.dataset.sid] }), null).catch(() => {});
 ACTIONS["src-q"] = (el) => { S.srcQuery = el.value; paint(); };
 ACTIONS["pool-f"] = (el) => { S.poolFilter = el.value; paint(); };
 ACTIONS["src-add"] = (el) =>

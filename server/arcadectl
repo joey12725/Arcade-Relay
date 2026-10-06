@@ -138,6 +138,26 @@ def main():
     sd.add_argument("--for", dest="duration", required=True,
                     help="e.g. 2h, 30m, 45 (seconds); 0 clears")
 
+    pl = sssub.add_parser("playlists", help="named sets of shows (christmas, "
+                          "halloween, sfw...) the screensaver can switch between")
+    plsub = pl.add_subparsers(dest="plcmd", required=True)
+    plsub.add_parser("list", help="every playlist and which is active")
+    plc = plsub.add_parser("create", help="make a new playlist (optionally "
+                           "seeded); fails if the name exists")
+    plc.add_argument("name")
+    plc.add_argument("--source", action="append", default=[], metavar="ID",
+                     help="a source id from `screensaver sources`; repeatable")
+    for c in ("add", "remove"):
+        pa = plsub.add_parser(c, help=f"{c} sources "
+                              + ("to" if c == "add" else "from") + " a playlist")
+        pa.add_argument("name")
+        pa.add_argument("ids", nargs="+", metavar="ID")
+    pd = plsub.add_parser("delete")
+    pd.add_argument("name")
+    pse = plsub.add_parser("select", help="play this playlist; `all` returns "
+                           "to every enabled source")
+    pse.add_argument("name")
+
     vol = sub.add_parser("volume")
     vsub = vol.add_subparsers(dest="volcmd", required=True)
     vsub.add_parser("get")
@@ -376,6 +396,20 @@ def main():
             res = call("POST", "/screensaver/set", body)
         elif c == "remove-source":
             res = call("POST", "/screensaver/remove-source", {"id": args.id})
+        elif c == "playlists":
+            pc = args.plcmd
+            if pc == "list":
+                res = call("GET", "/screensaver/playlists")
+            elif pc == "create":
+                res = call("POST", "/screensaver/playlists/save",
+                           {"name": args.name, "create": True, "sources": args.source})
+            elif pc in ("add", "remove"):
+                res = call("POST", "/screensaver/playlists/save",
+                           {"name": args.name, ("add" if pc == "add" else "remove"): args.ids})
+            elif pc == "delete":
+                res = call("POST", "/screensaver/playlists/delete", {"name": args.name})
+            else:
+                res = call("POST", "/screensaver/playlists/select", {"name": args.name})
         else:
             res = call("POST", "/screensaver/set-source",
                        {"id": args.id, "enabled": c == "enable-source"})
