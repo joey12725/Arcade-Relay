@@ -46,6 +46,7 @@ DEFAULTS = {
     },
     "homeassistant": {
         "enabled": False,
+        "cabinet_enabled": False,
         "mqtt_host": "",
         "mqtt_port": 1883,
         "mqtt_username": "",
@@ -367,20 +368,40 @@ class HomeAssistantPublisher:
             # instead of showing whatever it was playing forever.
             client.will_set(self.topic("availability"), "offline", retain=True)
             client.on_message = self._on_message
+            client.on_connect = self._on_connect
+            client.on_disconnect = self._on_disconnect
+            self.client = client
             client.connect(self.cfg["mqtt_host"],
                            int(self.cfg.get("mqtt_port") or 1883), keepalive=60)
             client.loop_start()
-            client.publish(self.topic("availability"), "online", retain=True)
-            client.subscribe(self.topic("command"))
-            client.subscribe(self.topic("screensaver/set"))
-            self.client = client
             self._announced = False
             return True
         except Exception as e:  # noqa: BLE001 — a broker problem is not ours
+            self.client = None
             self.log(f"home assistant: mqtt connect failed: {e!r}")
             return False
 
+    def _on_connect(self, client, _userdata, _flags, rc):
+        if rc != 0:
+            self.log(f"home assistant: broker rejected connection ({rc})")
+            return
+        self._announced = False
+        client.subscribe(self.topic("command"))
+        client.subscribe(self.topic("screensaver/set"))
+        client.subscribe(f"{self.prefix}/status")
+        client.publish(self.topic("availability"), "online", qos=1, retain=True)
+        self.log("home assistant: MQTT connected")
+
+    def _on_disconnect(self, _client, _userdata, _rc):
+        self._announced = False
+
     def _on_message(self, _client, _userdata, msg):
+        if msg.topic == f"{self.prefix}/status":
+            self._announced = False
+            return
+        # Never replay a stale retained stop/screensaver command on reconnect.
+        if msg.retain:
+            return
         if self.on_command is None:
             return
         try:
@@ -392,10 +413,10 @@ class HomeAssistantPublisher:
         self.on_command(kind, payload, leaf)
 
     def announce(self):
-        if self.client is None or self._announced:
+        if self.client is None or not self.client.is_connected() or self._announced:
             return
         for topic, payload in self._discovery():
-            self.client.publish(topic, json.dumps(payload), retain=True)
+            self.client.publish(topic, json.dumps(payload), qos=1, retain=True)
         self._announced = True
         self.log(f"home assistant: announced {len(self._discovery())} entities")
 

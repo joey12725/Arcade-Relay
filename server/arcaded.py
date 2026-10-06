@@ -18,6 +18,7 @@ import pathlib
 import random
 import re
 import subprocess
+import tempfile
 import time
 import urllib.parse
 import uuid
@@ -31,6 +32,7 @@ import integrations
 import plex
 import romdl
 import shuffle
+import subtitles
 
 RPC_TIMEOUT = float(os.environ.get("ARCADED_RPC_TIMEOUT", "15"))
 MISSED_BEATS_OFFLINE = 3  # spec §5.2: offline after 3 missed heartbeats
@@ -562,6 +564,10 @@ def load_screensaver():
     # wins when both are present
     d.setdefault("shuffle", shuffle.DEFAULT_POLICY)
     d.setdefault("movies_as_series", True)
+    # English subtitles on the screensaver: one switch, no track picking —
+    # media_proxy chooses the track (server/subtitles.py), the cabinet
+    # shows or hides it
+    d.setdefault("subtitles", False)
     return d
 
 
@@ -640,12 +646,76 @@ async def screensaver_playlist(request):
                               "aspect": cfg.get("aspect", "crop"),
                               "skip_intro_s": int(cfg.get("skip_intro_s", 0)),
                               "skip_outro_s": int(cfg.get("skip_outro_s", 0)),
+                              "subtitles": bool(cfg.get("subtitles", False)),
                               "fallback": cfg.get("fallback", "local_clips")})
 
 
 FFMPEG = os.environ.get("FFMPEG_BIN", "ffmpeg")
 MEDIA_MAX_HEIGHT = int(os.environ.get("SCREENSAVER_MAX_HEIGHT", "480"))
 MEDIA_BITRATE_K = int(os.environ.get("SCREENSAVER_VIDEO_BITRATE", "1500000")) // 1000
+
+
+def media_argv(src, streams=(), sub=None, sub_file=None, audio_lang=None):
+    """ffmpeg argv for one screensaver item.
+
+    Without a subtitle pick, ffmpeg chooses video and audio itself and
+    `-sn` keeps every subtitle out: left alone it grabs the first text track
+    in any language, keeps its default flag, and mpv shows it. With a pick, every stream is
+    mapped explicitly and the audio is the one ffmpeg would have chosen
+    (subtitles.pick_audio), kept to `audio_lang` when given. `sub_file` is
+    a local copy of a sidecar; an embedded pick is mapped straight out of
+    the source.
+    """
+    argv = [FFMPEG, "-hide_banner", "-loglevel", "error", "-i", src]
+    if sub is not None:
+        if sub_file:
+            argv += ["-i", sub_file]
+        audio = subtitles.pick_audio(streams, audio_lang)
+        argv += ["-map", "0:V:0",
+                 "-map", f"0:{audio['index']}" if audio else "0:a:0?",
+                 "-map", "1:0" if sub_file else f"0:{sub['index']}"]
+    argv += [
+        "-vf", f"scale=-2:{MEDIA_MAX_HEIGHT}",
+        "-c:v", "libx264", "-preset", "veryfast",
+        "-b:v", f"{MEDIA_BITRATE_K}k", "-maxrate", f"{MEDIA_BITRATE_K}k",
+        "-bufsize", f"{MEDIA_BITRATE_K * 2}k",
+        "-c:a", "aac", "-b:a", "96k",
+    ]
+    if sub is None:
+        argv.append("-sn")
+    else:
+        # No default/forced flag (-disposition 0 clears the source's): the
+        # cabinet selects it by language (--slang=eng) and decides its
+        # visibility, and a cabinet still on the old mpv flags selects
+        # nothing rather than showing subtitles nobody turned on.
+        # A subtitle track with nothing to say yet (signs-only, first sign
+        # 20 s in) would otherwise make the muxer hold back up to 10 s of
+        # audio and video waiting for it.
+        argv += [*subtitles.codec_args(sub),
+                 "-metadata:s:s:0", "language=eng",
+                 "-disposition:s:0", "0",
+                 "-max_interleave_delta", "1000000"]
+    argv += ["-f", "matroska", "-live", "1", "pipe:1"]
+    return argv
+
+
+async def _sidecar_file(sub):
+    """Fetch a sidecar subtitle to a temp file (None on any failure).
+
+    Fetched up front rather than handed to ffmpeg as a URL: a second network
+    input that fails takes the whole stream down with it, and a missing
+    subtitle must never cost the episode."""
+    try:
+        data = subtitles.to_utf8(await plex.fetch(sub["key"]))
+    except Exception as e:  # noqa: BLE001
+        print(f"media: sidecar {sub.get('key')} unavailable: {e!r}", flush=True)
+        return None
+    fd, path = tempfile.mkstemp(
+        prefix="arcade-sub-",
+        suffix="." + subtitles.SIDECAR[subtitles._codec(sub)])
+    with os.fdopen(fd, "wb") as f:
+        f.write(data)
+    return path
 
 
 async def media_proxy(request):
@@ -660,40 +730,86 @@ async def media_proxy(request):
 
     Output is fragmented matroska so it streams without a seekable output —
     mpv plays it straight from the pipe.
+
+    Every item carries its best English subtitle track when it has one
+    (server/subtitles.py), whatever the `subtitles` setting says: the
+    cabinet shows or hides it, so the switch acts on the episode already
+    playing and cached clips follow it too. Only with subtitles ON may a
+    better-subtitled version of the episode replace the first one, and it
+    then keeps the first one's audio language.
     """
     video_id = request.match_info["video_id"]
-    src = plex.PLEX_URL + await plex.part_path(video_id)
-    argv = [
-        FFMPEG, "-hide_banner", "-loglevel", "error",
-        "-i", src,
-        "-vf", f"scale=-2:{MEDIA_MAX_HEIGHT}",
-        "-c:v", "libx264", "-preset", "veryfast",
-        "-b:v", f"{MEDIA_BITRATE_K}k", "-maxrate", f"{MEDIA_BITRATE_K}k",
-        "-bufsize", f"{MEDIA_BITRATE_K * 2}k",
-        "-c:a", "aac", "-b:a", "96k",
-        "-f", "matroska",
-        "-live", "1",
-        "pipe:1",
-    ]
-    proc = await asyncio.create_subprocess_exec(
-        *argv, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL)
-    resp = web.StreamResponse()
-    resp.headers["Content-Type"] = "video/x-matroska"
-    await resp.prepare(request)
+    versions = await plex.versions(video_id)
+    original = versions[0]
+    version, sub = original, None
     try:
-        while True:
-            chunk = await proc.stdout.read(64 * 1024)
+        if load_screensaver().get("subtitles"):
+            version, sub = subtitles.choose(versions)
+        else:
+            sub = subtitles.pick(original["streams"])
+    except Exception as e:  # noqa: BLE001 — never let a subtitle cost the episode
+        print(f"media: {video_id}: no subtitle, choice failed: {e!r}", flush=True)
+        version, sub = original, None
+    sub_file = None
+    if sub is not None and subtitles.is_external(sub):
+        sub_file = await _sidecar_file(sub)
+        if sub_file is None:
+            version, sub = original, None   # the switch was for that track
+    audio_lang = None
+    if version is not original:
+        first_audio = subtitles.pick_audio(original["streams"])
+        audio_lang = first_audio and first_audio.get("languageCode")
+
+    async def spawn(version, sub):
+        argv = media_argv(plex.PLEX_URL + version["part"], version["streams"],
+                          sub, sub_file if sub else None, audio_lang)
+        return await asyncio.create_subprocess_exec(
+            *argv, stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.DEVNULL)
+
+    async def head(proc):
+        """The first 64 KiB of output, or all of it if ffmpeg exits first."""
+        buf = b""
+        while len(buf) < 64 * 1024:
+            chunk = await proc.stdout.read(64 * 1024 - len(buf))
             if not chunk:
                 break
+            buf += chunk
+        return buf
+
+    proc = await spawn(version, sub)
+    resp = web.StreamResponse()
+    hung_up = False
+    resp.headers["Content-Type"] = "video/x-matroska"
+    try:
+        first = await head(proc)
+        if len(first) < 64 * 1024 and sub is not None \
+                and await proc.wait() != 0:
+            # ffmpeg gave up at the start (a muxer refusing a track does so
+            # while writing the header, after a few hundred bytes): the
+            # explicit mapping or the track did not survive contact. Nothing
+            # has gone to the cabinet yet, so play the original without.
+            print(f"media: {video_id} failed with subtitle track "
+                  f"{sub.get('id')} ({sub.get('codec')}); retrying without",
+                  flush=True)
+            proc = await spawn(original, None)
+            first = await head(proc)
+        await resp.prepare(request)
+        chunk = first
+        while chunk:
             await resp.write(chunk)
+            chunk = await proc.stdout.read(64 * 1024)
     except (ConnectionResetError, asyncio.CancelledError):
-        pass          # cabinet hung up (playlist advanced) — normal
+        hung_up = True    # cabinet hung up (playlist advanced) — normal
     finally:
         # never leak an ffmpeg: the screensaver advances constantly
         if proc.returncode is None:
             proc.kill()
             await proc.wait()
-    await resp.write_eof()
+        if sub_file:
+            os.unlink(sub_file)
+    if resp.prepared and not hung_up:
+        await resp.write_eof()    # to a closed socket it raises, every advance
     return resp
 
 
@@ -723,19 +839,31 @@ async def screensaver_set(request):
                 return web.json_response(
                     {"error": f"{k} must be a non-negative integer"},
                     status=400)
+    # a strict bool: "false" from a hand-rolled client is truthy and would
+    # commit the opposite of what was asked
+    if "subtitles" in body and not isinstance(body["subtitles"], bool):
+        return web.json_response(
+            {"error": "subtitles must be true or false"}, status=400)
     changes = []
     for k in ("brightness", "idle_seconds", "mode", "fallback", "aspect",
-              "shuffle", "movies_as_series", "skip_intro_s", "skip_outro_s"):
+              "shuffle", "movies_as_series", "skip_intro_s", "skip_outro_s",
+              "subtitles"):
         if k in body:
             cfg[k] = body[k]
             changes.append(f"{k}={body[k]}")
     _write_yaml(SCREENSAVER_REL, cfg)
     git_commit(f"arcadectl: screensaver set {' '.join(changes)}")
     push_state_soon()
-    # live-adjust a running screensaver (brightness <500ms budget)
-    if "brightness" in body and hub.ws is not None and not hub.ws.closed:
+    # live-adjust a running screensaver (brightness <500ms budget; subtitles
+    # show/hide on the episode already playing, not just the next one)
+    live = {k: cfg[k] for k in ("brightness", "subtitles") if k in body}
+    if live and hub.ws is not None and not hub.ws.closed:
         try:
-            await hub.rpc("screensaver.set", {"brightness": cfg["brightness"]})
+            res = await hub.rpc("screensaver.set", live)
+            if not res.get("ok"):
+                # committed either way; say so instead of claiming it showed
+                hub.log_event("screensaver: cabinet did not apply "
+                              f"{live} live: {res.get('error')}")
         except web.HTTPException:
             pass
     return web.json_response(cfg)

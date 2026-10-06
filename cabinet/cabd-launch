@@ -7,6 +7,7 @@ first, and can kill cleanly.
 
 Usage:
   cabd-launch <system> <rom-path> [extra emulator args...]
+  cabd-launch --wait <system> <rom-path>   # Pegasus: wait until game exits
   cabd-launch kill
   cabd-launch running
 Exit codes: 0 ok, 1 cabd reported an error, 3 cabd socket unreachable.
@@ -15,12 +16,30 @@ import json
 import os
 import socket
 import sys
+import time
 
 SOCK = os.environ.get("CABD_SOCK", "/tmp/cabd.sock")
 
 
+def request(req):
+    with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as s:
+        s.settimeout(30)
+        s.connect(SOCK)
+        s.sendall((json.dumps(req) + "\n").encode())
+        buf = b""
+        while not buf.endswith(b"\n"):
+            chunk = s.recv(4096)
+            if not chunk:
+                break
+            buf += chunk
+    return json.loads(buf)
+
+
 def main():
     argv = sys.argv[1:]
+    wait = bool(argv and argv[0] == "--wait")
+    if wait:
+        argv = argv[1:]
     if not argv:
         print(__doc__, file=sys.stderr)
         sys.exit(2)
@@ -36,22 +55,22 @@ def main():
                "params": {"system": argv[0], "path": argv[1], "args": argv[2:]}}
 
     try:
-        s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-        s.settimeout(15)
-        s.connect(SOCK)
-        s.sendall((json.dumps(req) + "\n").encode())
-        buf = b""
-        while not buf.endswith(b"\n"):
-            chunk = s.recv(4096)
-            if not chunk:
-                break
-            buf += chunk
+        res = request(req)
+        print(json.dumps(res), flush=True)
+        # Pegasus keeps the launcher in the foreground until this process
+        # exits. Returning immediately steals focus from the running game
+        # and can replay held controller buttons into the frontend.
+        if wait and res.get("ok") and req["method"] == "game.launch":
+            running = res["result"]["running"]
+            while True:
+                time.sleep(0.25)
+                status = request({"method": "game.running"})
+                if not status.get("ok") or status["result"]["running"] != running:
+                    break
     except OSError as e:
         print(f"cabd-launch: cannot reach cabd at {SOCK}: {e}", file=sys.stderr)
         sys.exit(3)
 
-    res = json.loads(buf)
-    print(json.dumps(res))
     sys.exit(0 if res.get("ok") else 1)
 
 

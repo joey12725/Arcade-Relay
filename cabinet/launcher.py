@@ -62,6 +62,8 @@ def find_window(title):
 
 
 def focus_window(win_id):
+    _xdotool("windowmap", win_id)
+    _xdotool("windowactivate", "--sync", win_id)
     _xdotool("windowraise", win_id)
     _xdotool("windowfocus", "--sync", win_id)
 
@@ -76,6 +78,12 @@ def focus_frontend():
     if win:
         focus_window(win)
     return win
+
+
+def hide_frontend():
+    win = find_window(FRONTEND_TITLE)
+    if win:
+        _xdotool("windowunmap", win)
 
 
 class GameSession:
@@ -109,6 +117,7 @@ class GameSession:
         if not self.window:
             self.proc.kill()
             raise RuntimeError("session window never appeared")
+        hide_frontend()
         focus_window(self.window)
 
     def alive(self):

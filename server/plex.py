@@ -203,21 +203,32 @@ async def image(item_id, max_height=180):
     return await asyncio.to_thread(_fetch)
 
 
-def _part_path_sync(video_id):
-    """The on-disk file behind a video, as a Plex URL path.
+def _versions_sync(video_id):
+    """Every version (<Media>) Plex holds for a video, in Plex's order: the
+    on-disk file as a Plex URL path, plus the attributes of every <Stream>
+    Plex found in it (embedded tracks and sidecar subtitle files alike).
 
     Part ids are per-file and change on rescan, so they must be resolved
     from metadata every time rather than cached or guessed.
     """
     meta = _req(_url(f"/library/metadata/{video_id}"))
+    out = []
     for video in (meta or []):
         for media in video:
             if media.tag != "Media":
                 continue
-            for part in media:
-                if part.tag == "Part" and part.get("key"):
-                    return part.get("key")
-    return None
+            part = next((p for p in media
+                         if p.tag == "Part" and p.get("key")), None)
+            if part is not None:
+                out.append({"part": part.get("key"),
+                            "streams": [dict(s.attrib) for s in part
+                                        if s.tag == "Stream"]})
+    return out
+
+
+def _part_path_sync(video_id):
+    versions = _versions_sync(video_id)
+    return versions[0]["part"] if versions else None
 
 
 async def part_path(video_id):
@@ -240,6 +251,29 @@ async def part_path(video_id):
 async def stream_path(video_id):
     """Back-compat alias: callers ask for a path, we hand back the part."""
     return await part_path(video_id)
+
+
+async def versions(video_id):
+    """[{"part": direct-play path, "streams": [{attr: value}, ...]}, ...],
+    one per version, first first. One metadata request gives all of it, so
+    choosing a subtitle track costs no extra round trip to Plex."""
+    await ensure_setup()
+    found = await asyncio.to_thread(_versions_sync, video_id)
+    if not found:
+        raise RuntimeError(f"no playable part for video {video_id}")
+    return [{**v, "part": _url(v["part"])} for v in found]
+
+
+async def fetch(key, timeout=20):
+    """Raw bytes of a Plex path (a sidecar subtitle at /library/streams/<id>)."""
+    def _get():
+        req = urllib.request.Request(PLEX_URL + _url(key))
+        for k, v in HEADERS.items():
+            req.add_header(k, v)
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            return r.read()
+    await ensure_setup()
+    return await asyncio.to_thread(_get)
 
 
 async def _unused_transcode_path(video_id):

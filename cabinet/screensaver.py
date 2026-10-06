@@ -23,6 +23,7 @@ PLAYLIST_PATH = "/tmp/ss-playlist.m3u"
 _proc = None
 _req_id = 0
 _outro = {"seconds": 0}   # trim from the tail of each item (0 = off)
+_subs = {"on": False, "brightness": 100}   # what sub-visibility derives from
 
 
 def outro_tick():
@@ -137,8 +138,34 @@ def _aspect_args(mode):
     return ["--keepaspect", "--panscan=1.0"]     # crop (default)
 
 
+def _subs_visible():
+    """mpv draws subtitles after the video filters, so the brightness tint
+    never reaches them; at 0 ("fully black", SCR-3) they are hidden, above
+    it they stay at full brightness."""
+    return _subs["on"] and _subs["brightness"] > 0
+
+
+def _sub_args(visible):
+    """The server carries at most one subtitle track per item — the best
+    English one (server/subtitles.py), tagged eng — so --slang selects it
+    whatever the audio language; the switch is only its visibility, which
+    is instant both ways and holds across playlist items.
+
+    Not --sid=1: mpv 0.40 quietly resets an explicit sid to `auto` after an
+    item that has no subtitle track, and setting sid while one plays pins it
+    to `no` for every item after. Visibility has neither trap.
+
+    The margin flags lay ASS out against the window instead of the picture:
+    with the default, an ASS line wider than the visible part of a cropped
+    frame loses both ends, and a 4:3 episode cropped to the 16:9 screen puts
+    the bottom line off-screen entirely."""
+    return ["--slang=eng,en",
+            f"--sub-visibility={'yes' if visible else 'no'}",
+            "--sub-ass-force-margins=yes", "--sub-ass-scale-with-window=yes"]
+
+
 def start(playlist, brightness, window_timeout=15, aspect="crop",
-          skip_intro_s=0, skip_outro_s=0):
+          skip_intro_s=0, skip_outro_s=0, subtitles=False):
     """playlist: server-relative paths (/media/<id>). Returns True on window.
 
     window_timeout bounds the wait for mpv to map its window; a stalled
@@ -158,6 +185,7 @@ def start(playlist, brightness, window_timeout=15, aspect="crop",
             p if p.startswith("/var/") or p.startswith("/tmp/")
             else MEDIA_BASE + p
             for p in playlist) + "\n")
+    _subs.update(on=bool(subtitles), brightness=int(brightness))
     env = dict(os.environ)
     env["PULSE_PROP_media.role"] = "screensaver"
     try:
@@ -165,6 +193,7 @@ def start(playlist, brightness, window_timeout=15, aspect="crop",
     except FileNotFoundError:
         pass
     argv = ["mpv", "--no-config", "--fs", *_aspect_args(aspect),
+            *_sub_args(_subs_visible()),
             f"--input-ipc-server={SS_SOCK}", f"--vf={_vf(brightness)}",
             "--loop-playlist=inf", "--really-quiet", f"--title={SS_TITLE}",
             "--ao=pulse,pipewire,null", "--vo=x11",
@@ -194,6 +223,17 @@ def start(playlist, brightness, window_timeout=15, aspect="crop",
 
 def set_brightness(brightness):
     ipc(["vf", "set", _vf(brightness)])
+    was = _subs_visible()
+    _subs["brightness"] = int(brightness)
+    if _subs_visible() != was:
+        ipc(["set_property", "sub-visibility", _subs_visible()])
+    return True
+
+
+def set_subtitles(subtitles):
+    # never `sid`: see _sub_args
+    _subs["on"] = bool(subtitles)
+    ipc(["set_property", "sub-visibility", _subs_visible()])
     return True
 
 

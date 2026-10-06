@@ -948,6 +948,10 @@ VIEWS.saver = () => {
           display:inline-flex; gap:6px; align-items:center;">
           <input type="checkbox" data-change="sv" data-sk="movies_as_series"
                  ${sv.movies_as_series ? "checked" : ""}> each movie counts as its own series</label>`, "live")}
+      ${field("Subtitles", h`<label style="font-size:12px; font-weight:bold;
+          display:inline-flex; gap:6px; align-items:center;">
+          <input type="checkbox" data-change="sv" data-sk="subtitles"
+                 ${sv.subtitles ? "checked" : ""}> show English subtitles (best track picked automatically)</label>`, "live")}
       ${field("Skip intro", num("skip_intro_s", sv.skip_intro_s, "seconds"), "stored")}
       ${field("Skip outro", num("skip_outro_s", sv.skip_outro_s, "seconds"), "stored")}
       ${field("Fallback", sel("fallback", SS_FALLBACK, sv.fallback), "live")}
@@ -1055,7 +1059,7 @@ ACTIONS["sv-apply"] = async () => {
     await api("POST", "/screensaver/set", {
       brightness: sv.brightness, idle_seconds: sv.idle_seconds,
       aspect: sv.aspect, shuffle: sv.shuffle, fallback: sv.fallback,
-      movies_as_series: !!sv.movies_as_series,
+      movies_as_series: !!sv.movies_as_series, subtitles: !!sv.subtitles,
       skip_intro_s: sv.skip_intro_s, skip_outro_s: sv.skip_outro_s,
     });
     S.saverDirty = false; S.saverState = "✔ policy applied";

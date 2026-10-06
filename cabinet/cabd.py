@@ -25,6 +25,8 @@ import aiohttp
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import audio  # noqa: E402
 import inputs  # noqa: E402
+import panels  # noqa: E402
+import ha_local  # noqa: E402
 import pegasus_gen  # noqa: E402
 import launcher  # noqa: E402
 import lifeline  # noqa: E402
@@ -158,7 +160,11 @@ game = {"session": None, "rom": None, "system": None,
 # lifeline all contend for the same display. Separate locks let an in-flight
 # screensaver start land on top of a lifeline that had just come up.
 game_lock = asyncio.Lock()
-ss = {"on": False, "suppress_until": 0.0, "starting": False}
+ss = {"on": False, "suppress_until": 0.0, "starting": False,
+      # screensaver.set values with their arrival time: one that lands
+      # while a start is in flight is re-applied once mpv is up (the start
+      # used the playlist's older snapshot)
+      "live": {}}
 ll = {"on": False, "last_sync": None, "recovery": {}}
 
 
@@ -341,9 +347,30 @@ async def input_text(text):
     return {"typed": len(text)}
 
 
+_input_wake_task = None
+
+
+async def _wake_on_input():
+    # Input can arrive while the playlist/window is still being created.
+    while ss["starting"]:
+        await asyncio.sleep(0.05)
+    await screensaver_off()
+
+
+def _on_input_activity():
+    """Real devices must wake the screen, just like the simulation FIFO."""
+    global _input_wake_task
+    activity["last"] = time.monotonic()
+    if (ss["on"] or ss["starting"]) and (_input_wake_task is None or _input_wake_task.done()):
+        _input_wake_task = asyncio.create_task(_wake_on_input())
+
+
 def _on_evdev_key(button, is_down):
     """Real-hardware key events fan out to both engines: cabinet hotkeys and
     user combo/hold bindings are detected independently and can overlap."""
+    events_buf.append((time.monotonic(), f"{button} {'down' if is_down else 'up'}"))
+    if ll["on"] and button == "a" and is_down:
+        asyncio.create_task(lifeline_restart_network())
     if combo_engine is not None:
         combo_engine.key_event(button, is_down)
     if binding_engine is not None:
@@ -353,6 +380,20 @@ def _on_evdev_key(button, is_down):
 combo_engine = None   # built in main() once state (hotkeys) is loaded
 binding_engine = None  # user combo/hold bindings from controllers/*
 virtual_pad = inputs.VirtualPad()
+panel_bridge = None
+
+
+def _on_panel_key(player, button, down):
+    events_buf.append((time.monotonic(), f"player{player}.{button} {'down' if down else 'up'}"))
+
+
+async def run_panel_bridge():
+    while True:
+        try:
+            await panel_bridge.run()
+        except OSError as exc:
+            log(f"panel bridge unavailable: {exc}; retrying")
+            await asyncio.sleep(2)
 
 
 async def on_binding(target, kind):
@@ -453,6 +494,8 @@ def build_binding_engine(system=None, rom_path=None):
     per-game layers only make sense relative to what is running."""
     global binding_engine
     entries = collect_bindings(system, rom_path)
+    if panel_bridge is not None:
+        panel_bridge.configure(entries)
     binding_engine = inputs.BindingEngine(
         entries,
         lambda target, kind: asyncio.create_task(on_binding(target, kind)))
@@ -507,7 +550,7 @@ async def clips_sync_loop():
         await asyncio.sleep(15)
 
 
-async def screensaver_on(playlist, brightness):
+async def screensaver_on(playlist, brightness, subtitles=False):
     async with game_lock:   # never fight a game launch for the screen
         if game["session"] is not None:
             return {"screensaver": False, "note": "game running"}
@@ -522,10 +565,27 @@ async def screensaver_on(playlist, brightness):
         # never worth stalling a player's launch. If the window shows up
         # later the watchdog's heal path picks it up; if it never does,
         # start() kills it.
-        ok = await asyncio.to_thread(screensaver.start, playlist, brightness, 4)
+        t0 = time.monotonic()
+        ok = await asyncio.to_thread(screensaver.start, playlist, brightness, 4,
+                                     subtitles=bool(subtitles))
         ss["on"] = bool(ok)
+        if ok:
+            await _apply_raced_settings(t0)
         log(f"screensaver on -> {ss['on']}")
         return {"screensaver": ss["on"]}
+
+
+async def _apply_raced_settings(since):
+    for key, (at, value) in list(ss["live"].items()):
+        if at < since:
+            continue
+        try:
+            if key == "brightness":
+                await asyncio.to_thread(screensaver.set_brightness, value)
+            elif key == "subtitles":
+                await asyncio.to_thread(screensaver.set_subtitles, value)
+        except (OSError, TimeoutError) as e:
+            log(f"screensaver: {key} change during start not applied: {e!r}")
 
 
 async def screensaver_dim_clock(brightness):
@@ -618,7 +678,8 @@ async def _start_screensaver_now():
             await screensaver_dim_clock(cfg.get("brightness", 80))
         elif clips:
             log(f"idle: {why}; local clips fallback")
-            await screensaver_on(clips, cfg.get("brightness", 80))
+            await screensaver_on(clips, cfg.get("brightness", 80),
+                                 cfg.get("subtitles", False))
         else:
             log(f"idle: {why}; no fallback available")
             await asyncio.sleep(5)
@@ -630,7 +691,8 @@ async def _start_screensaver_now():
                              + "/screensaver/playlist") as r:
                 pl = await r.json()
         if pl.get("playlist"):
-            await screensaver_on(pl["playlist"], pl.get("brightness", 80))
+            await screensaver_on(pl["playlist"], pl.get("brightness", 80),
+                                 pl.get("subtitles", False))
         else:
             # A reachable server with zero enabled sources returns an EMPTY
             # playlist. That used to fall through silently: nothing started,
@@ -921,7 +983,19 @@ async def audio_loop():
         await asyncio.sleep(1)   # pactl died (pipewire restart?) — reattach
 
 
-frontend = {"proc": None}
+frontend = {"proc": None, "reload_pending": False, "last_rescan": 0}
+
+
+async def frontend_reload_loop():
+    # Coalesce deliveries and never replace Pegasus while a game owns the screen.
+    while True:
+        await asyncio.sleep(2)
+        if (frontend["reload_pending"] and not game_lock.locked()
+                and time.monotonic() - frontend["last_rescan"] >= 10):
+            async with game_lock:
+                if game["session"] is None:
+                    frontend["reload_pending"] = False
+                    await frontend_restart()
 
 
 async def frontend_loop():
@@ -1263,7 +1337,8 @@ async def handle_req(ws, data):
             result = {"devices": await asyncio.to_thread(inputs.list_devices)}
         elif method == "screensaver.on":
             result = await screensaver_on(params.get("playlist", []),
-                                          params.get("brightness", 80))
+                                          params.get("brightness", 80),
+                                          params.get("subtitles", False))
         elif method == "screensaver.on_fallback":
             # Forced on with no server playlist: same decision the idle path
             # makes — including honoring the `fallback:` config key, which
@@ -1279,18 +1354,30 @@ async def handle_req(ws, data):
                 result = {"screensaver": False, "note": "fallback is 'off'"}
             elif clips:
                 result = await screensaver_on(clips,
-                                              params.get("brightness", 80))
+                                              params.get("brightness", 80),
+                                              params.get("subtitles", False))
                 log("screensaver forced on from local clips (no sources)")
             else:
                 result = {"screensaver": False, "note": "no cached clips"}
         elif method == "screensaver.off":
             result = await screensaver_off()
         elif method == "screensaver.set":
-            if ss["on"]:
-                await asyncio.to_thread(screensaver.set_brightness,
-                                        params["brightness"])
-            result = {"screensaver": ss["on"],
-                      "brightness": params["brightness"]}
+            # either key alone is a valid request: the server sends only
+            # what changed
+            result = {"screensaver": ss["on"]}
+            for key in ("brightness", "subtitles"):
+                if key in params:
+                    ss["live"][key] = (time.monotonic(), params[key])
+            if "brightness" in params:
+                if ss["on"]:
+                    await asyncio.to_thread(screensaver.set_brightness,
+                                            params["brightness"])
+                result["brightness"] = params["brightness"]
+            if "subtitles" in params:
+                if ss["on"]:
+                    await asyncio.to_thread(screensaver.set_subtitles,
+                                            params["subtitles"])
+                result["subtitles"] = bool(params["subtitles"])
         elif method == "lifeline.on":
             result = await lifeline_on()
         elif method == "lifeline.off":
@@ -1355,13 +1442,11 @@ async def handle_req(ws, data):
                                            state["bundle"])
             # --no-block: the RPC must answer inside the server's deadline;
             # pegasus's own startup time is not this request's problem.
-            await asyncio.to_thread(
-                subprocess.run,
-                ["systemctl", "--user", "--no-block", "restart",
-                 "pegasus.service"],
-                capture_output=True, timeout=10)
-            log(f"library rescan: {len(meta)} metadata files; pegasus restarted")
-            result = {"rescanned": True, "metadata_files": len(meta)}
+            frontend["reload_pending"] = True
+            frontend["last_rescan"] = time.monotonic()
+            log(f"library rescan: {len(meta)} metadata files; menu reload queued")
+            result = {"rescanned": True, "metadata_files": len(meta),
+                      "frontend_reload_pending": True}
         elif method == "state.sync":
             bundle = params["bundle"]
             if not isinstance(bundle, dict):
@@ -1386,6 +1471,19 @@ async def handle_req(ws, data):
     except Exception as e:  # noqa: BLE001 — report, never die on a bad RPC
         await ws.send_json({"id": data.get("id"), "kind": "res", "ok": False,
                             "error": repr(e)})
+
+
+def cabinet_snapshot():
+    return {"running": game["rom"], "system": game["system"],
+            "started_at": game["started_at"], "elapsed_s": elapsed_s(),
+            "screensaver": ss["on"], "lifeline": ll["on"]}
+
+
+async def ha_dispatch(method):
+    class Reply:
+        async def send_json(self, response):
+            log(f"local Home Assistant: {method} ok={response.get('ok')}")
+    await handle_req(Reply(), {"method": method})
 
 
 async def heartbeat_loop(ws):
@@ -1457,6 +1555,7 @@ async def main():
     init_input_fifo()
     await local_server()
     asyncio.create_task(frontend_loop())
+    asyncio.create_task(frontend_reload_loop())
     asyncio.create_task(watchdog_loop())
     asyncio.create_task(audio_loop())
     asyncio.create_task(fifo_reader())
@@ -1464,12 +1563,22 @@ async def main():
     asyncio.create_task(clips_sync_loop())
     asyncio.create_task(saves_backup_loop())
     asyncio.create_task(metrics_loop())
+    asyncio.create_task(ha_local.run(
+        lambda: state["bundle"].get("integrations.yaml", {}),
+        cabinet_snapshot, health_report, ha_dispatch, log))
     asyncio.create_task(lifeline_loop(ws_state))
 
     # real hardware: evdev devices feed the same combo engine (A-17)
+    global panel_bridge
+    if os.environ.get("CABD_PANEL_BRIDGE") == "1":
+        panel_bridge = panels.PanelBridge(
+            collect_bindings(), lambda name: asyncio.create_task(on_action(name)),
+            _on_panel_key, _on_input_activity, log)
+        asyncio.create_task(run_panel_bridge())
     evsrc = inputs.EvdevSource(
         on_key=_on_evdev_key,
-        on_activity=lambda: activity.__setitem__("last", time.monotonic()))
+        on_activity=_on_input_activity,
+        ignore_device=panel_bridge.is_managed if panel_bridge else None)
     # Always run: the source hot-plugs, so a cabinet that boots with zero
     # controllers still picks them up the moment they are connected.
     asyncio.create_task(evsrc.run())
