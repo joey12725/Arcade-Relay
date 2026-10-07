@@ -80,12 +80,6 @@ def focus_frontend():
     return win
 
 
-def hide_frontend():
-    win = find_window(FRONTEND_TITLE)
-    if win:
-        _xdotool("windowunmap", win)
-
-
 class GameSession:
     """One running game or stream session. Not thread-safe; cabd serializes.
 
@@ -117,7 +111,10 @@ class GameSession:
         if not self.window:
             self.proc.kill()
             raise RuntimeError("session window never appeared")
-        hide_frontend()
+        # The menu stays mapped underneath; the focused fullscreen game is on
+        # top. Unmapping Pegasus makes Openbox drop its fullscreen state (Qt
+        # never reasserts it), and a cabd restart mid-game would leave the
+        # cabinet on a black screen with no menu to come back to.
         focus_window(self.window)
 
     def alive(self):

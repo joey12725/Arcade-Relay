@@ -12,9 +12,13 @@ Environment=RETROARCH_BIN=/usr/bin/retroarch
 Environment=REAL_RETROARCH=/usr/bin/retroarch
 # Pegasus is owned by pegasus.service (single supervisor) — empty
 # FRONTEND_BIN disables cabd's own spawn loop; the watchdog still refocuses
-# the frontend window by title.
+# the frontend window by title. Anchored: xdotool --name is a
+# case-insensitive regex, and a bare "pegasus" also matches Qt's hidden
+# helper windows ("pegasus-frontend" client leader, "Qt Selection Owner for
+# pegasus-fe"). focus_window maps whatever it is given, so a helper match
+# mapped a 1x1 window over the menu and stole all keyboard/pad input.
 Environment=FRONTEND_BIN=
-Environment=FRONTEND_TITLE=pegasus
+Environment=FRONTEND_TITLE=^Pegasus$
 Environment=STATE_CACHE=/var/cache/arcade/state.json
 Environment=CABD_SAVES_DIR=/saves
 # Real session binaries (sim defaults point at /fakes/*). Paths match the
