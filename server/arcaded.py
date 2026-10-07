@@ -943,8 +943,11 @@ def _rom_system(system):
     console = romdl.SYSTEM_TO_CONSOLE.get((system or "").lower())
     canonical = romdl.CONSOLE_TO_SYSTEM.get(console)
     cfg = yaml.safe_load((pathlib.Path(STATE_DIR) / "cabinet.yaml").read_text()) or {}
-    if canonical not in cfg.get("systems", []) or not cfg.get("emulators", {}).get(canonical, {}).get("core"):
-        raise ValueError(f"system {system!r} has no configured cabinet emulator")
+    playable = (canonical in cfg.get("systems", [])
+                and bool(cfg.get("emulators", {}).get(canonical, {}).get("core")))
+    acquisition = canonical in (cfg.get("downloads") or {}).get("systems", [])
+    if canonical not in romdl.ACQUISITION_EXTENSIONS or not (playable or acquisition):
+        raise ValueError(f"system {system!r} has no configured acquisition or cabinet emulator")
     return canonical
 
 
@@ -1047,7 +1050,7 @@ async def _rom_worker(entry):
             res = await hub.rpc("file.fetch", {
                 "path": f"/roms/files/{urllib.parse.quote(staged)}",
                 "dest": f"/roms/{files['system']}/{f['filename']}", "sha256": f["sha256"],
-                "protect_existing": True}, timeout=3600)
+                "protect_existing": True, "min_free_bytes": 40 * 1024 ** 3}, timeout=3600)
             if not res.get("ok"):
                 raise RuntimeError(res.get("error", "delivery failed"))
         arted = await _deliver_art(files, dest)
@@ -1059,13 +1062,20 @@ async def _rom_worker(entry):
         entry["source_metadata"] = files.get("source_metadata")
         entry["source_reused"] = files.get("source_reused", False)
         entry["display_title"] = files.get("display_title")
-        _register_installed_rom(entry)
-        synced = await hub.rpc("state.sync", {"bundle": build_bundle()}, timeout=45)
-        if not synced.get("ok"):
-            raise RuntimeError("installed game metadata sync failed")
-        rescan = await hub.rpc("library.rescan", {})
-        if not rescan.get("ok"):
-            raise RuntimeError("rescan failed")
+        cfg = yaml.safe_load((pathlib.Path(STATE_DIR) / "cabinet.yaml").read_text()) or {}
+        entry["playable"] = (
+            files["system"] in cfg.get("systems", [])
+            and bool(cfg.get("emulators", {}).get(files["system"], {}).get("core"))
+            and pathlib.Path(files["filename"]).suffix.lower()
+            in romdl.LAUNCH_EXTENSIONS.get(files["system"], set()))
+        if entry["playable"]:
+            _register_installed_rom(entry)
+            synced = await hub.rpc("state.sync", {"bundle": build_bundle()}, timeout=45)
+            if not synced.get("ok"):
+                raise RuntimeError("installed game metadata sync failed")
+            rescan = await hub.rpc("library.rescan", {})
+            if not rescan.get("ok"):
+                raise RuntimeError("rescan failed")
         entry["status"] = "ready"
         entry["detail"] = dest + ("" if arted else "  (no cover art)")
         hub.log_event(f"ROM ready: {entry['title']} at {dest}")
@@ -1107,10 +1117,15 @@ async def roms_search(request):
 async def roms_backend(request):
     """Which backend is live and which systems it can actually reach."""
     cfg = yaml.safe_load((pathlib.Path(STATE_DIR) / "cabinet.yaml").read_text()) or {}
-    systems = sorted(s for s in cfg.get("systems", []) if s in romdl.SYSTEM_TO_CONSOLE and cfg.get("emulators", {}).get(s, {}).get("core"))
+    playable = {s for s in cfg.get("systems", [])
+                if s in romdl.LAUNCH_EXTENSIONS
+                and cfg.get("emulators", {}).get(s, {}).get("core")}
+    systems = sorted((playable | set((cfg.get("downloads") or {}).get("systems", [])))
+                     & romdl.ACQUISITION_EXTENSIONS.keys())
     return web.json_response({
         "backend": romdl.backend_name(),
         "systems": systems,
+        "playable_systems": sorted(playable),
         "coverage": ({s: romdl.coverage(s) for s in systems}
                      if romdl.using_real() else {}),
         "dead_sources": romdl.DEAD_SOURCES if romdl.using_real() else {},

@@ -873,10 +873,12 @@ async def watchdog_loop():
         await asyncio.sleep(launcher.WATCHDOG_POLL_S)
 
 
-async def file_fetch(path, dest, sha256=None, protect_existing=False):
+async def file_fetch(path, dest, sha256=None, protect_existing=False,
+                     min_free_bytes=0):
     """ROM/media delivery over the tunnel (spec file.*): stream to .part,
     verify checksum, atomic rename."""
     import hashlib
+    import shutil
     if protect_existing and os.path.exists(dest):
         with open(dest, "rb") as f:
             existing = hashlib.file_digest(f, "sha256").hexdigest()
@@ -884,6 +886,7 @@ async def file_fetch(path, dest, sha256=None, protect_existing=False):
             return {"dest": dest, "bytes": os.path.getsize(dest), "sha256": existing, "cached": True}
         raise RuntimeError(f"refusing to replace existing game with different bytes: {dest}")
     os.makedirs(os.path.dirname(dest), exist_ok=True)
+    min_free_bytes = int(min_free_bytes)
     tmo = aiohttp.ClientTimeout(total=None, sock_connect=15, sock_read=120)
     h = hashlib.sha256()
     n = 0
@@ -892,8 +895,13 @@ async def file_fetch(path, dest, sha256=None, protect_existing=False):
             async with s.get(screensaver.MEDIA_BASE + path) as r:
                 if r.status != 200:
                     raise RuntimeError(f"fetch {path}: HTTP {r.status}")
+                if min_free_bytes and r.content_length is not None:
+                    if shutil.disk_usage(os.path.dirname(dest)).free - r.content_length < min_free_bytes:
+                        raise RuntimeError(f"cabinet storage reserve reached for {dest}")
                 with open(dest + ".part", "wb") as f:
                     async for chunk in r.content.iter_chunked(65536):
+                        if min_free_bytes and shutil.disk_usage(os.path.dirname(dest)).free - len(chunk) < min_free_bytes:
+                            raise RuntimeError(f"cabinet storage reserve reached for {dest}")
                         f.write(chunk)
                         h.update(chunk)
                         n += len(chunk)
@@ -1420,7 +1428,8 @@ async def handle_req(ws, data):
             result = {"suppressed_for_s": secs}
         elif method == "file.fetch":
             result = await file_fetch(params["path"], params["dest"],
-                                      params.get("sha256"), params.get("protect_existing", False))
+                                      params.get("sha256"), params.get("protect_existing", False),
+                                      params.get("min_free_bytes", 0))
         elif method == "system.screenshot":
             import base64
             p = subprocess.run(

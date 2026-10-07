@@ -89,6 +89,31 @@ CONSOLE_TO_SYSTEM = {
     "dreamcast": "dreamcast", "saturn": "saturn", "arcade": "arcade",
 }
 
+# An emulator core is necessary but not sufficient: the downloaded file must
+# also be a launchable format. In particular, Sony PKG downloads are not disc
+# images and must never be marked ready just because a core is configured.
+LAUNCH_EXTENSIONS = {
+    "nes": {".nes"}, "snes": {".sfc", ".smc"},
+    "gb": {".gb", ".gbc"}, "gbc": {".gbc"}, "gba": {".gba"},
+    "n64": {".n64", ".z64", ".v64"}, "nds": {".nds"},
+    "3ds": {".3ds", ".cci", ".cxi"},
+    "genesis": {".md", ".gen", ".bin"},
+    "arcade": {".zip"}, "psx": {".cue", ".chd"},
+    "ps2": {".iso", ".chd", ".cue"},
+    "psp": {".iso", ".cso", ".pbp"},
+    "dreamcast": {".gdi", ".cdi", ".chd", ".cue"},
+    "saturn": {".cue", ".chd", ".iso"},
+}
+
+# Acquisition-only formats can be stored and checksum-verified without being
+# exposed as playable. A Vita PKG/VPK is not a RetroArch disc image.
+ACQUISITION_EXTENSIONS = {
+    **LAUNCH_EXTENSIONS,
+    "3ds": LAUNCH_EXTENSIONS["3ds"] | {".cia"},
+    "psp": LAUNCH_EXTENSIONS["psp"] | {".pkg"},
+    "psvita": {".pkg", ".vpk"},
+}
+
 class Cancelled(Exception):
     """A download stopped because the queue asked it to."""
 
@@ -414,15 +439,15 @@ def download(rom_id, cancel=None, progress=None):
                 z.extract(i, target)
                 files.append({"filename": i.filename, "rom_path": str(target / i.filename),
                               "sha256": _hash_file(target / i.filename)})
-        exts = {"nes": {".nes"}, "snes": {".sfc", ".smc"}, "gb": {".gb"},
-                "gba": {".gba"}, "genesis": {".md", ".gen", ".bin"},
-                "psx": {".cue", ".chd"}}
-        launch = [f for f in files if pathlib.Path(f["filename"]).suffix.lower() in exts.get(entry["system"], set())]
+        launch = [f for f in files if pathlib.Path(f["filename"]).suffix.lower()
+                  in ACQUISITION_EXTENSIONS.get(entry["system"], set())]
         if len(launch) != 1:
             raise RuntimeError(f"archive must contain one launchable game, found {len(launch)}")
         rom_path, fname = launch[0]["rom_path"], launch[0]["filename"]
         digest = _hash_file(rom_path)
     else:
+        if pathlib.Path(fname).suffix.lower() not in ACQUISITION_EXTENSIONS.get(entry["system"], set()):
+            raise RuntimeError(f"unsupported {entry['system']} game format: {fname}")
         digest = h.hexdigest()
 
     system = entry.get("system") or CONSOLE_TO_SYSTEM.get(

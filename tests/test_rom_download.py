@@ -98,3 +98,69 @@ def test_search_refresh_preserves_verified_source_metadata(source, monkeypatch):
     monkeypatch.setattr(adapter, "_run_romdl", lambda *args: [{"title": "Game (USA).zip", "url": url, "score": 135}])
     adapter.search("Game", "nes")
     assert adapter._load_cache()[rid]["source_metadata"] == metadata
+
+
+@pytest.mark.parametrize("system,launch_name", [
+    ("gbc", "Game.gbc"), ("n64", "Game.z64"), ("nds", "Game.nds"),
+    ("3ds", "Game.3ds"), ("ps2", "Game.iso"),
+    ("psp", "Game.cso"), ("saturn", "Game.cue"),
+    ("dreamcast", "Game.gdi"),
+])
+def test_new_system_archive_selects_playable_descriptor(
+        source, tmp_path, monkeypatch, system, launch_name):
+    candidate, _ = source
+    payload = io.BytesIO()
+    with zipfile.ZipFile(payload, "w") as z:
+        z.writestr(launch_name, b"descriptor")
+        if launch_name.endswith((".cue", ".gdi")):
+            z.writestr("track.bin", b"disc data")
+    data = payload.getvalue()
+    # Exercise the real downloader against a local HTTP source, not a fake ROM.
+    class Response(io.BytesIO):
+        def __init__(self):
+            super().__init__(data)
+            self.headers = {"Content-Length": str(len(data))}
+    monkeypatch.setattr(adapter.urllib.request, "urlopen", lambda *args, **kw: Response())
+    candidate()
+    cached = adapter._load_cache()
+    cached["game"]["system"] = system
+    adapter._save_cache(cached)
+    result = adapter.download("game")
+    assert result["system"] == system
+    assert result["filename"] == launch_name
+    assert {f["filename"] for f in result["files"]} == (
+        {launch_name, "track.bin"} if launch_name.endswith((".cue", ".gdi"))
+        else {launch_name})
+
+
+def test_psp_package_can_only_be_acquired(source, monkeypatch):
+    candidate, _ = source
+    candidate()
+    cached = adapter._load_cache()
+    cached["game"].update(system="psp", title="Game.pkg")
+    adapter._save_cache(cached)
+    class Response(io.BytesIO):
+        headers = {"Content-Length": "4"}
+    monkeypatch.setattr(adapter.urllib.request, "urlopen",
+                        lambda *args, **kw: Response(b"\x7fPKG"))
+    result = adapter.download("game")
+    assert result["filename"] == "Game.pkg"
+    assert result["sha256"] == hashlib.sha256(b"\x7fPKG").hexdigest()
+    assert ".pkg" not in adapter.LAUNCH_EXTENSIONS["psp"]
+
+
+def test_vita_package_can_be_acquired_without_claiming_playability(source, monkeypatch):
+    candidate, _ = source
+    candidate()
+    cached = adapter._load_cache()
+    cached["game"].update(system="psvita", title="Game.pkg")
+    adapter._save_cache(cached)
+    class Response(io.BytesIO):
+        headers = {"Content-Length": "4"}
+    monkeypatch.setattr(adapter.urllib.request, "urlopen",
+                        lambda *args, **kw: Response(b"\x7fPKG"))
+    result = adapter.download("game")
+    assert result["system"] == "psvita"
+    assert result["filename"] == "Game.pkg"
+    assert result["sha256"] == hashlib.sha256(b"\x7fPKG").hexdigest()
+    assert ".pkg" not in adapter.LAUNCH_EXTENSIONS.get("psvita", set())
