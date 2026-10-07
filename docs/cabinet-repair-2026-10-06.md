@@ -29,3 +29,35 @@ game unobstructed. Injected raw controller events verify calibrated directions,
 button 7/8 isolation from axes, and Home returning to the menu. Physical switch
 health is not certified by injected tests; right top-row button 4 remains the
 previously suspect switch. No ROM files or active downloads were changed.
+
+## Follow-up: frozen menu after screensaver wake (afternoon)
+
+Symptom: the stick woke the cabinet from the screensaver, but neither the sticks
+nor a keyboard moved the menu, while it kept animating.
+
+Cause: cabd found the frontend with `xdotool search --name pegasus`, a
+case-insensitive regex. It also matches Qt's two hidden helper windows
+("pegasus-frontend" client leader, "Qt Selection Owner for pegasus-fe"), and
+xdotool's breadth-first search returns them before the real window. Before this
+morning's repair a bad match was harmless: focusing an unmapped window just
+failed. The repair added `windowmap` + `windowactivate` to `focus_window`, so
+each screensaver wake mapped a 1x1 helper over the menu and gave it keyboard
+focus. Pegasus only forwards pad navigation to Qt's focused window, so both
+inputs were dead. The same match made `hide_frontend` a silent no-op.
+
+Fix: `FRONTEND_TITLE=^Pegasus$` in cabd.service (anchored, like the stream
+titles). `hide_frontend` is removed rather than finally made effective:
+unmapping Pegasus makes Openbox drop its fullscreen state (it came back
+windowed with a title bar), and a cabd restart mid-game would have left the
+menu unmapped. Games started from the menu are unaffected either way, because
+Pegasus tears down its own window around launches it starts.
+
+Validation: tests/test_frontend_window.py. On the cabinet, with Qt focus and
+key logging temporarily added to the deployed theme: screensaver wakes, remote
+game launch/kill, and Pegasus restarts (including during the screensaver) all
+end with the menu fullscreen, active, and taking keys. The Qt helper windows
+stay unmapped.
+
+Testing note: a system change takes about 1-3 s to appear on screen, and the
+first one after a Pegasus restart about 2.5-4 s. A screenshot check with a
+shorter wait reports input as dead when it is not.
