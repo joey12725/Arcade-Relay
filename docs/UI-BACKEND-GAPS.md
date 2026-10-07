@@ -49,15 +49,19 @@ FAV/UNFAV, both of which work. The TRANSFER QUEUE panel states this.
 
 Combos and hold durations are implemented, but not where you might expect.
 
-A mapping layer's flat `{physical: logical}` map renders into `retroarch.cfg`
-/ `.rmp` and is applied by RetroArch. RetroArch's remap format cannot express
-"these two buttons, held for two seconds", so combo bindings live in a
+A mapping layer's flat map holds single-button remaps. Physical keys
+(`player1.button3: l2`, or `button3: l2` for both players) are resolved by
+`cabinet/panel_layout.py` and reach RetroArch as the two panels' rendered
+autoconfig (see `skills/controllers`). Legacy logical keys (`a: b`) still
+render to `retroarch.cfg` keyboard binds and the `.rmp`, which only the sim
+reads; the cabinet's RetroArch never applies them. RetroArch's mapping cannot
+express "these two buttons, held for two seconds", so combo bindings live in a
 separate `bindings:` list on the same layer and **cabd** detects them
 (`inputs.BindingEngine`, unit-tested in `tests/test_binding_engine.py`).
 
 ```yaml
 # controllers/global.yaml
-buttons: {a: a}              # flat remap, applied by RetroArch
+buttons: {player1.button3: l2}   # flat remap, rendered into panel autoconfig
 bindings:                    # combos/holds, detected by cabd
   - {buttons: [l, r], hold_ms: 2000, target: start}
   - {buttons: [select], hold_ms: 0, target: screensaver}
@@ -77,7 +81,11 @@ Longest match wins, so binding `l+r` does not also fire the binding on `l`.
 
 `arcadectl controls bind --scope global --buttons l+r --hold 2s --target start`
 
-**Still open:** the three cabinet hotkeys (home / screensaver / lifeline) are
+**Still open:** a panel combo whose target is `start`/`select` pulses evdev
+313/312 on that player's pad, which the rendered panel profiles no longer bind
+(Start/Select are panel buttons 7/8). It does nothing in RetroArch until
+`Panel.fire` emits the code of whichever panel button the layout gives the
+target. The three cabinet hotkeys (home / screensaver / lifeline) are
 a separate mechanism in `cabinet.yaml` and are still not editable from the
 remapper screen.
 

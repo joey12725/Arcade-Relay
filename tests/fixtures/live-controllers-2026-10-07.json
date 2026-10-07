@@ -1,0 +1,78 @@
+{
+ "controllers/global.yaml": {
+  "bindings": [
+   {
+    "buttons": [
+     "button4",
+     "button8"
+    ],
+    "hold_ms": 2000,
+    "target": "start"
+   },
+   {
+    "buttons": [
+     "button3",
+     "button7"
+    ],
+    "hold_ms": 2000,
+    "target": "select"
+   },
+   {
+    "buttons": [
+     "button1",
+     "button5"
+    ],
+    "hold_ms": 2000,
+    "target": "home"
+   }
+  ],
+  "buttons": {
+   "a": "a",
+   "b": "b",
+   "player1.button1": "a",
+   "player1.button2": "y",
+   "player1.button3": "l",
+   "player1.button4": "r",
+   "player1.button5": "b",
+   "player1.button6": "x",
+   "player1.button7": "start",
+   "player1.button8": "select",
+   "select": "select",
+   "start": "start",
+   "x": "x",
+   "y": "y"
+  }
+ },
+ "controllers/systems/arcade.yaml": {
+  "remap": {
+   "a": "x"
+  }
+ },
+ "controllers/systems/gba.yaml": {
+  "remap": {
+   "a": "l"
+  }
+ },
+ "controllers/systems/genesis.yaml": {
+  "remap": {
+   "a": "c"
+  }
+ },
+ "controllers/systems/nes.yaml": {
+  "remap": {
+   "a": "a",
+   "b": "b"
+  }
+ },
+ "controllers/systems/psx.yaml": {
+  "remap": {
+   "a": "cross"
+  }
+ },
+ "controllers/systems/snes.yaml": {
+  "remap": {
+   "a": "b",
+   "b": "a"
+  }
+ }
+}
