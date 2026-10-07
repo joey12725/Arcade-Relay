@@ -20,19 +20,23 @@ class ControllerTests(unittest.IsolatedAsyncioTestCase):
             events += [(1, code, 1), (1, code, 0)]
         events += [(1, 313, 1)]  # unplug while Start is held
         closed = asyncio.Event()
+        loop = asyncio.get_running_loop()
 
         class Device:
+            fd = -1
             info = SimpleNamespace(vendor=0x0c12, product=0x0c30)
             def capabilities(self): return {1: []}
             async def async_read_loop(self):
                 for kind, code, value in events:
                     yield SimpleNamespace(type=kind, code=code, value=value)
                 raise OSError('unplugged')
-            def close(self): closed.set()
+            def close(self): loop.call_soon_threadsafe(closed.set)   # closed off-loop
 
         keys, activity = [], []
         src = inputs.EvdevSource(lambda *x: keys.append(x), lambda: activity.append(1))
+        sysfs = inputs.NodeInfo('input1', 0x0c12, 0x0c30, '', 'Brook', 0x1b)
         with patch.object(evdev, 'list_devices', return_value=['test-pad']), \
+             patch.object(inputs, 'node_info', return_value=sysfs), \
              patch.object(evdev, 'InputDevice', return_value=Device()):
             task = asyncio.create_task(src.run())
             await asyncio.wait_for(closed.wait(), 1)

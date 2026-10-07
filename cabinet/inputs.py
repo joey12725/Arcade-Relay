@@ -13,8 +13,10 @@ until any of them is released. It is shared by both sources:
   - the sim FIFO source in cabd: lines "<button> down|up" drive the same
     engine, so combo timing is tested end-to-end in sim.
 """
+import os
 import re
 import time
+from collections import namedtuple
 
 DEFAULT_HOLD_S = 2.0
 
@@ -323,6 +325,45 @@ def list_devices():
     return out
 
 
+SYSFS_INPUT = "/sys/class/input"
+EV_KEY_BIT = 1 << 1
+NodeInfo = namedtuple("NodeInfo", "identity vendor product phys name ev")
+
+
+def node_info(path, known=None):
+    """Classify /dev/input/eventN from sysfs without opening it. On the
+    cabinet's kernel each evdev close() waits out an RCU grace period
+    (20-46 ms), so open/close-probing every node froze the input loop.
+    None when there is nothing new: the node still holds device instance
+    `known`, or sysfs is not complete yet (ask again next scan)."""
+    node = os.path.join(SYSFS_INPUT, os.path.basename(path))
+
+    def read(name):
+        with open(os.path.join(node, "device", name)) as f:
+            return f.read().strip()
+    try:
+        # The link names the inputNN instance, so it changes on every plug.
+        # Read first: a replug racing the reads below then shows up as a
+        # new identity next scan instead of being remembered wrongly.
+        identity = os.readlink(node)
+        if identity == known:
+            return None
+        return NodeInfo(identity, int(read("id/vendor"), 16), int(read("id/product"), 16),
+                        read("phys"), read("name"), int(read("capabilities/ev").split()[-1], 16))
+    except (OSError, ValueError, IndexError):
+        return None
+
+
+async def close_device(dev):
+    """evdev close() blocks (see node_info), so do it in a thread. Unhook
+    the fd from the loop first: python-evdev's close() only removes its
+    reader when it can see the loop, which it cannot from a thread."""
+    import asyncio
+    if dev.fd >= 0:
+        asyncio.get_running_loop().remove_reader(dev.fd)
+    await asyncio.to_thread(dev.close)
+
+
 class EvdevSource:
     """Real-hardware input reader. Emits (button, is_down) via callback and
     raw activity notifications. Requires /dev/input/event* devices (panel
@@ -333,26 +374,49 @@ class EvdevSource:
         self.on_activity = on_activity
         self.ignore_device = ignore_device or (lambda dev: False)
         self.devices = []
+        self.rejected = {}   # path -> identity of a device not worth opening
+
+    def wanted(self, path):
+        info = node_info(path, self.rejected.get(path))
+        if info is None:
+            return False
+        if self.ignore_device(info) or not info.ev & EV_KEY_BIT:
+            self.rejected[path] = info.identity
+            return False
+        return True
 
     def open_devices(self):
+        """Paths run() will read; sysfs only, nothing is opened."""
         try:
             import evdev
         except ImportError:
             return []
+        self.devices = [p for p in evdev.list_devices() if self.wanted(p)]
+        return self.devices
+
+    async def scan(self, tasks, reader):
+        import asyncio
+        import evdev
         from evdev import ecodes
-        self.devices = []
-        for path in evdev.list_devices():
+        try:
+            present = set(evdev.list_devices())
+        except OSError:
+            present = set()
+        for path in [p for p in tasks if p not in present
+                     or tasks[p].done()]:
+            tasks.pop(path).cancel()
+        for path in sorted(present - set(tasks)):
+            if not self.wanted(path):
+                continue
             try:
-                dev = evdev.InputDevice(path)
-                if self.ignore_device(dev):
-                    dev.close()
-                    continue
-                caps = dev.capabilities()
-                if ecodes.EV_KEY in caps:
-                    self.devices.append(dev)
+                dev = await asyncio.to_thread(evdev.InputDevice, path)
             except OSError:
                 continue
-        return self.devices
+            if self.ignore_device(dev) or ecodes.EV_KEY not in dev.capabilities():
+                await close_device(dev)   # replaced since the sysfs read
+                continue
+            tasks[path] = asyncio.create_task(reader(dev))
+        self.devices = list(tasks)
 
     async def run(self):
         """asyncio reader over all key-capable devices, with hot-plug.
@@ -363,7 +427,6 @@ class EvdevSource:
         engine as soon as the kernel enumerates it, without a cabd restart.
         """
         import asyncio
-        import evdev
         from evdev import ecodes
 
         held_counts = {}
@@ -420,28 +483,9 @@ class EvdevSource:
             finally:
                 for button in list(held):
                     emit(button, False)
-                dev.close()
+                await close_device(dev)
 
         tasks = {}
         while True:
-            try:
-                present = set(evdev.list_devices())
-            except OSError:
-                present = set()
-            for path in [p for p in tasks if p not in present
-                         or tasks[p].done()]:
-                tasks.pop(path).cancel()
-            for path in present - set(tasks):
-                try:
-                    dev = evdev.InputDevice(path)
-                    if self.ignore_device(dev):
-                        dev.close()
-                        continue
-                    if ecodes.EV_KEY in dev.capabilities():
-                        tasks[path] = asyncio.create_task(reader(dev))
-                    else:
-                        dev.close()
-                except OSError:
-                    continue
-            self.devices = list(tasks)
+            await self.scan(tasks, reader)
             await asyncio.sleep(5)

@@ -933,13 +933,13 @@ async def watchdog_loop():
         s = game["session"]
         if s is None:
             silent_since = None
-        elif not s.alive():
+        elif not await asyncio.to_thread(s.alive):   # xdotool: keep it off the input loop
             if await _recover_if_current(s, hung=False):
                 log("watchdog: game died, frontend refocused")
             silent_since = None
         elif not s.probe:
             silent_since = None   # streams have no UDP iface: never "hung"
-        elif launcher.probe_responsive():
+        elif await asyncio.to_thread(launcher.probe_responsive):
             silent_since = None
         else:
             now = time.monotonic()

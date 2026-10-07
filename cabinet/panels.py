@@ -10,7 +10,7 @@ import json
 from pathlib import Path
 import time
 
-from inputs import BindingEngine
+from inputs import BindingEngine, close_device, node_info
 
 VENDOR = 0xf055
 PROFILE = Path(__file__).parent / 'provision/controllers/panels.json'
@@ -28,6 +28,7 @@ class Panel:
         self.pulses = {}
         self.engine = BindingEngine([], self.fire, now=now)
         self.binding_entries = None
+        self.axes = {}
 
     def configure(self, entries):
         # ROM deliveries sync the whole state. An unchanged binding must
@@ -57,8 +58,20 @@ class Panel:
                 self.monitor(self.profile['player'], button, bool(value))
                 self.engine.key_event(button, bool(value))
         elif kind == 3 and str(code) in self.profile['axes']:
+            self.axes[code] = value
             output_code, sign = self.profile['axes'][str(code)]
             self.write(kind, output_code, value * sign)
+
+    def resync(self, keys, axes):
+        """Replay only what changed versus the device's real state."""
+        keys = set(keys)
+        for code in sorted(self.down - keys):
+            self.event(1, code, 0)
+        for code in sorted(keys - self.down):
+            self.event(1, code, 1)
+        for code, value in axes.items():
+            if self.axes.get(code, 0) != value:
+                self.event(3, code, value)
 
     def poll(self):
         self.engine.poll()
@@ -74,6 +87,7 @@ class Panel:
         self.pulses.clear()
         self.engine.held.clear()
         self.engine.latched.clear()
+        self.axes.clear()
         self.write(3, 16, 0)
         self.write(3, 17, 0)
 
@@ -84,6 +98,7 @@ class PanelBridge:
         self.entries = entries
         self.action, self.monitor, self.activity, self.log = action, monitor, activity, log
         self.panels = {}
+        self.seen = {}   # path -> identity already classified
 
     def configure(self, entries):
         # Only numbered-panel chords belong here. Generic bindings keep
@@ -97,12 +112,49 @@ class PanelBridge:
 
     @staticmethod
     def is_managed(dev):
-        return (dev.info.vendor, dev.info.product) == (0x0c12, 0x0c30) or dev.info.vendor == VENDOR
+        info = getattr(dev, 'info', dev)   # InputDevice or sysfs inputs.NodeInfo
+        return (info.vendor, info.product) == (0x0c12, 0x0c30) or info.vendor == VENDOR
+
+    def panel_for(self, vendor, product, phys):
+        if (vendor, product) != (self.config['vendor'], self.config['product']):
+            return None
+        return next((p for p in self.panels.values()
+                     if phys.endswith('-' + p.profile['usb_port'] + '/input0')), None)
+
+    async def scan(self, readers, read):
+        import evdev
+        for path, task in list(readers.items()):
+            if task.done():
+                task.result()
+                del readers[path]
+                self.seen.pop(path, None)   # still there (grab failed?): retry
+        for path in sorted(evdev.list_devices()):
+            if path in readers:
+                continue
+            info = node_info(path, self.seen.get(path))
+            if info is None:
+                continue
+            self.seen[path] = info.identity
+            panel = self.panel_for(info.vendor, info.product, info.phys)
+            if panel is None:
+                if (info.vendor, info.product) == (self.config['vendor'], self.config['product']):
+                    self.log(f'Brook panel on uncalibrated port: {info.phys}')
+                continue
+            try:
+                dev = await asyncio.to_thread(evdev.InputDevice, path)
+            except OSError:
+                del self.seen[path]
+                continue
+            if self.panel_for(dev.info.vendor, dev.info.product, dev.phys) is not panel:
+                await close_device(dev)   # replaced since the sysfs read
+                continue
+            readers[path] = asyncio.create_task(read(dev, panel))
 
     async def run(self):
         import evdev
         from evdev import ecodes as e
         self.panels = {}
+        self.seen = {}
         outputs, readers = {}, {}
         # SDL 2.0.20's fallback classifier requires X/Y even for a digital
         # hat-only pad. Keep these neutral; calibrated movement uses the hat.
@@ -128,40 +180,30 @@ class PanelBridge:
                     dev.grab()
                     panel.reset()
                     self.log(f"player {panel.profile['player']} panel attached: {dev.phys}")
+                    dropped = False
                     async for event in dev.async_read_loop():
                         if event.type in (e.EV_KEY, e.EV_ABS):
                             self.activity()
-                            panel.event(event.type, event.code, event.value)
+                            if not dropped:
+                                panel.event(event.type, event.code, event.value)
+                        elif event.type == e.EV_SYN and event.code == e.SYN_DROPPED:
+                            dropped = True
+                        elif dropped and event.type == e.EV_SYN and event.code == e.SYN_REPORT:
+                            # The kernel queue overflowed: skip to the next report,
+                            # then rebuild from real state so no release is lost.
+                            dropped = False
+                            panel.resync(dev.active_keys(), {int(c): dev.absinfo(int(c)).value
+                                                             for c in panel.profile['axes']})
                 except OSError as exc:
                     self.log(f"panel detached: {dev.path}: {exc}")
                 finally:
                     panel.reset()
-                    dev.close()
+                    await close_device(dev)
 
             next_scan = 0
             while True:
                 if time.monotonic() >= next_scan:
-                    for path, task in list(readers.items()):
-                        if task.done():
-                            task.result()
-                            del readers[path]
-                    for path in sorted(evdev.list_devices()):
-                        if path in readers:
-                            continue
-                        try:
-                            dev = evdev.InputDevice(path)
-                            if (dev.info.vendor, dev.info.product) != (self.config['vendor'], self.config['product']):
-                                dev.close()
-                                continue
-                            panel = next((p for p in self.panels.values()
-                                          if dev.phys.endswith('-' + p.profile['usb_port'] + '/input0')), None)
-                            if panel:
-                                readers[path] = asyncio.create_task(read(dev, panel))
-                            else:
-                                self.log(f'Brook panel on uncalibrated port: {dev.phys}')
-                                dev.close()
-                        except OSError:
-                            continue
+                    await self.scan(readers, read)
                     next_scan = time.monotonic() + 2
                 for panel in self.panels.values():
                     panel.poll()
