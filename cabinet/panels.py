@@ -121,6 +121,14 @@ class PanelBridge:
         return next((p for p in self.panels.values()
                      if phys.endswith('-' + p.profile['usb_port'] + '/input0')), None)
 
+    @staticmethod
+    def drain(dev):
+        try:
+            for _ in range(16):   # a few reads empty the kernel queue; never spin
+                list(dev.read())
+        except BlockingIOError:
+            pass
+
     async def scan(self, readers, read):
         import evdev
         for path, task in list(readers.items()):
@@ -180,18 +188,18 @@ class PanelBridge:
                     dev.grab()
                     panel.reset()
                     self.log(f"player {panel.profile['player']} panel attached: {dev.phys}")
-                    dropped = False
-                    async for event in dev.async_read_loop():
+                    events = dev.async_read_loop()
+                    async for event in events:
                         if event.type in (e.EV_KEY, e.EV_ABS):
                             self.activity()
-                            if not dropped:
-                                panel.event(event.type, event.code, event.value)
+                            panel.event(event.type, event.code, event.value)
                         elif event.type == e.EV_SYN and event.code == e.SYN_DROPPED:
-                            dropped = True
-                        elif dropped and event.type == e.EV_SYN and event.code == e.SYN_REPORT:
-                            # The kernel queue overflowed: skip to the next report,
-                            # then rebuild from real state so no release is lost.
-                            dropped = False
+                            # The kernel queue overflowed. As libevdev does, drop what
+                            # is already read (ReadIterator's batch) or still queued:
+                            # all of it predates the state read next. Then rebuild.
+                            self.activity()
+                            events.current_batch = iter(())
+                            self.drain(dev)
                             panel.resync(dev.active_keys(), {int(c): dev.absinfo(int(c)).value
                                                              for c in panel.profile['axes']})
                 except OSError as exc:

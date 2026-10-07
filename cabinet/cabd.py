@@ -908,7 +908,7 @@ async def _recover_if_current(s, hung):
         if hung:
             await asyncio.to_thread(s.kill)   # kill() refocuses frontend
         else:
-            launcher.focus_frontend()
+            await asyncio.to_thread(launcher.focus_frontend)
         game["session"] = None
         game["rom"] = None
         return True
@@ -928,7 +928,7 @@ async def watchdog_loop():
             async with game_lock:
                 if ss["on"] and not screensaver.running():
                     ss["on"] = False
-                    launcher.focus_frontend()
+                    await asyncio.to_thread(launcher.focus_frontend)
                     log("watchdog: screensaver died, flag cleared")
         s = game["session"]
         if s is None:
