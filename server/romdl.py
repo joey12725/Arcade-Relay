@@ -33,6 +33,8 @@ import zipfile
 import threading
 import time
 import signal
+import re
+import shlex
 
 STAGING = os.environ.get("ROMDL_STAGING", "/tmp/romdl-staging")
 BACKEND = os.environ.get("ROMDL_BACKEND", "auto").lower()
@@ -41,6 +43,7 @@ SEARCH_TIMEOUT = int(os.environ.get("ROMDL_SEARCH_TIMEOUT", "45"))
 DOWNLOAD_TIMEOUT = int(os.environ.get("ROMDL_DOWNLOAD_TIMEOUT", "3600"))
 USER_AGENT = "Mozilla/5.0 (compatible; arcaded/1.1; +https://github.com/joey12725/Arcade-Relay)"
 _cache_lock = threading.RLock()
+MIN_FREE_BYTES = 40 * 1024 ** 3
 
 # Our /roms directory name -> the console token romdl's fuzzy matcher wants.
 # Both of its sources keep their own alias tables; these are the spellings
@@ -88,6 +91,65 @@ CONSOLE_TO_SYSTEM = {
     "ps1": "psx", "ps2": "ps2", "ps3": "ps3", "psp": "psp", "vita": "psvita",
     "dreamcast": "dreamcast", "saturn": "saturn", "arcade": "arcade",
 }
+
+# Format support is independent of both source coverage and emulator setup.
+# Do not add guessed console tokens: new source mappings need live validation.
+LAUNCH_EXTENSIONS = {
+    "nes": {".nes"}, "snes": {".sfc", ".smc"},
+    "gb": {".gb", ".gbc"}, "gbc": {".gbc"}, "gba": {".gba"},
+    "n64": {".n64", ".z64", ".v64"}, "nds": {".nds"},
+    "3ds": {".3ds", ".cci", ".cxi"},
+    "genesis": {".md", ".gen", ".bin"}, "arcade": {".zip"},
+    "psx": {".cue", ".chd"}, "ps2": {".iso", ".chd", ".cue"},
+    "psp": {".iso", ".cso", ".pbp"},
+    "dreamcast": {".gdi", ".cdi", ".chd", ".cue"},
+    "saturn": {".cue", ".chd", ".iso"},
+}
+ACQUISITION_EXTENSIONS = {
+    **LAUNCH_EXTENSIONS,
+    "3ds": LAUNCH_EXTENSIONS["3ds"] | {".cia"},
+    "psp": LAUNCH_EXTENSIONS["psp"] | {".pkg"},
+    "psvita": {".pkg", ".vpk"},
+}
+UNVERIFIED_SYSTEMS = ["gamecube", "wii", "atari2600", "atari7800", "xbox"]
+
+
+def check_space(path, additional=0):
+    if shutil.disk_usage(path).free - additional < MIN_FREE_BYTES:
+        raise RuntimeError(f"server storage reserve reached at {path}")
+
+
+def validate_descriptor(path, files):
+    """Require every referenced track to be in the delivered manifest."""
+    path = pathlib.Path(path)
+    names = {f["filename"] for f in files}
+    if path.suffix.lower() == ".cue":
+        tracks = []
+        for line in path.read_text().splitlines():
+            if not re.match(r'^\s*FILE(?:\s|$)', line, re.I):
+                continue
+            try:
+                row = shlex.split(line)
+                if len(row) != 3:
+                    raise ValueError("invalid FILE directive")
+                tracks.append(row[1])
+            except ValueError as e:
+                raise RuntimeError("invalid CUE descriptor") from e
+    elif path.suffix.lower() == ".gdi":
+        lines = path.read_text().splitlines()
+        try:
+            count = int(lines[0])
+            rows = [shlex.split(line) for line in lines[1:] if line.strip()]
+            if count < 1 or len(rows) != count or any(len(row) != 6 for row in rows):
+                raise ValueError("invalid track table")
+            tracks = [row[4] for row in rows]
+        except (ValueError, IndexError) as e:
+            raise RuntimeError("invalid GDI descriptor") from e
+    else:
+        return
+    if not tracks or any(t not in names or pathlib.PurePosixPath(t).name != t
+                         or "\\" in t for t in tracks):
+        raise RuntimeError("disc descriptor references missing or unsafe tracks")
 
 class Cancelled(Exception):
     """A download stopped because the queue asked it to."""
@@ -145,6 +207,22 @@ def _candidate_id(url):
     return hashlib.sha1(url.encode()).hexdigest()[:16]
 
 
+def describe(rom_id):
+    """{title, system} for a candidate id a search handed out, else None.
+
+    Lets the queue label a job that was requested by bare id (the CLI's
+    `roms request --id`) with the game it actually is, and refuse an id the
+    downloader could never resolve.
+    """
+    if not using_real():
+        entry = next((c for c in FAKE_CATALOG if c["id"] == rom_id), None)
+    else:
+        entry = _load_cache().get(rom_id)
+    if entry is None:
+        return None
+    return {"title": entry["title"], "system": entry.get("system") or ""}
+
+
 def remember_source(rom_id, metadata):
     if not metadata:
         return
@@ -180,6 +258,7 @@ def _fetch_torrent(entry, path, cancel, progress):
         deadline = time.monotonic() + DOWNLOAD_TIMEOUT
         offset = 0
         while proc.poll() is None:
+            check_space(STAGING)
             log.seek(offset)
             for line in log:
                 try:
@@ -202,6 +281,8 @@ def _fetch_torrent(entry, path, cancel, progress):
         info = json.loads(out)
         if info["file_name"] != entry["title"]:
             raise RuntimeError("source identity differs from selected candidate")
+        if os.path.getsize(path) != info["size"] or _hash_file(path) != info["sha256"]:
+            raise RuntimeError("published source checksum or size mismatch")
         return info
     finally:
         if proc.poll() is None:
@@ -263,6 +344,9 @@ def search(query, system=None, limit=10, deep=False):
             continue
         if (m.get("source") == "pkgindex" and console not in NPS_CONSOLES):
             continue
+        reported = m.get("system") or m.get("console")
+        if reported and SYSTEM_TO_CONSOLE.get(str(reported).lower()) != console:
+            continue
         rid = _candidate_id(url)
         entry = {**cache.get(rid, {}), "id": rid, "title": m.get("title") or url.rsplit("/", 1)[-1],
                  "system": CONSOLE_TO_SYSTEM[console], "console": console, "url": url,
@@ -321,6 +405,7 @@ def download(rom_id, cancel=None, progress=None):
         raise KeyError(f"unknown rom id {rom_id} (search again to refresh it)")
 
     os.makedirs(STAGING, exist_ok=True)
+    check_space(STAGING)
     fname = _safe_filename(entry["title"])
     directory = pathlib.Path(STAGING) / rom_id
     directory.mkdir(exist_ok=True)
@@ -340,6 +425,10 @@ def download(rom_id, cancel=None, progress=None):
     elif url.startswith("https://mirror.invalid/rom?"):
         source_info = _fetch_torrent(entry, source_path, cancel, progress)
         url = pathlib.Path(source_path).as_uri()
+    else:
+        # Production payloads must use the server-side fetch command, never
+        # quietly fall back to direct HTTP for a new provider/package URL.
+        raise RuntimeError("source is not supported by the server-side ROM pipeline")
     req = urllib.request.Request(url,
                                  headers={"User-Agent": USER_AGENT})
     done = 0
@@ -351,12 +440,14 @@ def download(rom_id, cancel=None, progress=None):
                 total = int(r.headers.get("Content-Length") or 0) or None
             except (TypeError, ValueError):
                 pass
+            check_space(directory, total or 0)
             while True:
                 if cancel is not None and cancel.is_set():
                     raise Cancelled(f"cancelled after {done} bytes")
                 chunk = r.read(64 * 1024)
                 if not chunk:
                     break
+                check_space(directory, len(chunk))
                 h.update(chunk)
                 f.write(chunk)
                 done += len(chunk)
@@ -368,6 +459,8 @@ def download(rom_id, cancel=None, progress=None):
                 raise RuntimeError("source returned an empty file")
             if entry.get("sha256") and h.hexdigest() != entry["sha256"]:
                 raise RuntimeError("source checksum mismatch")
+            if source_info and (done != source_info["size"] or h.hexdigest() != source_info["sha256"]):
+                raise RuntimeError("published source checksum or size mismatch")
             if fname.lower().endswith(".zip"):
                 f.flush()
                 with zipfile.ZipFile(tmp) as z:
@@ -405,24 +498,32 @@ def download(rom_id, cancel=None, progress=None):
         target = pathlib.Path(STAGING) / rom_id
         target.mkdir(exist_ok=True)
         with zipfile.ZipFile(rom_path) as z:
+            check_space(target, sum(i.file_size for i in z.infolist()))
+            seen = set()
             for i in z.infolist():
                 p = pathlib.PurePosixPath(i.filename)
                 if p.is_absolute() or ".." in p.parts or len(p.parts) != 1:
                     raise RuntimeError(f"unsupported archive path: {i.filename}")
                 if i.is_dir():
                     continue
+                if i.filename in seen or i.filename == pathlib.Path(rom_path).name:
+                    raise RuntimeError(f"duplicate or conflicting archive member: {i.filename}")
+                seen.add(i.filename)
+                check_space(target, i.file_size)
                 z.extract(i, target)
                 files.append({"filename": i.filename, "rom_path": str(target / i.filename),
                               "sha256": _hash_file(target / i.filename)})
-        exts = {"nes": {".nes"}, "snes": {".sfc", ".smc"}, "gb": {".gb"},
-                "gba": {".gba"}, "genesis": {".md", ".gen", ".bin"},
-                "psx": {".cue", ".chd"}}
-        launch = [f for f in files if pathlib.Path(f["filename"]).suffix.lower() in exts.get(entry["system"], set())]
+        launch = [f for f in files if pathlib.Path(f["filename"]).suffix.lower()
+                  in ACQUISITION_EXTENSIONS.get(entry["system"], set())]
         if len(launch) != 1:
-            raise RuntimeError(f"archive must contain one launchable game, found {len(launch)}")
+            raise RuntimeError(f"archive must contain one primary game file, found {len(launch)}")
         rom_path, fname = launch[0]["rom_path"], launch[0]["filename"]
+        validate_descriptor(rom_path, files)
         digest = _hash_file(rom_path)
     else:
+        if pathlib.Path(fname).suffix.lower() not in ACQUISITION_EXTENSIONS.get(entry["system"], set()):
+            raise RuntimeError(f"unsupported {entry['system']} acquisition format: {fname}")
+        validate_descriptor(rom_path, [])
         digest = h.hexdigest()
 
     system = entry.get("system") or CONSOLE_TO_SYSTEM.get(

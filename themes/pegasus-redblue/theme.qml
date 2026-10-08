@@ -118,11 +118,8 @@ FocusScope {
                     collectionIndex = (collectionIndex + collections.length - 1)
                                       % collections.length;
             } else if (api.keys.isFilters(event)) {   // favorite: Y, panel 2
-                // NOTE: toggles Pegasus's internal favorite flag (star badge
-                // only). The authoritative favorites list lives in
-                // state/library/favorites.yaml (arcadectl favorites ...);
-                // the generated Favorites collection follows state, not this
-                // flag. Known divergence — see HARDWARE-TODO.
+                // cabd bridges Pegasus's saved stars to the authoritative
+                // server list and refreshes the generated Favorites collection.
                 event.accepted = true;
                 var g = currentCollection.games.get(grid.currentIndex);
                 g.favorite = !g.favorite;

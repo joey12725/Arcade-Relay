@@ -3,8 +3,8 @@
 
 mpv fullscreen above the frontend: --panscan=1.0 --keepaspect crops the
 16:9 source to fill the panel with zero bars and zero distortion (SCR-2);
-brightness is a multiplicative colorchannelmixer tint, live-adjustable
-through mpv's JSON IPC without restarting playback (SCR-3); the process
+brightness fades from black (0) through unchanged (100) to white (200),
+live-adjustable through mpv's JSON IPC without restarting playback (SCR-3); the process
 carries audio class `screensaver` => muted by default policy (SCR-7).
 """
 import json
@@ -50,19 +50,26 @@ def outro_tick():
 
 
 def _vf(brightness):
-    f = max(0, min(int(brightness), 100)) / 100.0
-    return f"lavfi=[colorchannelmixer=rr={f}:gg={f}:bb={f}]"
+    level = max(0, min(int(brightness), 200)) / 100.0
+    if level <= 1:
+        return f"lavfi=[colorchannelmixer=rr={level}:gg={level}:bb={level}]"
+    # Blend each channel toward white; multiplying alone leaves black black.
+    expr = f"val*{2 - level}+maxval*{level - 1}"
+    return f"lavfi=[lutrgb=r='{expr}':g='{expr}':b='{expr}']"
 
 
-def start_dim_clock(brightness=30):
+def start_dim_clock(brightness=100):
     """`fallback: dim_clock` (spec §5.5): no media to play, so show a dim
     clock rather than a black screen or the frontend. Same window title and
     process handle as media playback, so on/off, the watchdog and the
     brightness IPC all treat it identically."""
     global _proc
     stop(refocus=False)
-    f = max(0, min(int(brightness), 100)) / 100.0
-    grey = int(224 * f)
+    level = max(0, min(int(brightness), 200)) / 100.0
+    f = min(level, 2 - level)
+    white = max(0, level - 1)
+    grey = int(224 * f + 255 * white)
+    background = int(255 * white)
     # A generated source (no media file, no network) with the clock drawn
     # on top: works fully offline, which is the whole point of a fallback.
     _proc = subprocess.Popen(
@@ -74,7 +81,7 @@ def start_dim_clock(brightness=30):
          "--vf=lavfi=[drawtext=text='%{localtime}':fontsize=48:"
          f"fontcolor=0x{grey:02x}{grey:02x}{grey:02x}:"
          "x=(w-text_w)/2:y=(h-text_h)/2]",
-         "av://lavfi:color=c=black:s=640x480:r=5"],
+         f"av://lavfi:color=c=0x{background:02x}{background:02x}{background:02x}:s=640x480:r=5"],
         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
         preexec_fn=launcher.die_with_parent())
     deadline = time.monotonic() + 10
@@ -140,9 +147,9 @@ def _aspect_args(mode):
 
 def _subs_visible():
     """mpv draws subtitles after the video filters, so the brightness tint
-    never reaches them; at 0 ("fully black", SCR-3) they are hidden, above
-    it they stay at full brightness."""
-    return _subs["on"] and _subs["brightness"] > 0
+    never reaches them; hide them at the black and white endpoints so
+    the whole screen reaches the requested color."""
+    return _subs["on"] and 0 < _subs["brightness"] < 200
 
 
 def _sub_args(visible):

@@ -207,6 +207,75 @@ tbody tr:nth-child(even) { background:#fffbe8; }
   margin-top:12px; }
 .gap b { font-family:var(--cap); font-size:11px; color:#8a6400; }
 
+/* ------------------------------------------------------------ game library */
+.library { border:3px solid var(--blue); border-radius:16px; overflow:hidden;
+  background:#f5f4ff; box-shadow:5px 5px 0 rgba(27,11,46,.18); }
+.library-head { display:flex; align-items:center; justify-content:space-between;
+  gap:20px; flex-wrap:wrap; padding:24px; background:linear-gradient(120deg,#eaf0ff,#fff0f8); }
+.library-eyebrow { font-size:10px; font-weight:bold; color:var(--blue); letter-spacing:.14em; }
+.library h1 { font-family:var(--disp); font-size:32px; margin:7px 0 10px; }
+.library-head p { font-size:12px; line-height:1.6; margin:0; color:var(--greyink); }
+.library-totals { display:flex; gap:24px; }
+.library-total { font-size:10px; font-weight:bold; color:var(--greyink); }
+.library-total b { display:block; font-family:var(--disp); font-size:28px; color:var(--blue); margin-bottom:5px; }
+.library-toolbar { display:flex; align-items:flex-end; gap:14px; flex-wrap:wrap;
+  padding:18px 24px; background:#fff; border-top:1px solid #d9d9ef; border-bottom:1px solid #d9d9ef; }
+.library-toolbar .field { flex:1; min-width:150px; color:var(--greyink); }
+.library-toolbar .library-search { flex:2; min-width:220px; }
+.library-toolbar input, .library-toolbar select { width:100%; padding:11px 12px;
+  border:2px solid #c9c4de; border-radius:9px; font-weight:normal; }
+.library button:focus-visible, .library input:focus-visible, .library select:focus-visible {
+  outline:3px solid var(--hot); outline-offset:4px; }
+.library-toolbar button { min-height:41px; margin-bottom:3px; }
+.library-results { display:flex; align-items:center; justify-content:space-between; gap:12px;
+  flex-wrap:wrap; padding:18px 24px 0; font-size:12px; color:var(--greyink); }
+.library-results button { font-family:var(--body); font-size:11px; color:var(--blue);
+  background:transparent; border:0; box-shadow:none; text-shadow:none; padding:5px 0; }
+.game-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(210px,1fr));
+  align-items:stretch; gap:18px; padding:18px 24px 24px; }
+.game-card { min-width:0; display:flex; flex-direction:column; background:#fff;
+  border:2px solid #d9d5e9; border-radius:13px; overflow:hidden; box-shadow:0 3px 0 #e1dcec;
+  transition:border-color 150ms,box-shadow 150ms; }
+.game-card:hover { border-color:var(--blue); box-shadow:0 5px 14px rgba(11,63,209,.12); }
+.game-card.is-favorite { border-color:#d9b85c; }
+.game-cover { position:relative; height:190px; display:grid; place-items:center;
+  padding:18px; overflow:hidden; background:radial-gradient(ellipse at 50% 30%,#fff,#e8e8fb); }
+.game-cover img { position:relative; max-width:100%; width:100%; height:100%; object-fit:contain;
+  filter:drop-shadow(0 7px 7px rgba(27,11,46,.2)); }
+.game-cover img[hidden], .game-cover-fallback[hidden] { display:none; }
+.game-cover-fallback { position:absolute; inset:18px; border:2px solid #fff; border-radius:9px;
+  display:flex; flex-direction:column; align-items:center; justify-content:center; gap:12px;
+  color:#fff; background:linear-gradient(145deg,#243b96,#7b2dff 65%,#ed66af); }
+.game-cover-fallback span { font-family:var(--disp); font-size:42px; opacity:.8; }
+.game-cover-fallback small { font-weight:bold; font-size:10px; letter-spacing:.16em; }
+.game-cover-star { position:absolute; top:10px; right:10px; color:#6b4700; background:#ffedaa;
+  border:2px solid #fff; border-radius:50%; width:28px; height:28px; display:grid; place-items:center; }
+.game-info { padding:15px; display:flex; flex:1; flex-direction:column; align-items:flex-start; }
+.game-system { font-size:9px; font-weight:bold; letter-spacing:.08em; color:var(--blue);
+  background:#edf1ff; border:1px solid #d5dfff; border-radius:5px; padding:5px 7px; }
+.game-title { font-size:13px; line-height:1.6; margin:10px 0 18px; overflow-wrap:anywhere; }
+.game-actions { display:flex; gap:10px; width:100%; margin-top:auto; padding-bottom:3px; }
+.game-actions button { min-height:37px; }
+.game-actions .game-launch { flex:1; }
+.game-actions .game-favorite { width:42px; font-size:18px; padding:5px; }
+.library-empty { grid-column:1/-1; text-align:center; padding:45px 20px;
+  border:2px dashed #c9c4de; border-radius:12px; background:#fff; }
+.library-empty h2 { font-family:var(--disp); font-size:22px; margin:0 0 12px; }
+.library-empty p { font-size:12px; line-height:1.6; color:var(--greyink); }
+.library-foot { display:flex; align-items:center; gap:16px; flex-wrap:wrap; padding:16px 24px;
+  border-top:1px solid #d9d9ef; background:#fff; font-size:11px; color:var(--greyink); }
+.library-storage { flex:1; min-width:180px; max-width:340px; }
+.library-storage .meter { height:12px; border-width:2px; margin-top:7px; }
+.library-foot .note { flex:1; min-width:200px; font-weight:normal; }
+@media (max-width:600px) {
+  .library-head, .library-toolbar, .library-foot { padding:16px; }
+  .library-head { gap:16px; } .library h1 { font-size:27px; }
+  .library-totals { gap:20px; } .library-total b { font-size:23px; }
+  .library-toolbar .field, .library-toolbar .library-search { min-width:0; flex-basis:100%; }
+  .library-results { padding:16px 16px 0; }
+  .game-grid { grid-template-columns:repeat(auto-fill,minmax(200px,1fr)); padding:16px; gap:14px; }
+}
+
 /* ---------------------------------------------------------------- overlays */
 .shrine { position:fixed; bottom:10px; z-index:80; width:176px; border-radius:6px;
   background:var(--ink); overflow:hidden; }
@@ -329,14 +398,14 @@ const S = {
   online: false, lastSeen: null, pending: 0,
   ov: null, alerts: [], health: null,
   audio: null, audioDirty: false, audioState: "",
-  saver: null, saverDirty: false, saverState: "",
+  saver: null, saverDirty: false, saverState: "", commercialUrl: "",
   sources: null, srcLoading: false, srcQuery: "", poolFilter: "", plName: "",
   stream: null,
   remap: { scope: "global", scopes: ["global"], devices: null, bindings: {},
            combos: [], targets: {}, combo: [], hold: 0,
            presets: [], presetName: "", capture: null, stage: "idle",
            msg: "Press CAPTURE, then a button on the cabinet panel." },
-  lib: { sys: "All", q: "", favOnly: false },
+  lib: { sys: "All", q: "", favOnly: false, sort: "az" },
   rom: { query: "", system: "" }, romBackend: null,
   integ: null, integDirty: false, integState: "",
   konami: 0,
@@ -549,10 +618,9 @@ async function refresh() {
   }
   try { S.alerts = (await api("GET", "/alerts?limit=8")).alerts; } catch (_) { /* non-fatal */ }
   // An open native <select> dies with its element, so the poll must not
-  // re-render the view out from under the "+ playlist…" picker (its handler
-  // blurs it once a choice is made).
+  // re-render the view out from under playlist or library filter pickers.
   const a = document.activeElement;
-  if (a && a.matches && a.matches('select[data-change="pl-add"]')) paintChrome();
+  if (a && a.matches && a.matches('select[data-change="pl-add"], select[data-change^="lib-"], select[data-change="sv-commercial-count"]')) paintChrome();
   else paint();
 }
 
@@ -619,7 +687,7 @@ function paintChrome() {
     ["queued", "downloading", "delivering"].indexOf(r.status) >= 0);
   const xf = document.getElementById("pillXfer");
   xf.textContent = active.length
-    ? "⇅ " + active[0].title + " · " + active[0].status.toUpperCase()
+    ? "⇅ " + romTitle(active[0]) + " · " + active[0].status.toUpperCase()
     : "⇅ NO ROM JOBS";
   xf.style.background = active.length ? "var(--blue)" : "#6a4a8a";
 
@@ -743,7 +811,7 @@ VIEWS.dash = () => {
 
   const romCard = panel("p-purp", "RECENT ROM QUEUE", h`
     ${queue.slice(0, 5).map((r) => h`<div class="kv">
-      <span style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${esc(r.title)}</span>
+      <span style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${esc(romTitle(r))}</span>
       <b style="color:${r.status === "error" ? "#c1004a"
         : r.status === "ready" ? "#065c22" : "var(--blue)"}">${esc(r.status)}</b></div>`).join("")
       || h`<div class="note" style="opacity:.7;">queue is squeaky clean ✨</div>`}
@@ -981,12 +1049,13 @@ VIEWS.saver = () => {
   const policy = panel("p-purp", "SCREENSAVER POLICY", h`<div class="col" style="gap:10px;">
       <div class="row">
         <div style="width:150px; font-size:12px; font-weight:bold;">Brightness</div>
-        <input type="range" min="0" max="100" style="flex:1;"
-               value="${sv.brightness == null ? 80 : sv.brightness}"
+        <input type="range" min="0" max="200" style="flex:1;"
+               title="0% black · 100% original · 200% white"
+               value="${sv.brightness == null ? 100 : sv.brightness}"
                data-input="sv-bright" data-k="sv-bright">
         <div style="font-family:var(--cap); font-size:15px; width:62px; text-align:center;
              border:3px solid var(--ink); border-radius:6px; padding:3px 0;">
-          ${sv.brightness == null ? 80 : sv.brightness}%</div>
+          ${sv.brightness == null ? 100 : sv.brightness}%</div>
       </div>
       ${field("Idle timeout", num("idle_seconds", sv.idle_seconds, "seconds"), "stored")}
       ${field("Aspect", sel("aspect", SS_ASPECT, sv.aspect), "live")}
@@ -999,6 +1068,21 @@ VIEWS.saver = () => {
           display:inline-flex; gap:6px; align-items:center;">
           <input type="checkbox" data-change="sv" data-sk="subtitles"
                  ${sv.subtitles ? "checked" : ""}> show English subtitles (best track picked automatically)</label>`, "live")}
+      ${field("Commercials per episode", h`<select aria-label="Commercials per episode" data-change="sv-commercial-count">
+        ${[0,1,2,3,4,5].map((n) => h`<option value="${n}" ${n === (sv.commercial_count || 0) ? "selected" : ""}>${n === 0 ? "0 — off" : n}</option>`).join("")}
+        </select>`, "live")}
+      ${field("Commercial sources", h`<div class="col" style="gap:8px;">
+        <div class="note">Select YouTube playlists or individual videos. Commercials play in random order between episodes; 0 turns them off.</div>
+        ${(sv.commercial_sources || []).map((source, i) => h`<div class="row">
+          <input type="checkbox" aria-label="Select commercial source ${esc(source.url)}" data-change="sv-commercial-toggle" data-index="${i}" ${source.enabled ? "checked" : ""}>
+          <a href="${esc(source.url)}" target="_blank" rel="noopener" style="flex:1;overflow-wrap:anywhere;">${esc(source.url)}</a>
+          <button class="sm grey" data-act="sv-commercial-remove" data-index="${i}">REMOVE</button>
+        </div>`).join("")}
+        <div class="row"><input type="url" aria-label="Commercial source URL" data-input="sv-commercial-url"
+          value="${esc(S.commercialUrl)}" data-k="commercial-url" id="commercial-url"
+          placeholder="YouTube playlist or video URL" style="flex:1;min-width:150px;">
+          <button class="sm" data-act="sv-commercial-add">ADD</button></div>
+        </div>`, "live")}
       ${field("Skip intro", num("skip_intro_s", sv.skip_intro_s, "seconds"), "stored")}
       ${field("Skip outro", num("skip_outro_s", sv.skip_outro_s, "seconds"), "stored")}
       ${field("Fallback", sel("fallback", SS_FALLBACK, sv.fallback), "live")}
@@ -1101,18 +1185,41 @@ ACTIONS.sv = (el) => {
                          : el.type === "number" ? +el.value : el.value;
   S.saverDirty = true; S.saverState = ""; paint();
 };
+ACTIONS["sv-commercial-count"] = (el) => {
+  S.saver.commercial_count = +el.value;
+  S.saverDirty = true; S.saverState = ""; paint();
+};
+ACTIONS["sv-commercial-toggle"] = (el) => {
+  S.saver.commercial_sources[+el.dataset.index].enabled = el.checked;
+  S.saverDirty = true; S.saverState = ""; paint();
+};
+ACTIONS["sv-commercial-remove"] = (el) => {
+  S.saver.commercial_sources.splice(+el.dataset.index, 1);
+  S.saverDirty = true; S.saverState = ""; paint();
+};
+ACTIONS["sv-commercial-url"] = (el) => { S.commercialUrl = el.value; };
+ACTIONS["sv-commercial-add"] = () => {
+  const url = S.commercialUrl.trim();
+  if (!url) return;
+  S.saver.commercial_sources = S.saver.commercial_sources || [];
+  S.saver.commercial_sources.push({url, enabled: true});
+  S.commercialUrl = "";
+  S.saverDirty = true; S.saverState = ""; paint();
+};
 ACTIONS["sv-apply"] = async () => {
   const sv = S.saver || {};
   S.saverState = "applying..."; paint();
   try {
-    await api("POST", "/screensaver/set", {
+    const result = await api("POST", "/screensaver/set", {
       brightness: sv.brightness, idle_seconds: sv.idle_seconds,
       aspect: sv.aspect, shuffle: sv.shuffle, fallback: sv.fallback,
       movies_as_series: !!sv.movies_as_series, subtitles: !!sv.subtitles,
       skip_intro_s: sv.skip_intro_s, skip_outro_s: sv.skip_outro_s,
+      commercial_count: sv.commercial_count || 0,
+      commercial_sources: sv.commercial_sources || [],
     });
     S.saverDirty = false; S.saverState = "✔ policy applied";
-    toast("✔ screensaver policy applied", "ok");
+    toast(result.warning || "✔ screensaver policy applied", result.warning ? "err" : "ok");
   } catch (e) {
     S.saverState = ""; toast("✖ screensaver: " + e.message, "err");
   }
@@ -1692,62 +1799,96 @@ ACTIONS["rm-monitor"] = async () => {
 /* ----------------------------------------------------------- game library  */
 VIEWS.lib = () => {
   const all = (S.ov && S.ov.games) || [];
-  const systems = ["All"].concat([...new Set(all.map((g) => g.system))].sort());
+  const systems = [...new Set(all.map((g) => g.system))].sort();
   const q = S.lib.q.trim().toLowerCase();
+  const filtered = q || S.lib.sys !== "All" || S.lib.favOnly;
   const rows = all.filter((g) =>
     (S.lib.sys === "All" || g.system === S.lib.sys) &&
-    (!q || g.file.toLowerCase().indexOf(q) >= 0) &&
+    (!q || g.file.toLowerCase().includes(q)) &&
     (!S.lib.favOnly || g.favorite));
+  const byTitle = (a, b) => a.file.localeCompare(b.file, undefined, { numeric: true, sensitivity: "base" })
+    || a.system.localeCompare(b.system);
+  rows.sort((a, b) => S.lib.sort === "za" ? -byTitle(a, b)
+    : S.lib.sort === "system" ? a.system.localeCompare(b.system) || byTitle(a, b)
+    : S.lib.sort === "favorites" ? Number(!!b.favorite) - Number(!!a.favorite) || byTitle(a, b)
+    : byTitle(a, b));
   const hh = S.health || {};
 
-  return h`<div class="col">
-  ${panel("p-blue", "GAME LIBRARY &mdash; WHAT IS ON THE CABINET", h`
-    <div class="rowe" style="margin-bottom:12px;">
-      <label class="field">SYSTEM
-        <select data-change="lib-sys" style="min-width:130px">
-          ${systems.map((s) =>
-            h`<option ${s === S.lib.sys ? "selected" : ""}>${esc(s)}</option>`).join("")}
-        </select></label>
-      <label class="field">SEARCH
-        <input type="search" placeholder="title contains..." style="min-width:200px"
-               value="${esc(S.lib.q)}" data-input="lib-q" data-k="lib-q"></label>
-      <button class="sm ${S.lib.favOnly ? "gold" : "grey"}" data-act="lib-fav">
-        ${S.lib.favOnly ? "★ FAVORITES ONLY" : "☆ ALL GAMES"}</button>
-      <div style="flex:1; min-width:200px;">
-        <div style="font-size:11px; font-weight:bold; margin-bottom:4px;">
-          CABINET STORAGE &mdash; ${esc(dash(hh.disk_free_h))} free</div>
-        <div class="meter"><i class="${hh.disk_used_pct > 90 ? "hot" : ""}"
-             style="width:${hh.disk_used_pct || 0}%"></i></div>
+  return h`<section class="library" aria-labelledby="library-title">
+    <header class="library-head">
+      <div><div class="library-eyebrow">YOUR CABINET COLLECTION</div>
+        <h1 id="library-title">Game library</h1>
+        <p>Find your next favorite. Pick a game and press launch.</p></div>
+      <div class="library-totals">
+        <div class="library-total"><b>${all.length}</b>GAMES</div>
+        <div class="library-total"><b>${systems.length}</b>SYSTEMS</div>
+        <div class="library-total"><b>${all.filter((g) => g.favorite).length}</b>FAVORITES</div>
       </div>
-      <div class="stat"><b>${rows.length}</b>SHOWN</div>
-      <button class="sm gold" data-act="art-warm">WARM ART</button>
+    </header>
+    <div class="library-toolbar">
+      <label class="field library-search">SEARCH GAMES
+        <input type="search" placeholder="Search by filename…" value="${esc(S.lib.q)}"
+          data-input="lib-q" data-k="lib-q"></label>
+      <label class="field">SYSTEM
+        <select data-change="lib-sys" data-k="lib-sys">
+          <option value="All" ${S.lib.sys === "All" ? "selected" : ""}>All systems (${all.length})</option>
+          ${systems.map((sys) => h`<option value="${esc(sys)}" ${sys === S.lib.sys ? "selected" : ""}>
+            ${esc(sys.toUpperCase())} (${all.filter((g) => g.system === sys).length})</option>`).join("")}
+        </select></label>
+      <label class="field">SORT BY
+        <select data-change="lib-sort" data-k="lib-sort">
+          ${[["az", "Title: A–Z"], ["za", "Title: Z–A"], ["system", "System"], ["favorites", "Favorites first"]]
+            .map(([v, label]) => h`<option value="${v}" ${S.lib.sort === v ? "selected" : ""}>${label}</option>`).join("")}
+        </select></label>
+      <button class="sm ${S.lib.favOnly ? "gold" : "grey"}" data-act="lib-fav" data-k="lib-fav"
+        aria-pressed="${S.lib.favOnly}">${S.lib.favOnly ? "★" : "☆"} FAVORITES ONLY</button>
     </div>
-    <table><thead><tr><th>ART</th><th>TITLE</th><th>SYSTEM</th><th>ID</th><th>ACTIONS</th></tr></thead>
-    <tbody>
-    ${rows.map((g) => h`<tr>
-      <td>${cover(g.system, g.file, 44, 60)}</td>
-      <td><b>${esc(g.file)}</b> ${g.favorite ? "<span style='color:var(--yel)'>★</span>" : ""}</td>
-      <td>${esc(g.system.toUpperCase())}</td>
-      <td><code style="font-size:10.5px">${esc(g.id)}</code></td>
-      <td><div class="row" style="gap:4px;">
-        <button class="xs" data-act="lib-launch" data-sys="${esc(g.system)}"
-                data-path="${esc(g.path)}" ${off() ? "disabled" : ""}>LAUNCH</button>
-        <button class="xs ${g.favorite ? "gold" : "grey"}" data-act="lib-fav-toggle"
-                data-id="${esc(g.id)}" data-on="${g.favorite ? "" : "1"}">
-          ${g.favorite ? "UNFAV" : "FAV"}</button>
-      </div></td></tr>`).join("")
-      || h`<tr><td colspan="5" class="note" style="opacity:.7">${off()
-            ? "cabinet offline — library unknown" : "nothing matches those filters"}</td></tr>`}
-    </tbody></table>`)}
-  ${panel("p-purp", "TRANSFER QUEUE", gapNote(
-    "LOAD / UNLOAD AND THE TRANSFER QUEUE ARE NOT BUILT",
-    "The design treats the server as a big library and the cabinet as a small cache you load games into and unload them from, with per-transfer progress. Today there is no server-side game store: <code>library.list</code> reports the cabinet's own <code>/roms</code> tree and that is the only library there is. So this table is read-only plus launch and favorite. The gap report lists what building it needs."))}
-  </div>`;
+    <div class="library-results">
+      <span role="status"><b>${rows.length}</b> of ${all.length} games${S.lib.sys !== "All" ? " · " + esc(S.lib.sys.toUpperCase()) : ""}${S.lib.favOnly ? " · Favorites" : ""}</span>
+      ${filtered ? '<button data-act="lib-clear" data-k="lib-clear">Clear filters ×</button>' : ""}
+    </div>
+    <div class="game-grid">
+      ${rows.map((g) => h`<article class="game-card ${g.favorite ? "is-favorite" : ""}">
+        <div class="game-cover">
+          <div class="game-cover-fallback" aria-hidden="true"><span>✦</span><small>${esc(g.system.toUpperCase())}</small></div>
+          <img loading="lazy" alt="" src="${esc(artUrl(g.system, g.file))}" onload="this.previousElementSibling.hidden=true" onerror="this.hidden=true">
+          ${g.favorite ? '<span class="game-cover-star" aria-label="Favorite">★</span>' : ""}
+        </div>
+        <div class="game-info">
+          <span class="game-system">${esc(g.system.toUpperCase())}</span>
+          <h2 class="game-title">${esc(g.file)}</h2>
+          <div class="game-actions">
+            <button class="sm game-launch" data-act="lib-launch" data-sys="${esc(g.system)}"
+              data-path="${esc(g.path)}" data-k="${esc("launch:" + g.id)}"
+              aria-label="${esc("Launch " + g.file)}" ${off() ? 'disabled title="Cabinet is offline"' : ""}>▶ LAUNCH</button>
+            <button class="sm game-favorite ${g.favorite ? "gold" : "grey"}" data-act="lib-fav-toggle"
+              data-id="${esc(g.id)}" data-on="${g.favorite ? "" : "1"}" data-k="${esc("fav:" + g.id)}"
+              aria-pressed="${!!g.favorite}" aria-label="${esc((g.favorite ? "Unfavorite " : "Favorite ") + g.file)}"
+              title="${g.favorite ? "Remove favorite" : "Add favorite"}">${g.favorite ? "★" : "☆"}</button>
+          </div>
+        </div>
+      </article>`).join("") || h`<div class="library-empty">
+        <h2>${off() ? "Cabinet offline" : filtered ? "No games match" : "Your collection starts here"}</h2>
+        <p>${off() ? "Connect the cabinet to see its game library." : filtered
+          ? "Try another filename or clear your filters to see the collection." : "Games installed on your cabinet will appear here."}</p>
+        ${filtered ? '<button class="sm" data-act="lib-clear">CLEAR FILTERS</button>' : ""}
+      </div>`}
+    </div>
+    <footer class="library-foot">
+      <div class="library-storage"><b>CABINET STORAGE</b> · ${esc(dash(hh.disk_free_h))} free
+        <div class="meter"><i class="${hh.disk_used_pct > 90 ? "hot" : ""}"
+          style="width:${Math.max(0, Math.min(100, hh.disk_used_pct || 0))}%"></i></div></div>
+      <p class="note">Showing games installed on the cabinet. Request more games from the ROM Queue tab.</p>
+      <button class="sm gold" data-act="art-warm">WARM ART</button>
+    </footer>
+  </section>`;
 };
 
 ACTIONS["lib-sys"] = (el) => { S.lib.sys = el.value; paint(); };
+ACTIONS["lib-sort"] = (el) => { S.lib.sort = el.value; paint(); };
 ACTIONS["lib-q"] = (el) => { S.lib.q = el.value; paint(); };
 ACTIONS["lib-fav"] = () => { S.lib.favOnly = !S.lib.favOnly; paint(); };
+ACTIONS["lib-clear"] = () => { S.lib.sys = "All"; S.lib.q = ""; S.lib.favOnly = false; paint(); };
 ACTIONS["lib-launch"] = (el) =>
   op("launch", () => api("POST", "/games/launch",
     { system: el.dataset.sys, path: el.dataset.path }));
@@ -1756,6 +1897,11 @@ ACTIONS["lib-fav-toggle"] = (el) =>
     { id: el.dataset.id }), el.dataset.on ? "★ favorited" : "☆ unfavorited");
 
 /* ---------------------------------------------------------------- rom queue */
+/* A job queued by bare candidate id has the id as its title until the server
+   can resolve it. Say so instead of showing a hash as if it were a game. */
+const romUntitled = (r) => r.title === r.id;
+const romTitle = (r) => romUntitled(r)
+  ? "(untitled " + (r.system || "unknown system") + " request)" : r.title;
 const ROM_BADGE = {
   ready: "var(--lime)", error: "var(--red)", downloading: "var(--blue)",
   delivering: "var(--purp)", queued: "#c47a00",
@@ -1788,7 +1934,12 @@ VIEWS.rom = () => {
     <table><thead><tr><th>TITLE</th><th>STATUS</th><th>DETAIL / ERROR</th><th>ACTIONS</th></tr></thead>
     <tbody>
     ${q.map((r) => h`<tr>
-      <td><b>${esc(r.title)}</b></td>
+      <td>${romUntitled(r)
+        ? h`<b style="opacity:.6">${esc(romTitle(r))}</b>
+            <div class="note" style="font-size:10px;"><code>${esc(r.id)}</code>
+            — no title was given and this id is not in the search cache.
+            Drop it and queue the game again from a fresh search.</div>`
+        : h`<b>${esc(r.title)}</b>`}</td>
       <td>${badge(r.status, ROM_BADGE[r.status] || "#6a4a8a")}${
         r.status === "downloading" && r.bytes_done
           ? h`<div class="note" style="font-size:10px;">${

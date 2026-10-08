@@ -1,9 +1,9 @@
 # Skill: screensaver
 
 **Purpose:** the idle attract mode — streams the media library at 480p,
-cropped to fill the 4:3 panel, with a settable black-tint brightness.
+cropped to fill the 4:3 panel, with a settable brightness that fades from black through the original image to white.
 
-**State file:** `state/screensaver.yaml` (idle_seconds, brightness 0-100,
+**State file:** `state/screensaver.yaml` (idle_seconds, brightness 0-200 (default 100),
 mode, sources[], fallback, subtitles). Every change is a git commit; the
 cabinet is pushed live.
 
@@ -30,7 +30,7 @@ arcadectl screensaver playlists select all              # back to default rotati
 
 ```
 $ arcadectl --json screensaver status           # see current brightness (e.g. 80)
-$ arcadectl screensaver set --brightness 40     # dimmer (0=black, 100=untinted)
+$ arcadectl screensaver set --brightness 40     # dimmer (0=black, 100=original, 200=white)
 $ arcadectl --json screensaver sources          # find the id whose name starts "Redline"
 $ arcadectl screensaver disable-source <that-id>
 $ arcadectl --json screensaver sources          # confirm enabled:false
@@ -107,7 +107,7 @@ it (mpv `sub-visibility`), so it flips on the episode already playing and
 the offline clip cache follows it too.
 
 Limits: mpv draws subtitles after the brightness tint, so they stay at full
-brightness (at `--brightness 0` they are hidden). Positioned signs near the
+brightness (at `--brightness 0` and `200` they are hidden). Positioned signs near the
 top/bottom of a 4:3 episode can still be lost to `aspect: crop`. Release
 fonts are not carried (up to ~47 MB per episode); the cabinet's own fonts
 are used.
@@ -115,3 +115,35 @@ are used.
 Check what an episode got: `ffprobe <server>/media/<ratingKey>` lists at
 most one subtitle stream, tagged `eng`.
 
+
+## Commercials between episodes
+
+The policy form includes a 0–5 commercials selector and a separate list of
+YouTube playlist/video sources with checkboxes, ADD and REMOVE. SET / APPLY
+saves both and refreshes a running screensaver. Sources are independent of
+the episode rotation and named playlists. The initial three supplied sources
+are selected, with count 0 (off).
+
+```
+arcadectl screensaver set --commercial-count 2
+arcadectl screensaver set --commercial-source 'https://www.youtube.com/playlist?list=PLN7svyn8WVPDqwD565BkG74pfArzagzK6' --commercial-source 'https://www.youtube.com/watch?v=g5WlcjXiZZk'
+arcadectl screensaver set --commercial-count 0
+```
+
+`--commercial-source` replaces the selected source list (repeat for multiple
+sources). API `/screensaver/set` accepts `commercial_count: 0..5` and
+`commercial_sources: [{url: <YouTube URL>, enabled: <boolean>}, ...]`.
+Count 0 or no selected playable sources preserves episode-only playback.
+Commercial videos shuffle without repeats until the pool is exhausted.
+There is no commercial before the first episode; the final break precedes
+the next loop's first episode. Each YouTube video is one commercial, so a
+compilation plays as a single item.
+
+The server needs yt-dlp and ffmpeg; Node.js supports YouTube's JS challenges
+(use a current yt-dlp release if YouTube extraction breaks). Playlist catalogs
+refresh hourly. Failed sources are logged and skipped; failed clips are
+skipped by mpv. Clips download on first use and are transcoded to the same
+480p/bitrate cap as episodes, retaining the cabinet's silent audio policy.
+`COMMERCIALS_CACHE` defaults to `/var/cache/arcade-commercials`, with a 2 GiB
+LRU limit (`COMMERCIALS_CACHE_BYTES`). Mount this directory for persistence
+across container recreation. `YTDLP_BIN` can point to an updated executable.

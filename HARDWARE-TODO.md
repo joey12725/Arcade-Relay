@@ -34,11 +34,9 @@ Things that can only be verified on real hardware. Not faked green in the sim.
   window-tracking path would time out (20s) and kill Steam. On hardware, either
   discover the window via the newly-mapped-window heuristic or run Steam sessions
   without window tracking (probe=False already exempts them from hang detection).
-- [ ] Theme favorite-toggle divergence: the redblue theme's favorite button flips
-  Pegasus's internal flag (star badge) only; state/library/favorites.yaml (via
-  `arcadectl favorites ...`) is the source of truth for the generated Favorites
-  collection. Decide on-cabinet whether to hide the toggle or bridge it (e.g. a
-  Pegasus-side script watching its favorites DB and calling the server API).
+- [x] Theme favorite-toggle divergence: cabd bridges Pegasus's saved star changes
+  through the server favorites API, with a durable acknowledgement snapshot and
+  offline retries. Favorites state changes queue a menu refresh at home.
 - [ ] Fresh-cabinet boot view: with zero favorites Pegasus drops the empty Favorites
   collection, so the theme boots into the first system collection instead. Expected
   degradation — confirm it reads acceptably on the real screen.

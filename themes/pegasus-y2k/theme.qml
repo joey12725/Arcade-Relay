@@ -428,10 +428,8 @@ FocusScope {
                 root.moveSystem(-1);
             } else if (api.keys.isFilters(event)) {
                 // Filters is the pad's Y (panel 2), matching the "Y FAV" hint.
-                // NOTE: toggles Pegasus's internal favourite flag (star badge
-                // only). The authoritative list is state/library/favorites.yaml
-                // (arcadectl favorites ...) and the generated Favorites
-                // collection follows that, not this flag. See HARDWARE-TODO.
+                // cabd bridges Pegasus's saved stars to the server favorites
+                // list and refreshes the collection after the changes settle.
                 event.accepted = true;
                 if (gameCount > 0) {
                     var g = currentCollection.games.get(grid.currentIndex);

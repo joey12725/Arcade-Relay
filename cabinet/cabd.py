@@ -30,6 +30,7 @@ import inputs  # noqa: E402
 import panels  # noqa: E402
 import ha_local  # noqa: E402
 import pegasus_gen  # noqa: E402
+import favorites_sync  # noqa: E402
 import launcher  # noqa: E402
 import lifeline  # noqa: E402
 import metrics  # noqa: E402
@@ -559,7 +560,8 @@ async def clips_sync_loop():
                 async with aiohttp.ClientSession(timeout=tmo) as s:
                     async with s.get(screensaver.MEDIA_BASE
                                      + "/screensaver/playlist") as r:
-                        pl = (await r.json()).get("playlist", [])
+                        data = await r.json()
+                        pl = data.get("episode_playlist", data.get("playlist", []))
                     if not pl:
                         # Correct-by-design (nothing to cache from a library
                         # the owner disabled) but worth saying out loud: the
@@ -753,10 +755,10 @@ async def _start_screensaver_now(only_if_on=False):
             await asyncio.sleep(5)
         elif fallback == "dim_clock":
             log(f"idle: {why}; dim clock fallback")
-            await screensaver_dim_clock(cfg.get("brightness", 80), name, only_if_on)
+            await screensaver_dim_clock(cfg.get("brightness", 100), name, only_if_on)
         elif clips:
             log(f"idle: {why}; local clips fallback")
-            await screensaver_on(clips, cfg.get("brightness", 80),
+            await screensaver_on(clips, cfg.get("brightness", 100),
                                  cfg.get("subtitles", False), name, only_if_on)
         else:
             log(f"idle: {why}; no fallback available")
@@ -769,7 +771,7 @@ async def _start_screensaver_now(only_if_on=False):
                              + "/screensaver/playlist") as r:
                 pl = await r.json()
         if pl.get("playlist"):
-            await screensaver_on(pl["playlist"], pl.get("brightness", 80),
+            await screensaver_on(pl["playlist"], pl.get("brightness", 100),
                                  pl.get("subtitles", False),
                                  pl.get("active_playlist"), only_if_on)
         else:
@@ -952,10 +954,15 @@ async def watchdog_loop():
         await asyncio.sleep(launcher.WATCHDOG_POLL_S)
 
 
-async def file_fetch(path, dest, sha256=None, protect_existing=False):
+async def file_fetch(path, dest, sha256=None, protect_existing=False,
+                     min_free_bytes=0):
     """ROM/media delivery over the tunnel (spec file.*): stream to .part,
     verify checksum, atomic rename."""
     import hashlib
+    import shutil
+    min_free_bytes = int(min_free_bytes)
+    if min_free_bytes < 0:
+        raise ValueError("min_free_bytes cannot be negative")
     if protect_existing and os.path.exists(dest):
         with open(dest, "rb") as f:
             existing = hashlib.file_digest(f, "sha256").hexdigest()
@@ -971,8 +978,13 @@ async def file_fetch(path, dest, sha256=None, protect_existing=False):
             async with s.get(screensaver.MEDIA_BASE + path) as r:
                 if r.status != 200:
                     raise RuntimeError(f"fetch {path}: HTTP {r.status}")
+                if min_free_bytes and r.content_length is not None:
+                    if shutil.disk_usage(os.path.dirname(dest)).free - r.content_length < min_free_bytes:
+                        raise RuntimeError(f"cabinet storage reserve reached for {dest}")
                 with open(dest + ".part", "wb") as f:
                     async for chunk in r.content.iter_chunked(65536):
+                        if min_free_bytes and shutil.disk_usage(os.path.dirname(dest)).free - len(chunk) < min_free_bytes:
+                            raise RuntimeError(f"cabinet storage reserve reached for {dest}")
                         f.write(chunk)
                         h.update(chunk)
                         n += len(chunk)
@@ -1416,7 +1428,7 @@ async def handle_req(ws, data):
             result = {"devices": await asyncio.to_thread(inputs.list_devices)}
         elif method == "screensaver.on":
             result = await screensaver_on(params.get("playlist", []),
-                                          params.get("brightness", 80),
+                                          params.get("brightness", 100),
                                           params.get("subtitles", False),
                                           params.get("active_playlist"),
                                           bool(params.get("only_if_on")))
@@ -1434,12 +1446,12 @@ async def handle_req(ws, data):
                 result = {"screensaver": False, "note": "not running"}
             elif fallback == "dim_clock":
                 result = await screensaver_dim_clock(
-                    params.get("brightness", 80), name, only_if_on)
+                    params.get("brightness", 100), name, only_if_on)
             elif fallback == "off":
                 result = {"screensaver": False, "note": "fallback is 'off'"}
             elif clips:
                 result = await screensaver_on(clips,
-                                              params.get("brightness", 80),
+                                              params.get("brightness", 100),
                                               params.get("subtitles", False),
                                               name, only_if_on)
                 log("screensaver forced on from local clips (no sources)")
@@ -1506,7 +1518,8 @@ async def handle_req(ws, data):
             result = {"suppressed_for_s": secs}
         elif method == "file.fetch":
             result = await file_fetch(params["path"], params["dest"],
-                                      params.get("sha256"), params.get("protect_existing", False))
+                                      params.get("sha256"), params.get("protect_existing", False),
+                                      params.get("min_free_bytes", 0))
         elif method == "system.screenshot":
             import base64
             p = subprocess.run(
@@ -1537,6 +1550,8 @@ async def handle_req(ws, data):
             bundle = params["bundle"]
             if not isinstance(bundle, dict):
                 raise ValueError(f"bundle must be a dict, got {type(bundle).__name__}")
+            favorites_changed = (state["bundle"].get("library/favorites.yaml") !=
+                                 bundle.get("library/favorites.yaml"))
             save_state_cache(bundle)
             before = playlist_cache_key(state["bundle"])
             after = playlist_cache_key(bundle)
@@ -1554,6 +1569,9 @@ async def handle_req(ws, data):
             build_combo_engine()   # hotkeys may have changed
             meta = await asyncio.to_thread(pegasus_gen.render_all, bundle)
             log(f"pegasus metadata rendered: {len(meta)} files")
+            if favorites_changed:
+                frontend["reload_pending"] = True
+                frontend["last_rescan"] = time.monotonic()
             applied = await asyncio.to_thread(
                 audio.apply_all, audio.policy_from_bundle(bundle))
             result = {"applied": True, "files": len(bundle),
@@ -1666,6 +1684,8 @@ async def main():
     await local_server()
     asyncio.create_task(frontend_loop())
     asyncio.create_task(frontend_reload_loop())
+    asyncio.create_task(favorites_sync.run(
+        screensaver.MEDIA_BASE, pegasus_gen.ROMS_DIR, STATE_CACHE, log))
     asyncio.create_task(watchdog_loop())
     asyncio.create_task(audio_loop())
     asyncio.create_task(fifo_reader())

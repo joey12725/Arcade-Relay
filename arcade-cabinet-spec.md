@@ -85,7 +85,7 @@ Every requirement from the source conversation, given a stable ID for traceabili
 |----|-----|-----|
 | SCR-1 | When idle, the cabinet streams series/movies from the server's media library at 480p. | P0 |
 | SCR-2 | Video is cropped to fill the 4:3 display — no black bars, no squishing; center-crop to aspect. | P0 |
-| SCR-3 | Screensaver brightness is settable 0–100%, implemented as a black tint (100% = no tint, 0% = fully black). | P0 |
+| SCR-3 | Screensaver brightness is settable 0–200% (0% = black, 100% = original/default, 200% = white). | P0 |
 | SCR-4 | Individual series and movies can be enabled/disabled as screensaver sources, remotely. | P0 |
 | SCR-5 | All screensaver parameters (sources, brightness, idle timeout, etc.) are exposed via CLI/UI. | P0 |
 | SCR-6 | A keybind (or at minimum an exposed command) force-triggers screensaver mode and force-disables it. | P0 |
@@ -250,13 +250,13 @@ Single process (Python or Go) responsible for:
 
 **Aspect handling (SCR-2).** mpv launched with `--fs --panscan=1.0 --keepaspect`: pan-scan crops the 16:9 source symmetrically to fill the 4:3 panel with zero bars and zero distortion. (Assumption A-1: the cabinet display is natively 4:3 — confirm resolution, OQ-1.)
 
-**Brightness (SCR-3).** Multiplicative dim via mpv video filter: `--vf=lavfi=[colorchannelmixer=rr=F:gg=F:bb=F]` where `F = brightness/100`. Runtime-adjustable through mpv's JSON IPC socket without restarting playback. 100 → untouched image; 0 → black screen (still "on", by design).
+**Brightness (SCR-3).** Multiplicative dim via mpv video filter: `--vf=lavfi=[colorchannelmixer=rr=F:gg=F:bb=F]` where `F = brightness/100`. Runtime-adjustable through mpv's JSON IPC socket without restarting playback. 100 → untouched image (default); 0 → black screen (still "on", by design). Above 100, `lutrgb` blends each channel toward white as `val*(2-F)+maxval*(F-1)`; 200 → white.
 
 **Sources (SCR-4).** `state/screensaver.yaml`:
 
 ```yaml
 idle_seconds: 300
-brightness: 80          # 0-100
+brightness: 100         # 0-200; 100 is the default
 mode: shuffle_episodes
 sources:
   - jellyfin_id: "abc123"   # series: Cowboy Bebop

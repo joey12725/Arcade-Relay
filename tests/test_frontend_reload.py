@@ -10,6 +10,24 @@ import cabd
 
 
 class ReloadTests(unittest.IsolatedAsyncioTestCase):
+    async def test_favorites_change_queues_refresh_but_unchanged_sync_does_not(self):
+        old = {'library/favorites.yaml': {'favorites': ['nes/Mario.nes']}}
+        new = {'library/favorites.yaml': {'favorites': ['snes/World.sfc']}}
+        frontend = {'reload_pending': False, 'last_rescan': 0}
+        ws = AsyncMock()
+        with patch.object(cabd, 'state', {'bundle': old}), \
+             patch.object(cabd, 'frontend', frontend), \
+             patch.object(cabd, 'save_state_cache'), \
+             patch.object(cabd, 'build_combo_engine'), \
+             patch.object(cabd.pegasus_gen, 'render_all', return_value=[]), \
+             patch.object(cabd.audio, 'apply_all', return_value=[]):
+            await cabd.handle_req(ws, {'method': 'state.sync', 'params': {'bundle': new}})
+            self.assertTrue(ws.send_json.call_args.args[0]['ok'])
+            self.assertTrue(frontend['reload_pending'])
+            frontend['reload_pending'] = False
+            await cabd.handle_req(ws, {'method': 'state.sync', 'params': {'bundle': new}})
+            self.assertFalse(frontend['reload_pending'])
+
     async def tick(self):
         calls = 0
         async def sleep(_):

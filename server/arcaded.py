@@ -29,6 +29,7 @@ import yaml
 from aiohttp import WSMsgType, web
 
 import artdb
+import commercials
 import integrations
 import plex
 import romdl
@@ -575,7 +576,7 @@ SCREENSAVER_REL = "screensaver.yaml"
 def load_screensaver():
     d = _read_yaml(SCREENSAVER_REL)
     d.setdefault("idle_seconds", 300)
-    d.setdefault("brightness", 80)
+    d.setdefault("brightness", 100)
     d.setdefault("mode", "shuffle_episodes")
     d.setdefault("sources", [])
     d.setdefault("fallback", "local_clips")
@@ -593,6 +594,8 @@ def load_screensaver():
     # media_proxy chooses the track (server/subtitles.py), the cabinet
     # shows or hides it
     d.setdefault("subtitles", False)
+    d.setdefault("commercial_count", 0)
+    d.setdefault("commercial_sources", [dict(s) for s in commercials.DEFAULT_SOURCES])
     # Named sets of shows/movies ("christmas", "halloween", "sfw"...). With
     # `active_playlist` unset the rotation is every enabled source, as ever;
     # with one active, the rotation is exactly that playlist's members.
@@ -709,7 +712,13 @@ async def screensaver_playlist(request=None):
         policy = "in_order"
     out = shuffle.order(entries, policy,
                         movies_as_series=bool(cfg.get("movies_as_series", True)))
+    episodes = list(out)
+    commercial_ids = await commercials.pool(cfg["commercial_sources"], hub.log_event) \
+        if out and cfg["commercial_count"] else []
+    out = commercials.interleave(out, commercial_ids, cfg["commercial_count"])
     return web.json_response({"playlist": out,
+                              "commercial_count": cfg["commercial_count"],
+                              "episode_playlist": episodes,
                               "active_playlist": active,
                               "brightness": cfg["brightness"],
                               "mode": cfg["mode"],
@@ -720,6 +729,17 @@ async def screensaver_playlist(request=None):
                               "skip_outro_s": int(cfg.get("skip_outro_s", 0)),
                               "subtitles": bool(cfg.get("subtitles", False)),
                               "fallback": cfg.get("fallback", "local_clips")})
+
+
+async def commercial_media(request):
+    try:
+        path = await commercials.clip(request.match_info["video_id"], media_argv)
+    except ValueError as e:
+        raise web.HTTPBadRequest(text=str(e))
+    except (OSError, RuntimeError, asyncio.TimeoutError) as e:
+        hub.log_event(f"screensaver commercial unavailable: {e}")
+        raise web.HTTPBadGateway(text="Commercial unavailable; skip to the next item")
+    return web.FileResponse(path, headers={"Content-Type": "video/x-matroska"})
 
 
 FFMPEG = os.environ.get("FFMPEG_BIN", "ffmpeg")
@@ -916,10 +936,25 @@ async def screensaver_set(request):
     if "subtitles" in body and not isinstance(body["subtitles"], bool):
         return web.json_response(
             {"error": "subtitles must be true or false"}, status=400)
+    if "brightness" in body and (
+            type(body["brightness"]) is not int or not 0 <= body["brightness"] <= 200):
+        return web.json_response(
+            {"error": "brightness must be an integer from 0 to 200"}, status=400)
+    if "commercial_count" in body and (
+            type(body["commercial_count"]) is not int or not 0 <= body["commercial_count"] <= 5):
+        return web.json_response(
+            {"error": "commercial_count must be an integer from 0 to 5"}, status=400)
+    if "commercial_sources" in body:
+        try:
+            body["commercial_sources"] = commercials.normalize_sources(body["commercial_sources"])
+        except ValueError as e:
+            return web.json_response({"error": str(e)}, status=400)
+    commercials_changed = any(k in body and body[k] != cfg[k]
+                              for k in ("commercial_count", "commercial_sources"))
     changes = []
     for k in ("brightness", "idle_seconds", "mode", "fallback", "aspect",
               "shuffle", "movies_as_series", "skip_intro_s", "skip_outro_s",
-              "subtitles"):
+              "subtitles", "commercial_count", "commercial_sources"):
         if k in body:
             cfg[k] = body[k]
             changes.append(f"{k}={body[k]}")
@@ -938,7 +973,8 @@ async def screensaver_set(request):
                               f"{live} live: {res.get('error')}")
         except web.HTTPException:
             pass
-    return web.json_response(cfg)
+    warning = await _restart_screensaver_if_on() if commercials_changed else None
+    return web.json_response({**cfg, **({"warning": warning} if warning else {})})
 
 
 async def screensaver_disable(request):
@@ -1216,7 +1252,7 @@ rom_lock = asyncio.Lock()
 # entry is JSON-serialized to the UI.
 rom_cancel_events = {}
 rom_stopping = False
-rom_slots = asyncio.Semaphore(2)
+rom_slots = asyncio.Semaphore(1)  # one staging/extraction budget at a time
 ROM_QUEUE_PATH = pathlib.Path(os.environ.get("ROM_QUEUE_PATH", os.path.join(romdl.STAGING, "queue.json")))
 
 
@@ -1237,9 +1273,21 @@ def _rom_system(system):
     console = romdl.SYSTEM_TO_CONSOLE.get((system or "").lower())
     canonical = romdl.CONSOLE_TO_SYSTEM.get(console)
     cfg = yaml.safe_load((pathlib.Path(STATE_DIR) / "cabinet.yaml").read_text()) or {}
-    if canonical not in cfg.get("systems", []) or not cfg.get("emulators", {}).get(canonical, {}).get("core"):
-        raise ValueError(f"system {system!r} has no configured cabinet emulator")
+    configured = (canonical in cfg.get("systems", [])
+                  and cfg.get("emulators", {}).get(canonical, {}).get("core"))
+    acquisition = canonical in (cfg.get("downloads") or {}).get("systems", [])
+    if canonical not in romdl.ACQUISITION_EXTENSIONS or not (configured or acquisition):
+        raise ValueError(f"system {system!r} has no supported acquisition configuration")
     return canonical
+
+
+def _rom_playable(system, filename, cfg):
+    if not romdl.using_real():
+        return True  # preserve the sim's generated .bin launch/rescan contract
+    return bool(system in cfg.get("systems", [])
+                and cfg.get("emulators", {}).get(system, {}).get("core")
+                and pathlib.Path(filename).suffix.lower()
+                in romdl.LAUNCH_EXTENSIONS.get(system, set()))
 
 
 def _installed_roms():
@@ -1301,6 +1349,8 @@ async def rom_worker(entry):
 async def _rom_worker(entry):
     """request -> download (ROMDL) -> deliver over the tunnel -> rescan."""
     import threading
+    for key in ("verified", "playable", "acquisition_only"):
+        entry.pop(key, None)
     cancel = rom_cancel_events.setdefault(entry["id"], threading.Event())
 
     def progress(done, total):
@@ -1328,6 +1378,8 @@ async def _rom_worker(entry):
         save_rom_queue()
         files = await asyncio.to_thread(
             romdl.download, entry.get("candidate_id", entry["id"]), cancel, progress)
+        if entry.get("system") and files["system"] != entry["system"]:
+            raise RuntimeError("download candidate system differs from requested system")
         entry["status"] = "delivering"
         entry["title"] = files["title"]
         entry["system"] = files["system"]
@@ -1341,10 +1393,15 @@ async def _rom_worker(entry):
             res = await hub.rpc("file.fetch", {
                 "path": f"/roms/files/{urllib.parse.quote(staged)}",
                 "dest": f"/roms/{files['system']}/{f['filename']}", "sha256": f["sha256"],
-                "protect_existing": True}, timeout=3600)
+                "protect_existing": True,
+                "min_free_bytes": romdl.MIN_FREE_BYTES}, timeout=3600)
             if not res.get("ok"):
                 raise RuntimeError(res.get("error", "delivery failed"))
-        arted = await _deliver_art(files, dest)
+            if res.get("result", {}).get("sha256") != f["sha256"]:
+                raise RuntimeError("cabinet did not confirm the delivered checksum")
+        cfg = yaml.safe_load((pathlib.Path(STATE_DIR) / "cabinet.yaml").read_text()) or {}
+        playable = _rom_playable(files["system"], files["filename"], cfg)
+        arted = await _deliver_art(files, dest) if playable else False
         entry["path"] = dest
         entry["sha256"] = files["sha256"]
         entry["files"] = [{"filename": f["filename"], "sha256": f["sha256"]} for f in payloads]
@@ -1353,13 +1410,17 @@ async def _rom_worker(entry):
         entry["source_metadata"] = files.get("source_metadata")
         entry["source_reused"] = files.get("source_reused", False)
         entry["display_title"] = files.get("display_title")
-        _register_installed_rom(entry)
-        synced = await hub.rpc("state.sync", {"bundle": build_bundle()}, timeout=45)
-        if not synced.get("ok"):
-            raise RuntimeError("installed game metadata sync failed")
-        rescan = await hub.rpc("library.rescan", {})
-        if not rescan.get("ok"):
-            raise RuntimeError("rescan failed")
+        entry["verified"] = True
+        entry["playable"] = playable
+        entry["acquisition_only"] = not entry["playable"]
+        if entry["playable"]:
+            _register_installed_rom(entry)
+            synced = await hub.rpc("state.sync", {"bundle": build_bundle()}, timeout=45)
+            if not synced.get("ok"):
+                raise RuntimeError("installed game metadata sync failed")
+            rescan = await hub.rpc("library.rescan", {})
+            if not rescan.get("ok"):
+                raise RuntimeError("rescan failed")
         entry["status"] = "ready"
         entry["detail"] = dest + ("" if arted else "  (no cover art)")
         hub.log_event(f"ROM ready: {entry['title']} at {dest}")
@@ -1401,10 +1462,17 @@ async def roms_search(request):
 async def roms_backend(request):
     """Which backend is live and which systems it can actually reach."""
     cfg = yaml.safe_load((pathlib.Path(STATE_DIR) / "cabinet.yaml").read_text()) or {}
-    systems = sorted(s for s in cfg.get("systems", []) if s in romdl.SYSTEM_TO_CONSOLE and cfg.get("emulators", {}).get(s, {}).get("core"))
+    playable = {s for s in cfg.get("systems", []) if s in romdl.LAUNCH_EXTENSIONS
+                and cfg.get("emulators", {}).get(s, {}).get("core")}
+    systems = sorted((playable | set((cfg.get("downloads") or {}).get("systems", [])))
+                     & romdl.ACQUISITION_EXTENSIONS.keys())
     return web.json_response({
         "backend": romdl.backend_name(),
         "systems": systems,
+        "playable_systems": sorted(playable),
+        "acquisition_only_systems": sorted(set(systems) - playable),
+        "unverified_systems": romdl.UNVERIFIED_SYSTEMS,
+        "minimum_free_bytes": romdl.MIN_FREE_BYTES,
         "coverage": ({s: romdl.coverage(s) for s in systems}
                      if romdl.using_real() else {}),
         "dead_sources": romdl.DEAD_SOURCES if romdl.using_real() else {},
@@ -1415,14 +1483,22 @@ async def roms_request(request):
     body = await request.json()
     if romdl.using_real():
         try:
-            body["system"] = _rom_system(body.get("system"))
+            known = romdl.describe(body["id"]) if body.get("id") else None
+            body["system"] = _rom_system(body.get("system") or (known or {}).get("system"))
         except ValueError as e:
             return web.json_response({"error": str(e)}, status=400)
     # An explicit id skips the search entirely — that is how the UI queues a
     # specific candidate the user picked out of a result list, rather than
     # trusting "best match" a second time.
     if body.get("id"):
-        cand = {"id": body["id"], "title": body.get("title") or body["id"]}
+        known = romdl.describe(body["id"])
+        if known is None:
+            return web.json_response({"error": "unknown candidate; search again"}, status=404)
+        if body.get("system") and known["system"] != body["system"]:
+            return web.json_response({"error": "candidate system differs from requested system"}, status=400)
+        cand = {"id": body["id"],
+                "title": body.get("title") or known["title"],
+                "system": known["system"]}
     else:
         if not body.get("query") or (romdl.using_real() and not body.get("system")):
             return web.json_response({"error": "query and system are required"}, status=400)
@@ -1444,7 +1520,29 @@ async def roms_request(request):
     return web.json_response(entry)
 
 
+def label_bare_queue_titles():
+    """Give jobs that were queued by bare id the title of the game they are.
+
+    Entries created before roms_request resolved titles (and persisted in the
+    queue file) carry the candidate id as their title. Where the candidate
+    cache still knows the id, use its title; otherwise leave the id for the
+    UI to flag as untitled.
+    """
+    changed = False
+    for entry in rom_queue:
+        if entry["title"] != entry["id"]:
+            continue
+        known = romdl.describe(entry["id"])
+        if known:
+            entry["title"] = known["title"]
+            entry["system"] = entry.get("system") or known["system"]
+            changed = True
+    if changed:
+        save_rom_queue()
+
+
 async def roms_status(request):
+    label_bare_queue_titles()
     return web.json_response({"queue": rom_queue})
 
 
@@ -2291,6 +2389,7 @@ async def overview(request):
         except (web.HTTPException, OSError, ValueError):
             return None
 
+    label_bare_queue_titles()
     health = await maybe(hub.rpc("system.health", {}))
     library = await maybe(hub.rpc("library.list", {}))
     games = None
@@ -2535,6 +2634,7 @@ app.add_routes([
     web.post("/screensaver/disable", screensaver_disable),
     web.post("/screensaver/{action}", screensaver_cmd),
     web.get("/media/{video_id}", media_proxy),
+    web.get("/commercials/{video_id}", commercial_media),
     web.get("/roms/search", roms_search),
     web.get("/roms/backend", roms_backend),
     web.post("/roms/request", roms_request),

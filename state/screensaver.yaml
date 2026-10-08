@@ -1,7 +1,17 @@
 # Screensaver config (SCR-1..7). Sources are per-Jellyfin-item enable flags;
 # ids are filled in by `arcadectl screensaver enable-source`.
 idle_seconds: 300
-brightness: 80
+brightness: 100
 mode: shuffle_episodes
 sources: []
 fallback: local_clips
+
+# Separate YouTube sources for optional commercial breaks between episodes.
+commercial_count: 0
+commercial_sources:
+  - url: https://www.youtube.com/playlist?list=PLN7svyn8WVPDqwD565BkG74pfArzagzK6
+    enabled: true
+  - url: https://www.youtube.com/playlist?list=PLWm34Sbaq72OFR4BsgUSMkDzn5sXlNcb9
+    enabled: true
+  - url: https://www.youtube.com/watch?v=g5WlcjXiZZk
+    enabled: true

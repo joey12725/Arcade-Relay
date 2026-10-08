@@ -118,7 +118,7 @@ def main():
     for c in ("status", "sources", "playlist", "on", "off", "toggle"):
         sssub.add_parser(c)
     sset = sssub.add_parser("set")
-    sset.add_argument("--brightness", type=int)
+    sset.add_argument("--brightness", type=int, help="0–200%% (0 black, 100 original, 200 white)")
     sset.add_argument("--idle", type=int, dest="idle_seconds")
     sset.add_argument("--mode", choices=["shuffle_episodes", "continue_series"])
     sset.add_argument("--fallback", choices=["local_clips", "dim_clock", "off"],
@@ -126,6 +126,10 @@ def main():
     sset.add_argument("--aspect", choices=["crop", "bars", "stretch"])
     sset.add_argument("--shuffle", choices=["in_order", "random_episode",
                                             "even_series", "round_robin", "decay"])
+    sset.add_argument("--commercial-count", type=int, choices=range(6),
+                      help="commercials between episodes (0 disables)")
+    sset.add_argument("--commercial-source", action="append", metavar="URL",
+                      help="replace selected commercial sources with these YouTube URLs; repeatable")
     sset.add_argument("--skip-intro", type=int, dest="skip_intro_s")
     sset.add_argument("--skip-outro", type=int, dest="skip_outro_s")
     sset.add_argument("--subtitles", choices=["on", "off"],
@@ -389,8 +393,12 @@ def main():
                      ("fallback", args.fallback),
                      ("aspect", args.aspect),
                      ("shuffle", args.shuffle),
+                     ("commercial_count", args.commercial_count),
                      ("skip_intro_s", args.skip_intro_s),
                      ("skip_outro_s", args.skip_outro_s)) if v is not None}
+            if args.commercial_source is not None:
+                body["commercial_sources"] = [{"url": url, "enabled": True}
+                                              for url in args.commercial_source]
             if args.subtitles is not None:
                 body["subtitles"] = args.subtitles == "on"
             res = call("POST", "/screensaver/set", body)

@@ -21,6 +21,10 @@ CABD_LAUNCH = os.environ.get(
 SYSTEM_EXTENSIONS = {
     "nes": "nes", "snes": "sfc,smc", "genesis": "md,bin,gen",
     "arcade": "zip,bin", "gba": "gba", "psx": "cue,chd,bin", "gb": "gb,gbc",
+    "gbc": "gbc", "n64": "n64,z64,v64", "nds": "nds",
+    "3ds": "3ds,cci,cxi", "dreamcast": "gdi,cdi,chd,cue",
+    "saturn": "cue,chd,iso", "ps2": "iso,chd,cue",
+    "psp": "iso,cso,pbp",
 }
 
 

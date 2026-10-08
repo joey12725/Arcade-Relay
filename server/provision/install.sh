@@ -14,7 +14,12 @@ STATE_DIR=${STATE_DIR:-/var/lib/arcade/state}
 
 apt-get update
 apt-get install -y --no-install-recommends \
-    python3 python3-aiohttp python3-yaml git curl ca-certificates
+    python3 python3-aiohttp python3-yaml git curl ca-certificates ffmpeg nodejs python3-venv python3-pip
+
+# YouTube extractor and its JS challenge solver (Node.js runtime).
+python3 -m venv /opt/ytdlp
+/opt/ytdlp/bin/pip install --upgrade 'yt-dlp[default]'
+ln -sf /opt/ytdlp/bin/yt-dlp /usr/local/bin/yt-dlp
 
 # --- code ---
 install -d /opt/arcade
@@ -33,7 +38,7 @@ if [ ! -d "$STATE_DIR/.git" ]; then
     git -C "$STATE_DIR" -c user.name=arcaded -c user.email=arcaded@localhost \
         commit -qm "initial state (provisioned)"
 fi
-install -d /var/lib/arcade/saves-backup /var/lib/arcade/rom-staging
+install -d /var/lib/arcade/saves-backup /var/lib/arcade/rom-staging /var/cache/arcade-commercials
 
 # --- systemd system unit ---
 install -m 0644 "$SRC_DIR/provision/arcaded.service" \

@@ -581,3 +581,15 @@ def test_cabinet_recheck_stops_the_old_list_when_the_new_one_gives_nothing(monke
     monkeypatch.setitem(cabd.ss, "playlist", "nsfw")
     asyncio.run(cabd.recheck_screensaver_playlist(settle_s=0))
     assert calls == [("start", True), ("off",)]
+
+
+def test_brightness_default_and_range(ad):
+    assert ad.load_screensaver()["brightness"] == 100
+    for value in (0, 100, 150, 200):
+        response = call(ad.screensaver_set, {"brightness": value})
+        assert response[0] == 200
+        assert ad.load_screensaver()["brightness"] == value
+    for value in (-1, 201, True, "100", 100.5, None):
+        response = call(ad.screensaver_set, {"brightness": value})
+        assert response[0] == 400
+        assert ad.load_screensaver()["brightness"] == 200

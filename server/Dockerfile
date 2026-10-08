@@ -13,8 +13,13 @@ FROM debian:trixie-slim
 # and needs it.
 RUN apt-get update && apt-get install -y --no-install-recommends \
         python3 python3-aiohttp python3-yaml git openssh-client ffmpeg \
-        python3-venv python3-pip python3-paho-mqtt \
+        python3-venv python3-pip python3-paho-mqtt nodejs \
     && rm -rf /var/lib/apt/lists/*
+
+# Keep YouTube extraction current, including the EJS challenge solver.
+RUN python3 -m venv /opt/ytdlp \
+    && /opt/ytdlp/bin/pip install --no-cache-dir 'yt-dlp[default]' \
+    && ln -s /opt/ytdlp/bin/yt-dlp /usr/local/bin/yt-dlp
 
 # ROMDL (example.invalid/romdl) in its own venv, exposed only as a CLI.
 # Deliberately NOT installed into the system interpreter: arcaded talks to it
@@ -55,6 +60,7 @@ COPY server/arcaded.py /app/arcaded.py
 COPY server/artdb.py /app/artdb.py
 COPY server/plex.py /app/plex.py
 COPY server/shuffle.py /app/shuffle.py
+COPY server/commercials.py /app/commercials.py
 COPY server/romdl.py /app/romdl.py
 COPY server/webui.html /app/webui.html
 # Skins, sprites and the tagged GIF library, served at /assets for the web UI.

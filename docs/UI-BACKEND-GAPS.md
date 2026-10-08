@@ -218,10 +218,11 @@ selecting one does not scope the capture. Needs a `device` parameter on
 - **Trailer and screensaver volume are policy-only.** The sliders store a
   level; the cabinet keeps both muted (AUD-2). This is spec'd behaviour and
   the audio tab says so.
-- **Pegasus's own favourite flag diverges from server favourites.** The
-  theme's FAV button toggles Pegasus's internal star; the authoritative list
-  is `state/library/favorites.yaml`, and the generated Favorites collection
-  follows *that*. Pre-existing, tracked in HARDWARE-TODO.md.
+- **Cabinet stars are bridged to server favourites.** cabd watches Pegasus's
+  saved stars and sends additions/removals to the favourites API, retrying
+  offline changes. The authoritative list remains `state/library/favorites.yaml`;
+  its changes refresh the generated Favorites collection when no game is running.
+  Server-only favourites do not automatically set Pegasus's internal star badge.
 - **No CRT scanlines / curvature / bloom.** Explicitly excluded by the design
   brief, and not implemented.
 
