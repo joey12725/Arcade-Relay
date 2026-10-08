@@ -36,19 +36,24 @@ SYSTEM_LAYOUTS = {
 }
 
 
-def user_entries(remap, player):
-    """[(panel, target)] that a flat remap assigns to one player: both-player
-    `buttonN` keys first, then this player's own, each in panel order."""
-    general, own = [], []
+def user_entries(remap, player, below):
+    """[(panel, target)] that a flat remap assigns to one player over the
+    `below` layout, in the order overlay() must apply them."""
+    picked = {}
     for key, target in (remap if isinstance(remap, dict) else {}).items():
         m = ENTRY.fullmatch(str(key))
         if not (m and isinstance(target, str) and target.lower() in TARGETS):
             continue
-        if m[1] is None:
-            general.append((int(m[2]), target.lower()))
-        elif int(m[1]) == player:
-            own.append((int(m[2]), target.lower()))
-    return sorted(general) + sorted(own)
+        own = m[1] is not None
+        if (own and int(m[1]) == player) or (not own and int(m[2]) not in picked):
+            picked[int(m[2])] = (own, target.lower())
+    # A stored layer has no order (yaml sorts keys). /controls/map keeps one
+    # claim per target, but older or hand-edited state can hold two; the
+    # later-applied wins, so this player's keys beat `buttonN` and an entry
+    # changing the layout below beats a stale one restating it.
+    order = sorted((own, below.get(n) != t, n, t)
+                   for n, (own, t) in picked.items())
+    return [(n, t) for _, _, n, t in order]
 
 
 def overlay(layout, entries):
@@ -71,11 +76,10 @@ def effective_layouts(bundle, system, rom_path=None):
     builtin = sorted(SYSTEM_LAYOUTS.get(system, {}).items())
     layouts = {}
     for player in PLAYERS:
-        layout = dict(NINTENDO)
-        for entries in (user_entries(glob, player), builtin,
-                        user_entries(sysmap, player),
-                        user_entries(gamemap, player)):
-            overlay(layout, entries)
+        layout = overlay(dict(NINTENDO), user_entries(glob, player, NINTENDO))
+        overlay(layout, builtin)
+        for remap in (sysmap, gamemap):
+            overlay(layout, user_entries(remap, player, layout))
         layouts[player] = layout
     return layouts
 

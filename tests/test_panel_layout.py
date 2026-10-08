@@ -79,6 +79,20 @@ class ResolverTests(unittest.TestCase):
         self.assertEqual((got[1][3], got[1][6]), ('l2', 'r2'))
         self.assertEqual((got[2][3], got[2][6]), ('r2', 'x'))
 
+    def test_own_key_on_a_panel_replaces_the_both_player_one_outright(self):
+        # button2: x must not take x off panel 6 for player 1 first
+        got = layouts('snes', glob={'button2': 'x', 'player1.button2': 'y'})
+        self.assertEqual(got[1], pl.NINTENDO)
+        self.assertEqual(got[2], {**without(pl.NINTENDO, 6), 2: 'x'})
+
+    def test_a_layers_changing_entry_beats_one_restating_the_layout_below(self):
+        full = {f'player1.button{n}': t for n, t in pl.NINTENDO.items()}
+        for key, target, panel, freed in (('player1.button2', 'x', 2, 6),
+                                          ('player1.button1', 'b', 1, 5),
+                                          ('player1.button6', 'y', 6, 2)):
+            got = layouts('snes', glob={**full, key: target})[1]
+            self.assertEqual(got, {**without(pl.NINTENDO, freed), panel: target}, key)
+
     def test_per_player_key_leaves_the_other_player_alone(self):
         got = layouts('snes', sysmap={'player2.button1': 'b'})
         self.assertEqual(got[1], pl.NINTENDO)
@@ -318,6 +332,17 @@ class LiveStateTests(unittest.TestCase):
                 'start': 7, 'select': 6}
         self.assertEqual(self.render('arcade'), want)
         self.assertEqual(self.render('arcade', 'Right'), want)
+
+    def test_a_remap_merged_beside_the_old_capture_takes_effect(self):
+        # what an older /controls/map (plain dict.update) stored for "press
+        # panel 2, pick X": player1.button2: x next to player1.button6: x
+        glob = self.bundle['controllers/global.yaml']
+        self.bundle['controllers/global.yaml'] = dict(
+            glob, buttons=dict(glob['buttons'], **{'player1.button2': 'x'}))
+        got = self.render('snes')
+        self.assertEqual(got['x'], 3)
+        self.assertNotIn('y', got)
+        self.assertEqual(self.render('snes', 'Right')['x'], 2)
 
     def test_no_junk_keyboard_binds(self):
         self.render('snes')

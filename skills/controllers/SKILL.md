@@ -52,7 +52,9 @@ player; what the web remapper writes when you press a panel button) or
 start select` (the table translates them; the stick always stays the
 d-pad). Assigning moves a button: `button3=l2` takes L2 off whichever button
 had it, and panel 3's old target (L) is unbound unless another entry claims
-it. Any other key (`a: b`, ...) is a legacy logical key: it renders only to the
+it. In one scope the newest remap wins: `controls map` drops that scope's
+older entries for the same target (and, for a `button<N>` key, any player's
+entry on that button). Any other key (`a: b`, ...) is a legacy logical key: it renders only to the
 sim's `.rmp` / keyboard binds and never touches the panels.
 
 ```
