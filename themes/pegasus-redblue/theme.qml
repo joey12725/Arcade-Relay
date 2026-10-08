@@ -117,7 +117,7 @@ FocusScope {
                 if (collections.length > 0)
                     collectionIndex = (collectionIndex + collections.length - 1)
                                       % collections.length;
-            } else if (api.keys.isDetails(event)) {   // dedicated favorite button
+            } else if (api.keys.isFilters(event)) {   // favorite: Y, panel 2
                 // NOTE: toggles Pegasus's internal favorite flag (star badge
                 // only). The authoritative favorites list lives in
                 // state/library/favorites.yaml (arcadectl favorites ...);

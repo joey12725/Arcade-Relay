@@ -426,7 +426,8 @@ FocusScope {
             } else if (event.key === Qt.Key_Up || api.keys.isPrevPage(event)) {
                 event.accepted = true;
                 root.moveSystem(-1);
-            } else if (api.keys.isDetails(event)) {
+            } else if (api.keys.isFilters(event)) {
+                // Filters is the pad's Y (panel 2), matching the "Y FAV" hint.
                 // NOTE: toggles Pegasus's internal favourite flag (star badge
                 // only). The authoritative list is state/library/favorites.yaml
                 // (arcadectl favorites ...) and the generated Favorites

@@ -486,17 +486,40 @@ async def controls_load_preset(request):
     return web.json_response({"loaded": name})
 
 
+PANEL_KEY = re.compile(r"(?:player([12])\.)?button([1-8])")   # panel_layout.ENTRY
+
+
+def _merge_remap(binds, sets):
+    """Apply a /controls/map set to one layer. The stored map is unordered, so
+    a panel key `[playerP.]buttonN: T` first drops the keys it would tie or
+    lose with: that player's other claims on T and, for a both-player key,
+    any player's claim on T or on buttonN. Returns the dropped keys."""
+    dropped = []
+    for key, target in sets.items():
+        m = PANEL_KEY.fullmatch(str(key))
+        for k, t in list(binds.items()) if m else ():
+            o = PANEL_KEY.fullmatch(str(k))
+            if not o or k == key:
+                continue
+            same = str(t).lower() == str(target).lower()
+            if m[1] and o[1] == m[1] and same or not m[1] and (same or o[2] == m[2]):
+                del binds[k]
+                dropped.append(k)
+        binds[key] = target
+    return dropped
+
+
 async def controls_map(request):
     body = await request.json()
     scope, sets = body["scope"], body["set"]
     if scope == "global":
         rel = "controllers/global.yaml"
         data = _read_yaml(rel)
-        data.setdefault("buttons", {}).update(sets)
+        dropped = _merge_remap(data.setdefault("buttons", {}), sets)
     elif scope.startswith("system:"):
         rel = f"controllers/systems/{scope.split(':', 1)[1]}.yaml"
         data = _read_yaml(rel)
-        data.setdefault("remap", {}).update(sets)
+        dropped = _merge_remap(data.setdefault("remap", {}), sets)
     elif scope.startswith("game:"):
         # Layer 3 (spec §5.7): all per-game overrides live in one file keyed
         # by '<system>/<rom>', so the bundle stays small and diffable.
@@ -512,13 +535,14 @@ async def controls_map(request):
                 status=400)
         rel = "controllers/games.yaml"
         data = _read_yaml(rel)
-        data.setdefault("games", {}).setdefault(gid, {}) \
-            .setdefault("remap", {}).update(sets)
+        dropped = _merge_remap(data.setdefault("games", {}).setdefault(gid, {})
+                               .setdefault("remap", {}), sets)
     else:
         return web.json_response({"error": f"bad scope {scope}"}, status=400)
     _write_yaml(rel, data)
     git_commit(f"arcadectl: controls map {scope} "
-               + " ".join(f"{k}={v}" for k, v in sets.items()))
+               + " ".join(f"{k}={v}" for k, v in sets.items())
+               + (f" (dropped {' '.join(dropped)})" if dropped else ""))
     push_state_soon()
     hub.log_event(f"controls map {scope}: {sets}")
     return web.json_response(data)
