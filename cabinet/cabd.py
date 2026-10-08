@@ -908,7 +908,7 @@ async def _recover_if_current(s, hung):
         if hung:
             await asyncio.to_thread(s.kill)   # kill() refocuses frontend
         else:
-            launcher.focus_frontend()
+            await asyncio.to_thread(launcher.focus_frontend)
         game["session"] = None
         game["rom"] = None
         return True
@@ -928,18 +928,18 @@ async def watchdog_loop():
             async with game_lock:
                 if ss["on"] and not screensaver.running():
                     ss["on"] = False
-                    launcher.focus_frontend()
+                    await asyncio.to_thread(launcher.focus_frontend)
                     log("watchdog: screensaver died, flag cleared")
         s = game["session"]
         if s is None:
             silent_since = None
-        elif not s.alive():
+        elif not await asyncio.to_thread(s.alive):   # xdotool: keep it off the input loop
             if await _recover_if_current(s, hung=False):
                 log("watchdog: game died, frontend refocused")
             silent_since = None
         elif not s.probe:
             silent_since = None   # streams have no UDP iface: never "hung"
-        elif launcher.probe_responsive():
+        elif await asyncio.to_thread(launcher.probe_responsive):
             silent_since = None
         else:
             now = time.monotonic()
