@@ -29,7 +29,7 @@ git config --global --add safe.directory "$SRC"
 # --- writable state repo (SRV-2: every state change is a commit) ------------
 STATE_DIR=${STATE_DIR:-/statework}
 export STATE_DIR
-export ROMDL_STAGING=${ROMDL_STAGING:-$SRC/.runtime/rom-staging}
+export ROMDL_STAGING=${ROMDL_STAGING:-/arcade-media/incoming}
 export ROMDL_QBIT_CONFIG=${ROMDL_QBIT_CONFIG:-/srv/arcade-ssh/romdl-qbit.json}
 if [ ! -d "$STATE_DIR/.git" ]; then
     log "seeding state repo at $STATE_DIR from $SRC/state"
