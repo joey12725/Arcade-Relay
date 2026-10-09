@@ -35,8 +35,14 @@ import time
 import signal
 import re
 import shlex
+import sys
 
 STAGING = os.environ.get("ROMDL_STAGING", "/tmp/romdl-staging")
+# Delivered games are promoted out of staging into ROM_LIBRARY/<system>/ and
+# owned as ROM_LIBRARY_OWNER ("uid:gid"), so a share's users can manage what
+# the root container writes. Unset, staging stays the only server-side copy.
+LIBRARY = os.environ.get("ROM_LIBRARY") or None
+OWNER = os.environ.get("ROM_LIBRARY_OWNER") or None
 BACKEND = os.environ.get("ROMDL_BACKEND", "auto").lower()
 ROMDL_BIN = os.environ.get("ROMDL_BIN", "romdl")
 SEARCH_TIMEOUT = int(os.environ.get("ROMDL_SEARCH_TIMEOUT", "45"))
@@ -155,6 +161,23 @@ class Cancelled(Exception):
     """A download stopped because the queue asked it to."""
 
 
+class LibraryConflict(Exception):
+    """A different file already holds a delivered game's library name."""
+
+
+def _own(path):
+    """Hand a staged or library path to OWNER. Never fatal: a file root still
+    owns is an inconvenience on the share, not a failed download."""
+    if not OWNER:
+        return
+    try:
+        uid, gid = (int(x) for x in OWNER.split(":"))
+        os.chown(path, uid, gid)
+        os.chmod(path, 0o777 if os.path.isdir(path) else 0o666)
+    except (OSError, ValueError) as e:
+        print(f"romdl: cannot own {path} as {OWNER}: {e!r}", file=sys.stderr, flush=True)
+
+
 FAKE_CATALOG = [
     {"id": "ms3", "title": "Metal Slug 3", "system": "arcade"},
     {"id": "ms1", "title": "Metal Slug", "system": "arcade"},
@@ -201,6 +224,7 @@ def _save_cache(cache):
     tmp = p.with_suffix(".part")
     tmp.write_text(json.dumps(cache))
     os.replace(tmp, p)
+    _own(p)
 
 
 def _candidate_id(url):
@@ -380,6 +404,8 @@ def _download_fake(rom_id):
     with open(art_path, "wb") as f:
         f.write(b"\x89PNG\r\n\x1a\n"
                 + hashlib.sha256((rom_id + "art").encode()).digest())
+    _own(rom_path)
+    _own(art_path)
     return {"rom_path": rom_path, "art_path": art_path,
             "sha256": hashlib.sha256(blob).hexdigest(),
             "system": entry["system"], "filename": fname,
@@ -409,6 +435,7 @@ def download(rom_id, cancel=None, progress=None):
     fname = _safe_filename(entry["title"])
     directory = pathlib.Path(STAGING) / rom_id
     directory.mkdir(exist_ok=True)
+    _own(directory)
     rom_path = str(directory / fname)
     tmp = rom_path + ".part"
     h = hashlib.sha256()
@@ -484,6 +511,7 @@ def download(rom_id, cancel=None, progress=None):
         if source_info is not None and not reuse:
             pathlib.Path(source_path).unlink(missing_ok=True)
     os.replace(tmp, rom_path)
+    _own(rom_path)
     if source_info:
         entry["source_metadata"] = source_info
         with _cache_lock:
@@ -511,6 +539,7 @@ def download(rom_id, cancel=None, progress=None):
                 seen.add(i.filename)
                 check_space(target, i.file_size)
                 z.extract(i, target)
+                _own(target / i.filename)
                 files.append({"filename": i.filename, "rom_path": str(target / i.filename),
                               "sha256": _hash_file(target / i.filename)})
         launch = [f for f in files if pathlib.Path(f["filename"]).suffix.lower()
@@ -535,3 +564,64 @@ def download(rom_id, cancel=None, progress=None):
             "source_metadata": source_info,
             "source_reused": reuse,
             "display_title": entry.get("extra", {}).get("display_title")}
+
+
+# ------------------------------------------------------------------- library
+
+def promote(result):
+    """Move a delivered game from staging into LIBRARY/<system>/.
+
+    `result` is what download() returned. Returns the library paths, or []
+    without LIBRARY. A library file with the same bytes counts as promoted
+    and the staged copy is dropped; a different file under the same name
+    raises LibraryConflict before anything moves. The item's folder under
+    STAGING (source archive included) goes once every payload is placed.
+    """
+    if not LIBRARY:
+        return []
+    system = result.get("system") or ""
+    if not re.fullmatch(r"[a-z0-9]+", system):
+        raise ValueError(f"unsafe library system {system!r}")
+    payloads = result.get("files") or [result]
+    for f in payloads:
+        name = f.get("filename") or ""
+        if "/" in name or name in ("", ".", ".."):
+            raise ValueError(f"unsafe library file name {name!r}")
+    root = pathlib.Path(LIBRARY) / system
+    plan = []
+    for f in payloads:
+        dest = root / f["filename"]
+        if dest.exists() and _hash_file(dest) != f["sha256"]:
+            raise LibraryConflict(f"{dest} already holds a different file")
+        plan.append((pathlib.Path(f["rom_path"]), dest, f["sha256"]))
+    if not root.is_dir():
+        root.mkdir(exist_ok=True)
+        _own(root)
+    placed = []
+    for src, dest, digest in plan:
+        if dest.exists():
+            src.unlink(missing_ok=True)
+        else:
+            try:
+                os.replace(src, dest)
+            except OSError:
+                # staging and library on different filesystems
+                part = dest.with_name(dest.name + ".part")
+                try:
+                    shutil.copyfile(src, part)
+                    if _hash_file(part) != digest:
+                        raise RuntimeError(f"library copy checksum mismatch: {dest}")
+                    os.replace(part, dest)
+                finally:
+                    part.unlink(missing_ok=True)
+                src.unlink()
+        _own(dest)
+        placed.append(str(dest))
+    staging = pathlib.Path(os.path.realpath(STAGING))
+    for src, _, _ in plan:
+        src = pathlib.Path(os.path.realpath(src))
+        if src.is_relative_to(staging) and src != staging:
+            top = staging / src.relative_to(staging).parts[0]
+            if top.is_dir():
+                shutil.rmtree(top)
+    return placed

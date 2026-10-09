@@ -210,3 +210,198 @@ def test_disc_archive_hashes_descriptor_and_every_track(source, monkeypatch, sys
     assert result["filename"] == name
     assert {f["filename"]: f["sha256"] for f in result["files"]} == {
         filename: hashlib.sha256(data).hexdigest() for filename, data in members.items()}
+
+
+# ------------------------------------------------------------ library promotion
+
+@pytest.fixture
+def library(tmp_path, monkeypatch):
+    staging, lib = tmp_path / "staging", tmp_path / "library"
+    staging.mkdir()
+    lib.mkdir()
+    chowned = []
+    monkeypatch.setattr(adapter, "STAGING", str(staging))
+    monkeypatch.setattr(adapter, "LIBRARY", str(lib))
+    monkeypatch.setattr(adapter, "OWNER", "99:100")
+    monkeypatch.setattr(adapter.os, "chown", lambda p, uid, gid: chowned.append((Path(p), uid, gid)))
+    def staged(rid, system, members, primary=None):
+        item = staging / rid
+        item.mkdir()
+        (item / "Source.zip").write_bytes(b"source archive")
+        files = []
+        for name, data in members.items():
+            (item / name).write_bytes(data)
+            files.append({"filename": name, "rom_path": str(item / name),
+                          "sha256": hashlib.sha256(data).hexdigest()})
+        main = next(f for f in files if f["filename"] == (primary or files[0]["filename"]))
+        return {**main, "system": system, "title": "Game", "files": files if len(files) > 1 else []}
+    return types.SimpleNamespace(staging=staging, lib=lib, chowned=chowned, staged=staged)
+
+
+def test_promote_single_payload_into_system_folder(library):
+    result = library.staged("abc", "gb", {"Game.gb": b"gb rom"})
+    paths = adapter.promote(result)
+    dest = library.lib / "gb" / "Game.gb"
+    assert paths == [str(dest)]
+    assert dest.read_bytes() == b"gb rom"
+    assert not (library.staging / "abc").exists()
+    assert (dest, 99, 100) in library.chowned
+    assert (library.lib / "gb", 99, 100) in library.chowned
+    assert dest.stat().st_mode & 0o777 == 0o666
+    assert (library.lib / "gb").stat().st_mode & 0o777 == 0o777
+
+
+def test_promote_cue_and_bin_together(library):
+    result = library.staged("def", "psx", {"Game.cue": b'FILE "Game.bin" BINARY', "Game.bin": b"track"},
+                            primary="Game.cue")
+    paths = adapter.promote(result)
+    assert sorted(Path(p).name for p in paths) == ["Game.bin", "Game.cue"]
+    assert (library.lib / "psx" / "Game.bin").read_bytes() == b"track"
+    assert not (library.staging / "def").exists()
+
+
+def test_promote_same_bytes_already_in_library_drops_staging(library):
+    (library.lib / "gb").mkdir()
+    (library.lib / "gb" / "Game.gb").write_bytes(b"gb rom")
+    result = library.staged("abc", "gb", {"Game.gb": b"gb rom"})
+    assert adapter.promote(result) == [str(library.lib / "gb" / "Game.gb")]
+    assert not (library.staging / "abc").exists()
+
+
+def test_promote_conflict_moves_nothing(library):
+    (library.lib / "psx").mkdir()
+    (library.lib / "psx" / "Game.bin").write_bytes(b"another dump")
+    result = library.staged("def", "psx", {"Game.cue": b'FILE "Game.bin" BINARY', "Game.bin": b"track"},
+                            primary="Game.cue")
+    with pytest.raises(adapter.LibraryConflict):
+        adapter.promote(result)
+    assert (library.lib / "psx" / "Game.bin").read_bytes() == b"another dump"
+    assert not (library.lib / "psx" / "Game.cue").exists()
+    assert sorted(p.name for p in (library.staging / "def").iterdir()) == ["Game.bin", "Game.cue", "Source.zip"]
+
+
+def test_promote_without_library_is_a_no_op(library, monkeypatch):
+    monkeypatch.setattr(adapter, "LIBRARY", None)
+    result = library.staged("abc", "gb", {"Game.gb": b"gb rom"})
+    assert adapter.promote(result) == []
+    assert (library.staging / "abc" / "Game.gb").exists()
+    assert not list(library.lib.iterdir())
+
+
+@pytest.mark.parametrize("system,name", [
+    ("../gb", "Game.gb"), ("GB", "Game.gb"), ("", "Game.gb"),
+    ("gb", "../Game.gb"), ("gb", "sub/Game.gb"), ("gb", ".."), ("gb", "."),
+])
+def test_promote_refuses_unsafe_names(library, system, name):
+    result = library.staged("abc", "gb", {"Game.gb": b"gb rom"})
+    result["system"], result["filename"] = system, name
+    with pytest.raises(ValueError):
+        adapter.promote(result)
+    assert (library.staging / "abc" / "Game.gb").exists()
+    assert not list(library.lib.iterdir())
+
+
+def test_promote_copies_and_verifies_across_filesystems(library, monkeypatch):
+    real_replace = adapter.os.replace
+    def replace(src, dst):
+        if Path(src).parent.parent == library.staging:
+            raise OSError(18, "Invalid cross-device link")
+        return real_replace(src, dst)
+    monkeypatch.setattr(adapter.os, "replace", replace)
+    result = library.staged("abc", "gb", {"Game.gb": b"gb rom"})
+    adapter.promote(result)
+    assert (library.lib / "gb" / "Game.gb").read_bytes() == b"gb rom"
+    assert not list(library.lib.rglob("*.part"))
+    assert not (library.staging / "abc").exists()
+
+
+def test_own_failure_is_logged_not_raised(library, monkeypatch, capsys):
+    def refuse(*a):
+        raise PermissionError("not permitted")
+    monkeypatch.setattr(adapter.os, "chown", refuse)
+    result = library.staged("abc", "gb", {"Game.gb": b"gb rom"})
+    adapter.promote(result)
+    assert (library.lib / "gb" / "Game.gb").exists()
+    assert "cannot own" in capsys.readouterr().err
+
+
+def test_download_owns_staged_files(source, tmp_path, monkeypatch):
+    candidate, data = source
+    chowned = []
+    monkeypatch.setattr(adapter, "OWNER", "99:100")
+    monkeypatch.setattr(adapter.os, "chown", lambda p, uid, gid: chowned.append(Path(p)))
+    candidate(sha256=hashlib.sha256(data).hexdigest())
+    result = adapter.download("game")
+    owned = set(chowned)
+    assert {tmp_path / "game", tmp_path / "game" / "Game (USA).zip",
+            Path(result["rom_path"]), tmp_path / "candidates.json"} <= owned
+
+
+def test_download_without_owner_never_chowns(source, monkeypatch):
+    candidate, data = source
+    def unexpected(*a):
+        raise AssertionError("chown without ROM_LIBRARY_OWNER")
+    monkeypatch.setattr(adapter.os, "chown", unexpected)
+    candidate(sha256=hashlib.sha256(data).hexdigest())
+    adapter.download("game")
+
+
+@pytest.fixture
+def worker(tmp_path, monkeypatch):
+    import asyncio
+    import importlib
+    import sys
+    from unittest.mock import AsyncMock
+    sys.path.insert(0, str(Path(__file__).parents[1] / "server"))
+    monkeypatch.setenv("STATE_DIR", str(tmp_path))
+    ad = importlib.import_module("arcaded")
+    monkeypatch.setattr(ad, "STATE_DIR", str(tmp_path))
+    monkeypatch.setattr(ad.romdl, "BACKEND", "real")
+    (tmp_path / "cabinet.yaml").write_text("systems: [gb]\nemulators:\n  gb: {core: installed}\n")
+    monkeypatch.setattr(ad, "save_rom_queue", lambda: None)
+    monkeypatch.setattr(ad, "rom_cancel_events", {})
+    monkeypatch.setattr(ad, "_register_installed_rom", lambda entry: None)
+    monkeypatch.setattr(ad, "_deliver_art", AsyncMock(return_value=True))
+    monkeypatch.setattr(ad, "build_bundle", lambda: {})
+    events = []
+    rpc = AsyncMock(return_value={"ok": True, "result": {"sha256": "a" * 64}})
+    monkeypatch.setattr(ad, "hub", types.SimpleNamespace(online=True, rpc=rpc, log_event=events.append))
+    payload = {"system": "gb", "filename": "Game.gb", "title": "Game",
+               "rom_path": str(tmp_path / "Game.gb"), "sha256": "a" * 64}
+    monkeypatch.setattr(ad.romdl, "download", lambda *a: payload)
+    def run():
+        job = {"id": "job", "candidate_id": "candidate", "system": "gb", "title": "Game"}
+        asyncio.run(ad._rom_worker(job))
+        return job
+    return types.SimpleNamespace(ad=ad, run=run, events=events)
+
+
+def test_worker_records_library_paths(worker, monkeypatch):
+    monkeypatch.setattr(worker.ad.romdl, "LIBRARY", "/library")
+    monkeypatch.setattr(worker.ad.romdl, "promote", lambda files: ["/library/gb/Game.gb"])
+    job = worker.run()
+    assert job["status"] == "ready"
+    assert job["library_paths"] == ["/library/gb/Game.gb"]
+    assert "library_error" not in job
+
+
+def test_worker_promotion_error_keeps_entry_ready(worker, monkeypatch):
+    monkeypatch.setattr(worker.ad.romdl, "LIBRARY", "/library")
+    def conflict(files):
+        raise worker.ad.romdl.LibraryConflict("/library/gb/Game.gb already holds a different file")
+    monkeypatch.setattr(worker.ad.romdl, "promote", conflict)
+    job = worker.run()
+    assert job["status"] == "ready"
+    assert "LibraryConflict" in job["library_error"]
+    assert "library_paths" not in job
+    assert any("promotion failed" in e for e in worker.events)
+
+
+def test_worker_without_library_skips_promotion(worker, monkeypatch):
+    monkeypatch.setattr(worker.ad.romdl, "LIBRARY", None)
+    def unexpected(files):
+        raise AssertionError("promote without ROM_LIBRARY")
+    monkeypatch.setattr(worker.ad.romdl, "promote", unexpected)
+    job = worker.run()
+    assert job["status"] == "ready"
+    assert "library_paths" not in job and "library_error" not in job

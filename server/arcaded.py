@@ -1261,6 +1261,7 @@ def save_rom_queue():
     tmp = ROM_QUEUE_PATH.with_suffix(".part")
     tmp.write_text(json.dumps(rom_queue))
     os.replace(tmp, ROM_QUEUE_PATH)
+    romdl._own(ROM_QUEUE_PATH)
 
 
 def _queue_entry(rid):
@@ -1349,7 +1350,7 @@ async def rom_worker(entry):
 async def _rom_worker(entry):
     """request -> download (ROMDL) -> deliver over the tunnel -> rescan."""
     import threading
-    for key in ("verified", "playable", "acquisition_only"):
+    for key in ("verified", "playable", "acquisition_only", "library_paths", "library_error"):
         entry.pop(key, None)
     cancel = rom_cancel_events.setdefault(entry["id"], threading.Event())
 
@@ -1421,6 +1422,14 @@ async def _rom_worker(entry):
             rescan = await hub.rpc("library.rescan", {})
             if not rescan.get("ok"):
                 raise RuntimeError("rescan failed")
+        if romdl.LIBRARY:
+            # The game is already on the cabinet, so a library miss is
+            # reported on the entry rather than failing the request.
+            try:
+                entry["library_paths"] = await asyncio.to_thread(romdl.promote, files)
+            except Exception as e:  # noqa: BLE001
+                entry["library_error"] = repr(e)
+                hub.log_event(f"ROM library promotion failed: {entry['title']}: {e!r}")
         entry["status"] = "ready"
         entry["detail"] = dest + ("" if arted else "  (no cover art)")
         hub.log_event(f"ROM ready: {entry['title']} at {dest}")
