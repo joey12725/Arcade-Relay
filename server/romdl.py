@@ -1,59 +1,54 @@
 #!/usr/bin/env python3
-"""ROMDL adapter (ROM-1, spec §6.4) — bridges the queue to the romdl CLI.
+"""ROM delivery adapter (ROM-1, spec §6.4): the server side of the game queue.
+
+The queue's contract is search -> pick a candidate -> stage it on the server
+-> verify -> deliver to the cabinet. This module owns the first three steps
+and everything that has to be true about a file before the cabinet ever sees
+it: checksums, archive CRCs, disc descriptors that only reference tracks we
+actually shipped, a free-space reserve, cooperative cancellation, and
+promotion into a shared library folder.
 
 Two backends behind one contract:
 
-  real — shells out to the `romdl` CLI's documented `--json` interface
-         (example.invalid/romdl). Searches Mirror + PkgIndex.
-  fake — deterministic generated ROM bytes, no network.
+  library — the owner's own game library on the server. Point ROM_SOURCE_DIR
+            at a folder laid out as <system>/<file> (cartridge dumps you made
+            yourself, homebrew, freeware releases) and the queue searches it,
+            stages a verified copy, and ships it to the cabinet.
+  fake    — deterministic generated ROM bytes, no files needed.
 
-`ROMDL_BACKEND` picks one; `auto` (the default) uses real when the CLI is on
-PATH. The sim pins `fake` because its network is a closed toxiproxy topology
-with no egress, and accept-m4 asserts on the fake payload's exact checksum.
-
-Why the CLI and not `import romdl`: the README advertises `--json` as the
-automation interface, so it is the part with a stability promise. Importing
-would couple us to `_unified_search`, a private function, and would drag
-requests/bs4/rapidfuzz into the arcaded process — the Dockerfile installs
-romdl into its own venv precisely so it cannot.
-
-Download does NOT re-run `romdl download`. Search caches each candidate's URL
-against the id the queue holds, and download streams that exact URL: the
-queue's job is to fetch *the thing the user picked*, and a second search
-could rank a different dump first.
+`ROMDL_BACKEND` picks one; `auto` (the default) uses the library when
+ROM_SOURCE_DIR points at a directory. The sim pins `fake` because accept-m4
+asserts on the fake payload's exact checksum.
 """
+import difflib
 import hashlib
 import json
 import os
 import pathlib
 import shutil
-import subprocess
+import urllib.parse
 import urllib.request
 import zipfile
 import threading
-import time
-import signal
 import re
 import shlex
 import sys
 
 STAGING = os.environ.get("ROMDL_STAGING", "/tmp/romdl-staging")
+# Where the owner keeps game files the queue may hand out: <system>/<file>.
+SOURCE_DIR = os.environ.get("ROM_SOURCE_DIR") or None
 # Delivered games are promoted out of staging into ROM_LIBRARY/<system>/ and
 # owned as ROM_LIBRARY_OWNER ("uid:gid"), so a share's users can manage what
 # the root container writes. Unset, staging stays the only server-side copy.
 LIBRARY = os.environ.get("ROM_LIBRARY") or None
 OWNER = os.environ.get("ROM_LIBRARY_OWNER") or None
 BACKEND = os.environ.get("ROMDL_BACKEND", "auto").lower()
-ROMDL_BIN = os.environ.get("ROMDL_BIN", "romdl")
-SEARCH_TIMEOUT = int(os.environ.get("ROMDL_SEARCH_TIMEOUT", "45"))
-DOWNLOAD_TIMEOUT = int(os.environ.get("ROMDL_DOWNLOAD_TIMEOUT", "3600"))
-USER_AGENT = "Mozilla/5.0 (compatible; arcaded/1.1; +https://github.com/joey12725/Arcade-Relay)"
+COPY_TIMEOUT = int(os.environ.get("ROMDL_COPY_TIMEOUT", "3600"))
 _cache_lock = threading.RLock()
-MIN_FREE_BYTES = 40 * 1024 ** 3
+MIN_FREE_BYTES = int(os.environ.get("ROMDL_MIN_FREE_BYTES", str(40 * 1024 ** 3)))
 
-# Our /roms directory name -> the console token romdl's fuzzy matcher wants.
-# Both of its sources keep their own alias tables; these are the spellings
-# that hit in both.
+# Our /roms directory name -> a canonical console token. Several spellings
+# people actually use map onto the same /roms folder.
 SYSTEM_TO_CONSOLE = {
     "nes": "nes", "snes": "snes", "n64": "n64", "gb": "gb", "gbc": "gbc",
     "gba": "gba", "nds": "nds", "3ds": "3ds",
@@ -63,31 +58,20 @@ SYSTEM_TO_CONSOLE = {
     "dreamcast": "dreamcast", "dc": "dreamcast", "saturn": "saturn",
     "arcade": "arcade", "mame": "arcade",
 }
-# PkgIndex only carries Sony digital content. romdl asks it for every
-# console anyway, and its `_normalize_console_keys` falls back to querying
-# ALL of its databases when the console name matches none of its aliases —
-# so a `snes` search comes back topped by PS Vita titles that merely share a
-# word with the query, and they outrank anything else on score. Drop them
-# here rather than hand the queue a candidate that would deliver a Vita file
-# into /roms/snes.
-NPS_CONSOLES = {"ps1", "psp", "ps3", "vita"}
 
-# Mirror the ORIGINAL host shut down 2026-03-31; the romdl `mirror`
-# source was repointed (a 2026-04 patch) at mirror.invalid,
-# a successor mirror with the same autoindex layout, so the source id
-# "mirror" lives on with a different upstream. If cartridge-console
-# searches go empty again, check that the deployed romdl venv still carries
-# that patch — a fresh image built from an unpatched romdl repo regresses to
-# the dead host.
+# Kept in the /roms/backend response for UI compatibility; the library
+# backend has no remote sources that can go away.
 DEAD_SOURCES = {}
 
 
 def coverage(system):
     """Why a search for this system may come back empty, or None if it is
-    expected to work. Advisory only — never blocks a search."""
+    expected to work. Advisory only; never blocks a search."""
     console = SYSTEM_TO_CONSOLE.get((system or "").lower())
     if console is None:
-        return f"no ROMDL console mapping for {system!r}"
+        return f"no console mapping for {system!r}"
+    if using_real() and not _system_dirs(CONSOLE_TO_SYSTEM.get(console, system)):
+        return f"no {system} folder under ROM_SOURCE_DIR"
     return None
 
 # Reverse, for filing a download under a /roms dir.
@@ -189,15 +173,16 @@ FAKE_CATALOG = [
 
 
 def using_real():
+    """True when a real (non-generated) backend serves the queue."""
     if BACKEND == "fake":
         return False
-    if BACKEND == "real":
+    if BACKEND in ("library", "real"):
         return True
-    return shutil.which(ROMDL_BIN) is not None
+    return bool(SOURCE_DIR) and os.path.isdir(SOURCE_DIR)
 
 
 def backend_name():
-    return "real" if using_real() else "fake"
+    return "library" if using_real() else "fake"
 
 
 # --------------------------------------------------------------- candidates
@@ -272,76 +257,64 @@ def _hash_file(path):
         return hashlib.file_digest(f, "sha256").hexdigest()
 
 
-def _fetch_torrent(entry, path, cancel, progress):
-    import tempfile
-    log = tempfile.TemporaryFile(mode="w+")
-    proc = subprocess.Popen([ROMDL_BIN, "--json", "fetch", entry["url"], "--out", path],
-                            stdout=subprocess.PIPE, stderr=log, text=True,
-                            start_new_session=True)
+def _system_dirs(system):
+    """Folders under SOURCE_DIR that hold games for one /roms system. Any
+    alias that maps to the same console counts (genesis/megadrive/md)."""
+    if not SOURCE_DIR:
+        return []
+    console = SYSTEM_TO_CONSOLE.get((system or "").lower())
+    root = pathlib.Path(SOURCE_DIR)
+    names = {s for s, c in SYSTEM_TO_CONSOLE.items() if c == console} or {system}
+    return [root / n for n in sorted(names) if (root / n).is_dir()]
+
+
+def _inside_source(path):
+    """True when `path` resolves to a file inside SOURCE_DIR (no symlink or
+    `..` escapes); the queue never copies anything else."""
+    if not SOURCE_DIR:
+        return False
     try:
-        deadline = time.monotonic() + DOWNLOAD_TIMEOUT
-        offset = 0
-        while proc.poll() is None:
-            check_space(STAGING)
-            log.seek(offset)
-            for line in log:
-                try:
-                    event = json.loads(line)
-                    if progress:
-                        progress(event["done"], event["total"])
-                except (ValueError, KeyError):
-                    pass
-            offset = log.tell()
-            if cancel is not None and cancel.is_set():
-                raise Cancelled("torrent download canceled")
-            if time.monotonic() > deadline:
-                raise RuntimeError("torrent download deadline exceeded")
-            time.sleep(.2)
-        out, _ = proc.communicate()
-        log.seek(0)
-        err = log.read()
-        if proc.returncode:
-            raise RuntimeError(f"romdl fetch failed: {err[-1800:]}")
-        info = json.loads(out)
-        if info["file_name"] != entry["title"]:
-            raise RuntimeError("source identity differs from selected candidate")
-        if os.path.getsize(path) != info["size"] or _hash_file(path) != info["sha256"]:
-            raise RuntimeError("published source checksum or size mismatch")
-        return info
-    finally:
-        if proc.poll() is None:
-            os.killpg(proc.pid, signal.SIGTERM)
-            try:
-                proc.wait(timeout=5)
-            except subprocess.TimeoutExpired:
-                os.killpg(proc.pid, signal.SIGKILL)
-                proc.wait()
-        log.close()
+        return pathlib.Path(path).resolve().is_relative_to(
+            pathlib.Path(SOURCE_DIR).resolve())
+    except OSError:
+        return False
+
+
+_REGION = re.compile(r"[\(\[][^\)\]]*[\)\]]")
+
+
+def _normalize(title):
+    """'Game Title (USA) (Rev 1).zip' -> 'game title'."""
+    stem = pathlib.PurePath(title).stem if pathlib.PurePath(title).suffix else title
+    stem = _REGION.sub(" ", stem)
+    return " ".join(re.findall(r"[a-z0-9]+", stem.lower()))
+
+
+def score(query, title):
+    """Title match score. >= 100 means "confident enough to queue unattended":
+    an exact title is 150, every query word present is 100-135, anything
+    else is a fuzzy ratio below 100 that only a human pick can queue."""
+    q, t = _normalize(query), _normalize(title)
+    if not q or not t:
+        return 0.0
+    if q == t:
+        return 150.0
+    words = q.split()
+    have = set(t.split())
+    if all(w in have for w in words):
+        return round(100 + 35 * len(words) / max(len(have), 1), 1)
+    return round(99 * difflib.SequenceMatcher(None, q, t).ratio(), 1)
 
 
 # -------------------------------------------------------------------- search
 
-def _run_romdl(args, timeout):
-    proc = subprocess.run([ROMDL_BIN, "--json", *args],
-                          capture_output=True, text=True, timeout=timeout)
-    if proc.returncode == 2:          # documented "no results"
-        return []
-    if proc.returncode != 0:
-        raise RuntimeError(
-            f"romdl {' '.join(args)} failed ({proc.returncode}): "
-            + (proc.stderr or "").strip()[:300])
-    try:
-        return json.loads(proc.stdout or "[]")
-    except ValueError as e:
-        raise RuntimeError(f"romdl returned non-JSON: {e}") from e
-
-
 def search(query, system=None, limit=10, deep=False):
     """Candidates for a query. Returns [{id, title, system, source, score}].
 
-    `system` is one of our /roms directory names. The real backend needs it —
-    romdl searches one console at a time and crawling every console per query
-    would take minutes — so it is required there and optional for the fake.
+    `system` is one of our /roms directory names. The library backend needs
+    it (it files the delivery under that system's folder on the cabinet), so
+    it is required there and optional for the fake. `deep` also matches
+    files nested in sub-folders of the system directory.
     """
     if not using_real():
         q = query.lower()
@@ -349,34 +322,30 @@ def search(query, system=None, limit=10, deep=False):
                 for c in FAKE_CATALOG if q in c["title"].lower()]
 
     if not system:
-        raise ValueError(
-            "a system is required (romdl searches one console at a time)")
+        raise ValueError("a system is required (the library is filed per system)")
     console = SYSTEM_TO_CONSOLE.get(system.lower())
     if console is None:
-        raise ValueError(f"no romdl console mapping for system {system!r}")
+        raise ValueError(f"no console mapping for system {system!r}")
+    canonical = CONSOLE_TO_SYSTEM[console]
+    allowed = ACQUISITION_EXTENSIONS.get(canonical, set()) | {".zip"}
 
-    args = ["search", console, query, "-n", str(limit), "--sources", "mirror"]
-    if deep:
-        args.append("--deep")
-    matches = _run_romdl(args, SEARCH_TIMEOUT)
+    found = []
+    for folder in _system_dirs(canonical):
+        files = folder.rglob("*") if deep else folder.iterdir()
+        for path in files:
+            if (path.is_file() and path.suffix.lower() in allowed
+                    and _inside_source(path)):
+                found.append((score(query, path.name), path))
+    found.sort(key=lambda m: (-m[0], m[1].name))
 
     cache = _load_cache()
     out = []
-    for m in matches:
-        url = m.get("url")
-        if not url:
-            continue
-        if (m.get("source") == "pkgindex" and console not in NPS_CONSOLES):
-            continue
-        reported = m.get("system") or m.get("console")
-        if reported and SYSTEM_TO_CONSOLE.get(str(reported).lower()) != console:
-            continue
+    for points, path in found[:limit]:
+        url = path.resolve().as_uri()
         rid = _candidate_id(url)
-        entry = {**cache.get(rid, {}), "id": rid, "title": m.get("title") or url.rsplit("/", 1)[-1],
-                 "system": CONSOLE_TO_SYSTEM[console], "console": console, "url": url,
-                 "extra": m.get("extra", {}),
-                 "source": m.get("source", "?"),
-                 "score": round(float(m.get("score", 0)), 1)}
+        entry = {**cache.get(rid, {}), "id": rid, "title": path.name,
+                 "system": canonical, "console": console, "url": url,
+                 "extra": {}, "source": "library", "score": points}
         cache[rid] = entry
         out.append({k: entry[k] for k in
                     ("id", "title", "system", "source", "score")})
@@ -413,11 +382,11 @@ def _download_fake(rom_id):
 
 
 def download(rom_id, cancel=None, progress=None):
-    """Fetch a candidate into staging.
+    """Stage a candidate on the server and verify it.
 
     Returns {rom_path, art_path|None, sha256, system, filename, title}. The
-    real backend has no artwork source — arcaded fills that from artdb after
-    delivery — so art_path is None there.
+    library backend has no artwork source (arcaded fills that from artdb
+    after delivery), so art_path is None there.
 
     `cancel` is a threading.Event checked between chunks: /roms/cancel sets
     it, the transfer stops with `Cancelled`, and the partial is removed.
@@ -440,7 +409,6 @@ def download(rom_id, cancel=None, progress=None):
     tmp = rom_path + ".part"
     h = hashlib.sha256()
     source_info = None
-    source_path = rom_path + ".source"
     url = entry["url"]
     retained = entry.get("source_metadata")
     reuse = bool(retained and os.path.isfile(rom_path)
@@ -449,18 +417,20 @@ def download(rom_id, cancel=None, progress=None):
     if reuse:
         source_info = retained
         url = pathlib.Path(rom_path).as_uri()
-    elif url.startswith("https://mirror.invalid/rom?"):
-        source_info = _fetch_torrent(entry, source_path, cancel, progress)
-        url = pathlib.Path(source_path).as_uri()
+    elif url.startswith("file:"):
+        src = urllib.request.url2pathname(urllib.parse.urlparse(url).path)
+        if not _inside_source(src) or not os.path.isfile(src):
+            raise RuntimeError("source file is outside ROM_SOURCE_DIR or gone")
+        # Hash the source up front: the staged copy must match it byte for
+        # byte, and the digest is the provenance record the queue keeps.
+        source_info = {"file_name": entry["title"], "size": os.path.getsize(src),
+                       "sha256": _hash_file(src)}
     else:
-        # Production payloads must use the server-side fetch command, never
-        # quietly fall back to direct HTTP for a new provider/package URL.
-        raise RuntimeError("source is not supported by the server-side ROM pipeline")
-    req = urllib.request.Request(url,
-                                 headers={"User-Agent": USER_AGENT})
+        raise RuntimeError("only files under ROM_SOURCE_DIR can be delivered")
+    req = urllib.request.Request(url)
     done = 0
     try:
-        with urllib.request.urlopen(req, timeout=DOWNLOAD_TIMEOUT) as r, \
+        with urllib.request.urlopen(req, timeout=COPY_TIMEOUT) as r, \
                 open(tmp, "wb") as f:
             total = None
             try:
@@ -487,7 +457,7 @@ def download(rom_id, cancel=None, progress=None):
             if entry.get("sha256") and h.hexdigest() != entry["sha256"]:
                 raise RuntimeError("source checksum mismatch")
             if source_info and (done != source_info["size"] or h.hexdigest() != source_info["sha256"]):
-                raise RuntimeError("published source checksum or size mismatch")
+                raise RuntimeError("source checksum or size changed during the copy")
             if fname.lower().endswith(".zip"):
                 f.flush()
                 with zipfile.ZipFile(tmp) as z:
@@ -507,9 +477,6 @@ def download(rom_id, cancel=None, progress=None):
         except FileNotFoundError:
             pass
         raise
-    finally:
-        if source_info is not None and not reuse:
-            pathlib.Path(source_path).unlink(missing_ok=True)
     os.replace(tmp, rom_path)
     _own(rom_path)
     if source_info:

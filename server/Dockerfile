@@ -21,48 +21,11 @@ RUN python3 -m venv /opt/ytdlp \
     && /opt/ytdlp/bin/pip install --no-cache-dir 'yt-dlp[default]' \
     && ln -s /opt/ytdlp/bin/yt-dlp /usr/local/bin/yt-dlp
 
-# ROMDL (example.invalid/romdl) in its own venv, exposed only as a CLI.
-# Deliberately NOT installed into the system interpreter: arcaded talks to it
-# over the documented `--json` interface, so its dependency tree (requests,
-# bs4, rapidfuzz, tqdm) never has to be importable from the daemon.
-# Build-arg pinned so an image rebuild is reproducible; bump to update.
-# The repo is PRIVATE, so the build takes an optional read-only deploy key as a
-# BuildKit secret (id=romdl_key) and clones over SSH. Without the secret it
-# falls back to the anonymous HTTPS URL, and if that fails the install is
-# SKIPPED rather than failing the whole build: romdl.py's default `auto`
-# backend is `shutil.which(romdl)`, so a missing CLI degrades to the fake
-# catalog instead of taking the daemon down with it.
-ARG ROMDL_REF=5d8c400
-RUN --mount=type=secret,id=romdl_key,required=false \
-    set -eu; \
-    if [ -s /run/secrets/romdl_key ]; then \
-        install -m 600 /run/secrets/romdl_key /tmp/romdl_key; \
-        export GIT_SSH_COMMAND="ssh -i /tmp/romdl_key -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new"; \
-        URL="git+ssh://git@example.invalid/romdl@${ROMDL_REF}"; \
-    else \
-        URL="git+https://example.invalid/romdl@${ROMDL_REF}"; \
-    fi; \
-    if python3 -m venv /opt/romdl \
-       && /opt/romdl/bin/pip install --no-cache-dir "$URL"; then \
-        ln -s /opt/romdl/bin/romdl /usr/local/bin/romdl; \
-        romdl --help >/dev/null; \
-        echo "romdl: installed from ${ROMDL_REF}"; \
-    else \
-        echo "WARNING: romdl unavailable at build time -- arcaded falls back to its fake catalog"; \
-        rm -rf /opt/romdl; \
-    fi; \
-    rm -f /tmp/romdl_key
-
 # NB: the build context is the REPO ROOT, not server/ — the Y2K asset pack
 # below lives at the top level because the Pegasus theme uses it too. Build
 # with `docker build -f server/Dockerfile .`; sim/docker-compose.yml does.
-COPY server/arcaded.py /app/arcaded.py
-COPY server/artdb.py /app/artdb.py
-COPY server/plex.py /app/plex.py
-COPY server/shuffle.py /app/shuffle.py
-COPY server/commercials.py /app/commercials.py
-COPY server/romdl.py /app/romdl.py
-COPY server/webui.html /app/webui.html
+# Every server module (arcaded imports all of them) plus the web UI.
+COPY server/*.py server/webui.html /app/
 # Skins, sprites and the tagged GIF library, served at /assets for the web UI.
 COPY assets /app/assets
 COPY server/arcadectl /usr/local/bin/arcadectl

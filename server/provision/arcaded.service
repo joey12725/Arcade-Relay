@@ -8,7 +8,10 @@ Wants=network-online.target
 Environment=STATE_DIR=/var/lib/arcade/state
 Environment=SAVES_BACKUP_DIR=/var/lib/arcade/saves-backup
 Environment=ROMDL_STAGING=/var/lib/arcade/rom-staging
-Environment=JELLYFIN_URL=http://localhost:8096
+# Your own game files, laid out as <system>/<file>. Unset = fake catalogue.
+#Environment=ROM_SOURCE_DIR=/srv/games
+Environment=PLEX_URL=http://localhost:32400
+#Environment=PLEX_TOKEN=
 WorkingDirectory=/opt/arcade/server
 ExecStart=/usr/bin/python3 /opt/arcade/server/arcaded.py
 Restart=always

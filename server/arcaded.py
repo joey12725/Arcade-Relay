@@ -15,7 +15,6 @@ import hashlib
 import json
 import os
 import pathlib
-import random
 import re
 import subprocess
 import tempfile
@@ -24,7 +23,6 @@ import urllib.error
 import urllib.parse
 import uuid
 
-import aiohttp
 import yaml
 from aiohttp import WSMsgType, web
 
@@ -630,7 +628,7 @@ def active_playlist(cfg):
 
 
 async def screensaver_sources(request):
-    """Every series/movie in Jellyfin, merged with enabled flags (SCR-4)."""
+    """Every series/movie in the media library, merged with enabled flags (SCR-4)."""
     lib = await plex.items()
     cfg = load_screensaver()
     enabled = {source_id(s): s.get("enabled", False)
@@ -1317,7 +1315,7 @@ async def _deliver_art(files, dest_rom):
     """Put cover art next to a freshly delivered ROM. Never fatal.
 
     Two sources, in order: art the backend staged itself (the fake backend
-    does; real ROMDL has no artwork), then artdb's libretro-thumbnails
+    does; the library backend has no artwork), then artdb's libretro-thumbnails
     lookup. A game with no cover is still a perfectly good game, so a miss
     here must not fail the request the way it used to.
     """
@@ -1348,7 +1346,7 @@ async def rom_worker(entry):
 
 
 async def _rom_worker(entry):
-    """request -> download (ROMDL) -> deliver over the tunnel -> rescan."""
+    """request -> stage + verify (romdl.py) -> deliver over the tunnel -> rescan."""
     import threading
     for key in ("verified", "playable", "acquisition_only", "library_paths", "library_error"):
         entry.pop(key, None)
@@ -1447,8 +1445,8 @@ async def _rom_worker(entry):
 
 
 async def roms_search(request):
-    """Candidates for a query. `system` is required by the real ROMDL backend
-    (it searches one console at a time); the fake ignores it."""
+    """Candidates for a query. `system` is required by the library backend
+    (games are filed per system); the fake ignores it."""
     try:
         res = await asyncio.to_thread(
             romdl.search, request.query.get("q", ""),
@@ -1458,10 +1456,10 @@ async def roms_search(request):
     except ValueError as e:
         return web.json_response({"error": str(e)}, status=400)
     except (RuntimeError, OSError, subprocess.SubprocessError) as e:
-        return web.json_response({"error": f"romdl search failed: {e}"},
+        return web.json_response({"error": f"library search failed: {e}"},
                                  status=502)
-    # An empty result from a console with no live source is not a bad query;
-    # say which, so the UI does not tell someone to try different spelling.
+    # An empty result from a system with no library folder is not a bad
+    # query; say which, so the UI does not tell someone to try new spelling.
     note = None
     if not res and romdl.using_real():
         note = romdl.coverage(request.query.get("system"))

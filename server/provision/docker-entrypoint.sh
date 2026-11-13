@@ -30,7 +30,7 @@ git config --global --add safe.directory "$SRC"
 STATE_DIR=${STATE_DIR:-/statework}
 export STATE_DIR
 export ROMDL_STAGING=${ROMDL_STAGING:-/arcade-media/incoming}
-export ROMDL_QBIT_CONFIG=${ROMDL_QBIT_CONFIG:-/srv/arcade-ssh/romdl-qbit.json}
+# ROM_SOURCE_DIR (your own <system>/<file> game library) passes straight through.
 if [ ! -d "$STATE_DIR/.git" ]; then
     log "seeding state repo at $STATE_DIR from $SRC/state"
     mkdir -p "$STATE_DIR"

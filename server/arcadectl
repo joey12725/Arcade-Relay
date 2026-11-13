@@ -96,10 +96,10 @@ def main():
     rs = rsub.add_parser("search")
     rs.add_argument("query")
     rs.add_argument("--system", help="nes, snes, psx, ... (required by the "
-                                     "real ROMDL backend)")
+                                     "library backend)")
     rs.add_argument("--limit", type=int, default=10)
     rs.add_argument("--deep", action="store_true",
-                    help="more permissive matching, deeper crawl")
+                    help="also match files in sub-folders")
     rr = rsub.add_parser("request")
     rr.add_argument("query", nargs="?", help="omit when using --id")
     rr.add_argument("--system")
@@ -107,7 +107,7 @@ def main():
     rsub.add_parser("queue")
     rsub.add_parser("status")
     rsub.add_parser("sync")
-    rsub.add_parser("backend", help="which ROMDL backend and source coverage")
+    rsub.add_parser("backend", help="which ROM backend is live and what it covers")
     rrt = rsub.add_parser("retry")
     rrt.add_argument("id")
     rc = rsub.add_parser("cancel")

@@ -27,7 +27,7 @@ def server(tmp_path, monkeypatch):
     monkeypatch.setenv("STATE_DIR", str(tmp_path))
     ad = importlib.import_module("arcaded")
     monkeypatch.setattr(ad, "STATE_DIR", str(tmp_path))
-    monkeypatch.setattr(ad.romdl, "BACKEND", "real")
+    monkeypatch.setattr(ad.romdl, "BACKEND", "library")
     (tmp_path / "cabinet.yaml").write_text(
         "systems: [nes, psp, 3ds]\nemulators:\n"
         "  nes: {core: installed}\n  psp: {core: installed}\n"

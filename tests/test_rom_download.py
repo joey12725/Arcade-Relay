@@ -1,11 +1,10 @@
-"""Transport faults must never become installable files."""
+"""Server-side ROM staging: nothing unverified ever becomes an installable file."""
 import hashlib
 import importlib.util
 import io
+import os
 from pathlib import Path
-import threading
 import types
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import zipfile
 
 import pytest
@@ -15,103 +14,131 @@ adapter = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(adapter)
 
 
-@pytest.fixture
-def source(tmp_path, monkeypatch):
+def _zip(members):
     payload = io.BytesIO()
     with zipfile.ZipFile(payload, "w") as z:
-        z.writestr("Game (USA).nes", b"NES\x1a" + b"rom bytes" * 200)
-    data = payload.getvalue()
-    class Handler(BaseHTTPRequestHandler):
-        def do_GET(self):
-            self.send_response(200)
-            self.send_header("Content-Length", str(len(data)))
-            self.end_headers()
-            self.wfile.write(data[:len(data)//2] if self.path == "/short" else data)
-        def log_message(self, *args):
-            pass
-    http = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
-    threading.Thread(target=http.serve_forever, daemon=True).start()
-    monkeypatch.setattr(adapter, "STAGING", str(tmp_path))
-    monkeypatch.setattr(adapter, "BACKEND", "real")
+        for name, data in members.items():
+            z.writestr(name, data)
+    return payload.getvalue()
+
+
+@pytest.fixture
+def source(tmp_path, monkeypatch):
+    """A staging dir plus an owner library at ROM_SOURCE_DIR/<system>/."""
+    staging, src = tmp_path / "staging", tmp_path / "library-src"
+    staging.mkdir()
+    src.mkdir()
+    data = _zip({"Game (USA).nes": b"NES\x1a" + b"rom bytes" * 200})
+    monkeypatch.setattr(adapter, "STAGING", str(staging))
+    monkeypatch.setattr(adapter, "SOURCE_DIR", str(src))
+    monkeypatch.setattr(adapter, "BACKEND", "library")
     monkeypatch.setattr(adapter.shutil, "disk_usage",
                         lambda p: types.SimpleNamespace(free=100 * 1024 ** 3))
-    def fetch(entry, path, cancel, progress):
-        with adapter.urllib.request.urlopen(entry["test_url"]) as response:
-            chunks = []
-            while chunk := response.read(65536):
-                chunks.append(chunk)
-            Path(path).write_bytes(b"".join(chunks))
-        # Model a provider with independently published expected bytes.
-        return {"file_name": entry["title"], "size": len(data),
-                "sha256": hashlib.sha256(data).hexdigest()}
-    monkeypatch.setattr(adapter, "_fetch_torrent", fetch)
-    def candidate(path="/good", **kw):
-        adapter._save_cache({"game": {"title": "Game (USA).zip", "system": "nes",
-                            "url": "https://mirror.invalid/rom?id=test",
-                            "test_url": f"http://127.0.0.1:{http.server_port}{path}", **kw}})
-    yield candidate, data
-    http.shutdown()
+
+    def candidate(system="nes", name="Game (USA).zip", payload=data, **kw):
+        path = src / system / name
+        path.parent.mkdir(exist_ok=True)
+        path.write_bytes(payload)
+        adapter._save_cache({"game": {"title": name, "system": system,
+                                      "url": path.resolve().as_uri(), **kw}})
+        return path
+    return types.SimpleNamespace(candidate=candidate, data=data, staging=staging, src=src)
 
 
-def test_source_truncation_preserves_existing_archive(source, tmp_path):
-    candidate, _ = source
-    candidate("/short")
-    (tmp_path / "game").mkdir()
-    existing = tmp_path / "game" / "Game (USA).zip"
+def test_truncated_copy_preserves_existing_archive(source, monkeypatch):
+    source.candidate()
+    (source.staging / "game").mkdir()
+    existing = source.staging / "game" / "Game (USA).zip"
     existing.write_bytes(b"existing")
+
+    class Short(io.BytesIO):
+        headers = {"Content-Length": str(len(source.data))}
+    monkeypatch.setattr(adapter.urllib.request, "urlopen",
+                        lambda *a, **kw: Short(source.data[:len(source.data) // 2]))
     with pytest.raises((RuntimeError, OSError)):
         adapter.download("game")
     assert existing.read_bytes() == b"existing"
-    assert not list(tmp_path.rglob("*.part"))
+    assert not list(source.staging.rglob("*.part"))
 
 
-def test_source_checksum_and_extracted_cartridge(source, tmp_path):
-    candidate, data = source
-    candidate(sha256=hashlib.sha256(data).hexdigest())
+def test_source_checksum_and_extracted_cartridge(source):
+    source.candidate(sha256=hashlib.sha256(source.data).hexdigest())
     result = adapter.download("game")
     assert result["filename"] == "Game (USA).nes"
     assert Path(result["rom_path"]).read_bytes().startswith(b"NES\x1a")
     assert result["sha256"] == hashlib.sha256(Path(result["rom_path"]).read_bytes()).hexdigest()
     assert result["files"][0]["sha256"] == result["sha256"]
+    assert result["source_metadata"]["sha256"] == hashlib.sha256(source.data).hexdigest()
 
 
-def test_wrong_source_checksum_never_publishes(source, tmp_path):
-    candidate, _ = source
-    candidate(sha256="0" * 64)
+def test_wrong_source_checksum_never_publishes(source):
+    source.candidate(sha256="0" * 64)
     with pytest.raises(RuntimeError, match="checksum"):
         adapter.download("game")
-    assert not (tmp_path / "game" / "Game (USA).zip").exists()
-    assert not list(tmp_path.rglob("*.part"))
+    assert not (source.staging / "game" / "Game (USA).zip").exists()
+    assert not list(source.staging.rglob("*.part"))
 
 
-def test_retained_verified_archive_reinstalls_without_source_network(source, tmp_path, monkeypatch):
-    candidate, data = source
-    candidate()
+def test_retained_verified_archive_reinstalls_without_touching_source(source):
+    path = source.candidate()
     cache = adapter._load_cache()
-    cache["game"]["url"] = "https://mirror.invalid/rom?id=123"
-    cache["game"]["source_metadata"] = {"file_name": "Game (USA).zip", "size": len(data),
-                                        "sha256": hashlib.sha256(data).hexdigest()}
+    cache["game"]["source_metadata"] = {"file_name": "Game (USA).zip", "size": len(source.data),
+                                        "sha256": hashlib.sha256(source.data).hexdigest()}
     adapter._save_cache(cache)
-    (tmp_path / "game").mkdir()
-    (tmp_path / "game/Game (USA).zip").write_bytes(data)
-    def unexpected_fetch(*args):
-        raise AssertionError("verified retained archives must not need the source network")
-    monkeypatch.setattr(adapter, "_fetch_torrent", unexpected_fetch)
+    (source.staging / "game").mkdir()
+    (source.staging / "game/Game (USA).zip").write_bytes(source.data)
+    path.unlink()   # the library copy is gone; the retained one must suffice
     result = adapter.download("game")
     assert result["filename"] == "Game (USA).nes"
-    assert result["source_metadata"]["sha256"] == hashlib.sha256(data).hexdigest()
+    assert result["source_metadata"]["sha256"] == hashlib.sha256(source.data).hexdigest()
     assert result["source_reused"] is True
 
 
-def test_search_refresh_preserves_verified_source_metadata(source, monkeypatch):
-    _, data = source
-    url = "https://mirror.invalid/rom?id=123#Game.zip"
-    rid = adapter._candidate_id(url)
-    metadata = {"file_name": "Game (USA).zip", "size": len(data), "sha256": hashlib.sha256(data).hexdigest()}
+def test_search_refresh_preserves_verified_source_metadata(source):
+    path = source.candidate()
+    rid = adapter._candidate_id(path.resolve().as_uri())
+    metadata = {"file_name": "Game (USA).zip", "size": len(source.data),
+                "sha256": hashlib.sha256(source.data).hexdigest()}
     adapter._save_cache({rid: {"title": "Game (USA).zip", "source_metadata": metadata}})
-    monkeypatch.setattr(adapter, "_run_romdl", lambda *args: [{"title": "Game (USA).zip", "url": url, "score": 135}])
     adapter.search("Game", "nes")
     assert adapter._load_cache()[rid]["source_metadata"] == metadata
+
+
+def test_search_ranks_exact_titles_first_and_stays_in_system(source):
+    for name in ("Game (USA).zip", "Game II (USA).zip", "Other Thing (Europe).zip", "notes.txt"):
+        (source.src / "nes").mkdir(exist_ok=True)
+        (source.src / "nes" / name).write_bytes(b"x")
+    (source.src / "snes").mkdir()
+    (source.src / "snes" / "Game (USA).sfc").write_bytes(b"x")
+    results = adapter.search("game", "nes")
+    titles = [r["title"] for r in results]
+    assert titles[0] == "Game (USA).zip" and results[0]["score"] == 150
+    assert "notes.txt" not in titles and "Game (USA).sfc" not in titles
+    assert all(r["system"] == "nes" and r["source"] == "library" for r in results)
+    assert results[-1]["score"] < 100   # fuzzy-only matches need a human pick
+
+
+def test_search_follows_system_aliases(source):
+    (source.src / "megadrive").mkdir()
+    (source.src / "megadrive" / "Demo (World).md").write_bytes(b"x")
+    results = adapter.search("demo", "genesis")
+    assert [r["title"] for r in results] == ["Demo (World).md"]
+    assert results[0]["system"] == "genesis"
+
+
+def test_search_requires_a_system(source):
+    with pytest.raises(ValueError):
+        adapter.search("game")
+
+
+@pytest.mark.parametrize("query,title,confident", [
+    ("Game", "Game (USA).zip", True),
+    ("game ii", "Game II (USA) (Rev 1).zip", True),
+    ("game", "Game II (USA).zip", True),
+    ("gmae", "Game (USA).zip", False),
+])
+def test_score_threshold(query, title, confident):
+    assert (adapter.score(query, title) >= 100) is confident
 
 
 @pytest.mark.parametrize("system,name", [
@@ -119,27 +146,20 @@ def test_search_refresh_preserves_verified_source_metadata(source, monkeypatch):
     ("3ds", "Game.cia"), ("psp", "Game.pkg"), ("psvita", "Game.vpk"),
     ("ps2", "Game.iso"), ("saturn", "Game.chd"), ("dreamcast", "Game.cdi"),
 ])
-def test_acquisition_formats(source, monkeypatch, system, name):
-    candidate, _ = source
-    payload = io.BytesIO()
-    with zipfile.ZipFile(payload, "w") as z:
-        z.writestr(name, b"payload")
-    data = payload.getvalue()
-    monkeypatch.setattr(adapter, "_fetch_torrent", lambda entry, path, *a:
-        (Path(path).write_bytes(data) and {"file_name": entry["title"], "size": len(data),
-         "sha256": hashlib.sha256(data).hexdigest()}))
-    class Response(io.BytesIO):
-        headers = {"Content-Length": str(len(data))}
-    monkeypatch.setattr(adapter.urllib.request, "urlopen", lambda *a, **kw: Response(data))
-    candidate()
-    cache = adapter._load_cache()
-    cache["game"]["system"] = system
-    adapter._save_cache(cache)
+def test_library_formats(source, system, name):
+    source.candidate(system=system, name="Game.zip", payload=_zip({name: b"payload"}))
     result = adapter.download("game")
     assert result["filename"] == name
     assert result["sha256"] == hashlib.sha256(b"payload").hexdigest()
     if name.endswith((".cia", ".pkg", ".vpk")):
         assert Path(name).suffix not in adapter.LAUNCH_EXTENSIONS.get(system, set())
+
+
+def test_bare_cartridge_is_staged_as_is(source):
+    source.candidate(system="gba", name="Homebrew Demo.gba", payload=b"GBA" * 100)
+    result = adapter.download("game")
+    assert result["filename"] == "Homebrew Demo.gba"
+    assert Path(result["rom_path"]).read_bytes() == b"GBA" * 100
 
 
 @pytest.mark.parametrize("name,descriptor", [
@@ -154,58 +174,58 @@ def test_descriptor_requires_manifest_tracks(tmp_path, name, descriptor):
     adapter.validate_descriptor(path, [{"filename": "track.bin"}])
 
 
-def test_server_reserve_rejects_before_payload(source, tmp_path, monkeypatch):
-    import types
-    candidate, _ = source
-    candidate()
-    monkeypatch.setattr(adapter.shutil, "disk_usage", lambda p: types.SimpleNamespace(free=adapter.MIN_FREE_BYTES - 1))
+def test_server_reserve_rejects_before_payload(source, monkeypatch):
+    source.candidate()
+    monkeypatch.setattr(adapter.shutil, "disk_usage",
+                        lambda p: types.SimpleNamespace(free=adapter.MIN_FREE_BYTES - 1))
     with pytest.raises(RuntimeError, match="storage reserve"):
         adapter.download("game")
-    assert not list(tmp_path.rglob("*.part"))
+    assert not list(source.staging.rglob("*.part"))
 
 
-def test_search_drops_cross_system_results(source, monkeypatch):
-    monkeypatch.setattr(adapter, "_run_romdl", lambda *a: [
-        {"title": "Game.zip", "system": "psvita", "url": "https://example.invalid/wrong"},
-        {"title": "Game.zip", "console": "n64", "url": "https://example.invalid/right"},
-    ])
-    results = adapter.search("Game", "n64")
-    assert len(results) == 1
-    assert results[0]["id"] == adapter._candidate_id("https://example.invalid/right")
+def test_only_source_dir_files_can_be_delivered(source, tmp_path):
+    source.candidate()
+    outside = tmp_path / "elsewhere.zip"
+    outside.write_bytes(source.data)
+    escape = source.src / "nes" / "escape.zip"
+    os.symlink(outside, escape)
+    for url in ("https://example.invalid/Game.zip", outside.as_uri(),
+                escape.as_uri()):
+        cache = adapter._load_cache()
+        cache["game"]["url"] = url
+        adapter._save_cache(cache)
+        with pytest.raises(RuntimeError, match="ROM_SOURCE_DIR"):
+            adapter.download("game")
+    assert "escape.zip" not in [r["title"] for r in adapter.search("escape", "nes")]
 
 
-def test_direct_provider_payload_cannot_bypass_vpn(source):
-    candidate, _ = source
-    candidate()
-    cache = adapter._load_cache()
-    cache["game"]["url"] = "https://example.invalid/Game.pkg"
-    adapter._save_cache(cache)
-    with pytest.raises(RuntimeError, match="server-side"):
-        adapter.download("game")
+def test_cancel_removes_partial(source):
+    import threading
+    source.candidate()
+    stop = threading.Event()
+    stop.set()
+    with pytest.raises(adapter.Cancelled):
+        adapter.download("game", cancel=stop)
+    assert not list(source.staging.rglob("*.part"))
+
+
+def test_backend_selection(monkeypatch, tmp_path):
+    monkeypatch.setattr(adapter, "BACKEND", "auto")
+    monkeypatch.setattr(adapter, "SOURCE_DIR", None)
+    assert adapter.backend_name() == "fake"
+    monkeypatch.setattr(adapter, "SOURCE_DIR", str(tmp_path))
+    assert adapter.backend_name() == "library"
+    monkeypatch.setattr(adapter, "BACKEND", "fake")
+    assert adapter.backend_name() == "fake"
 
 
 @pytest.mark.parametrize("system,name,descriptor", [
     ("saturn", "Game.cue", 'FILE "track.bin" BINARY\n TRACK 01 MODE1/2352\n'),
     ("dreamcast", "Game.gdi", '1\n1 0 4 2352 "track.bin" 0\n'),
 ])
-def test_disc_archive_hashes_descriptor_and_every_track(source, monkeypatch, system, name, descriptor):
-    candidate, _ = source
-    payload = io.BytesIO()
+def test_disc_archive_hashes_descriptor_and_every_track(source, system, name, descriptor):
     members = {name: descriptor.encode(), "track.bin": b"track contents"}
-    with zipfile.ZipFile(payload, "w") as z:
-        for filename, data in members.items():
-            z.writestr(filename, data)
-    archive = payload.getvalue()
-    monkeypatch.setattr(adapter, "_fetch_torrent", lambda entry, path, *a:
-        (Path(path).write_bytes(archive) and {"file_name": entry["title"], "size": len(archive),
-         "sha256": hashlib.sha256(archive).hexdigest()}))
-    class Response(io.BytesIO):
-        headers = {"Content-Length": str(len(archive))}
-    monkeypatch.setattr(adapter.urllib.request, "urlopen", lambda *a, **kw: Response(archive))
-    candidate()
-    cache = adapter._load_cache()
-    cache["game"]["system"] = system
-    adapter._save_cache(cache)
+    source.candidate(system=system, name="Game.zip", payload=_zip(members))
     result = adapter.download("game")
     assert result["filename"] == name
     assert {f["filename"]: f["sha256"] for f in result["files"]} == {
@@ -325,24 +345,24 @@ def test_own_failure_is_logged_not_raised(library, monkeypatch, capsys):
     assert "cannot own" in capsys.readouterr().err
 
 
-def test_download_owns_staged_files(source, tmp_path, monkeypatch):
-    candidate, data = source
+def test_download_owns_staged_files(source, monkeypatch):
+    source.candidate(sha256=hashlib.sha256(source.data).hexdigest())
     chowned = []
     monkeypatch.setattr(adapter, "OWNER", "99:100")
     monkeypatch.setattr(adapter.os, "chown", lambda p, uid, gid: chowned.append(Path(p)))
-    candidate(sha256=hashlib.sha256(data).hexdigest())
+    adapter._save_cache(adapter._load_cache())
     result = adapter.download("game")
     owned = set(chowned)
-    assert {tmp_path / "game", tmp_path / "game" / "Game (USA).zip",
-            Path(result["rom_path"]), tmp_path / "candidates.json"} <= owned
+    st = source.staging
+    assert {st / "game", st / "game" / "Game (USA).zip",
+            Path(result["rom_path"]), st / "candidates.json"} <= owned
 
 
 def test_download_without_owner_never_chowns(source, monkeypatch):
-    candidate, data = source
     def unexpected(*a):
         raise AssertionError("chown without ROM_LIBRARY_OWNER")
     monkeypatch.setattr(adapter.os, "chown", unexpected)
-    candidate(sha256=hashlib.sha256(data).hexdigest())
+    source.candidate(sha256=hashlib.sha256(source.data).hexdigest())
     adapter.download("game")
 
 
@@ -356,7 +376,7 @@ def worker(tmp_path, monkeypatch):
     monkeypatch.setenv("STATE_DIR", str(tmp_path))
     ad = importlib.import_module("arcaded")
     monkeypatch.setattr(ad, "STATE_DIR", str(tmp_path))
-    monkeypatch.setattr(ad.romdl, "BACKEND", "real")
+    monkeypatch.setattr(ad.romdl, "BACKEND", "library")
     (tmp_path / "cabinet.yaml").write_text("systems: [gb]\nemulators:\n  gb: {core: installed}\n")
     monkeypatch.setattr(ad, "save_rom_queue", lambda: None)
     monkeypatch.setattr(ad, "rom_cancel_events", {})

@@ -1,12 +1,12 @@
 # ROMs on the arcade cabinet
 
-You are running **on the cabinet**, in its T3 Code **ROMs** project (`/roms`).
-To download/request/install a game, read **ROM-DOWNLOADS.md** and
-**skills/arcade-roms/SKILL.md**, then use:
+You are running **on the cabinet**, in its **ROMs** project (`/roms`). To
+install a game from the server's library, read **skills/arcade-roms/SKILL.md**,
+then use:
 
 ```sh
 arcadectl --json status
-arcadectl --json roms request "Gunstar Heroes" --system genesis
+arcadectl --json roms request "Star Patrol" --system nes
 arcadectl --json roms status
 ```
 
@@ -14,9 +14,9 @@ arcadectl --json roms status
 No laptop, server terminal, environment export, or interactive login is needed.
 If your agent's PATH is unusual, use `/usr/local/bin/arcadectl` explicitly.
 
-The **server** downloads via server-side download client and delivers verified
-files to this cabinet. This project is the installed library, not a torrent
-workspace. Use the request API instead of manually downloading/copying ROMs.
+The **server** owns the game library. It stages a checksum-verified copy and
+delivers it to this cabinet over the tunnel. Use the request API instead of
+copying ROM files in by hand, so every install is verified and recorded.
 
 Specify the system: `nes`, `snes`, `genesis`, `gb`, `gba`, `psx`, or `arcade`.
 Use full titles; choose an exact candidate if a search is ambiguous. Preserve
@@ -25,5 +25,4 @@ existing ROMs, art, saves, and jobs. Report success only after the job is
 launching replaces the game currently running on the cabinet.
 
 For errors, inspect the job's `detail`, then use `roms retry <job-id>`.
-Don't restart unrelated services on the server to fix a
-game request. This workflow needs no changes to other server services.
+Don't restart unrelated services on the server to fix a game request.
