@@ -1,0 +1,27 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install dependencies
+        run: pip install pytest ruff aiohttp pyyaml paho-mqtt evdev
+      - name: Lint
+        run: ruff check .
+      - name: Shell syntax
+        run: |
+          for f in sim/scripts/*.sh sim/soak/bin/*.sh cabinet/provision/*.sh \
+                   server/provision/*.sh server/entrypoint.sh; do
+            bash -n "$f"
+          done
+      - name: Tests
+        run: pytest -q

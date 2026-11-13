@@ -258,7 +258,7 @@ class VirtualPad:
 
     def open(self):
         try:
-            import evdev
+            import evdev  # noqa: F401  (availability probe)
             from evdev import UInput, ecodes
         except ImportError:
             self._why = "python3-evdev not installed"

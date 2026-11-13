@@ -1,0 +1,10 @@
+target-version = "py311"
+extend-exclude = ["sim/.data", ".runtime"]
+
+[lint]
+# Pyflakes + syntax/runtime errors. Style is left to the code's own taste.
+select = ["F", "E9"]
+
+[lint.per-file-ignores]
+# Fixtures imported from a sibling test module look unused / redefined.
+"tests/test_commercials.py" = ["F401", "F811"]

@@ -15,7 +15,6 @@ import json
 import subprocess
 import sys
 import time
-import urllib.request
 
 SIM = ["docker", "compose", "-f", "sim/docker-compose.yml"]
 CHROMIUM = "/opt/pw-browsers/chromium-1194/chrome-linux/chrome"

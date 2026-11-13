@@ -1,4 +1,27 @@
-.PHONY: media sim-up sim-down sim-test test-m0 accept-m0 test-fakes test-m1 soak-up soak-down soak-status
+.PHONY: test lint dev-server demo-cabinet media sim-up sim-down sim-test test-m0 accept-m0 test-fakes test-m1 soak-up soak-down soak-status
+
+# --- no-Docker dev loop -------------------------------------------------
+DEV_STATE ?= .runtime/state
+DEV_PORT ?= 8000
+
+test:
+	python3 -m pytest -q
+
+lint:
+	python3 -m ruff check .
+
+# arcaded against a throwaway copy of state/ (seeded once as a git repo).
+dev-server:
+	@if [ ! -d $(DEV_STATE)/.git ]; then \
+		mkdir -p $(DEV_STATE) && cp -r state/. $(DEV_STATE)/ && \
+		git -C $(DEV_STATE) init -q && git -C $(DEV_STATE) add -A && \
+		git -C $(DEV_STATE) -c user.name=arcaded -c user.email=arcaded@localhost commit -qm seed; \
+	fi
+	STATE_DIR=$(DEV_STATE) ROMDL_STAGING=.runtime/staging PORT=$(DEV_PORT) python3 server/arcaded.py
+
+# A pretend cabinet that dials dev-server, so the dashboard has a game running.
+demo-cabinet:
+	python3 sim/demo_cabinet.py ws://127.0.0.1:$(DEV_PORT)/cab
 
 sim-up:
 	cd sim && docker compose up -d --build --wait --wait-timeout 300

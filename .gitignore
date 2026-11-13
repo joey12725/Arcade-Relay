@@ -9,3 +9,5 @@ soak/.data/
 .pytest_cache/
 sim/media/**/*.mkv
 .runtime/
+.ruff_cache/
+.DS_Store

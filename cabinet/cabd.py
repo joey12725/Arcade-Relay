@@ -50,7 +50,7 @@ _fifo_fd = None   # persistent nonblocking reader so writers never block
 
 def init_input_fifo():
     """Sim input source (A-13): button events arrive as lines on a FIFO.
-    Real hardware reads evdev instead (HARDWARE-TODO)."""
+    Real hardware reads evdev instead (docs/hardware-checklist.md)."""
     global _fifo_fd
     try:
         if not os.path.exists(INPUT_FIFO):
@@ -737,7 +737,7 @@ async def recheck_screensaver_playlist(settle_s=20):
 
 
 async def _start_screensaver_now(only_if_on=False):
-    cfg = state["bundle"].get("screensaver.yaml") or {}
+    cfg = state["bundle"].get("screensaver.yaml") or {}  # noqa: F841  (raises early if no bundle yet)
 
     async def use_local_clips(why):
         """Same fallback for both no-playlist cases: the server being

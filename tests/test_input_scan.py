@@ -12,7 +12,9 @@ from unittest.mock import patch
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'cabinet'))
 import cabd
-import evdev
+import pytest
+
+evdev = pytest.importorskip("evdev")  # Linux-only input layer
 from evdev.eventio_async import EventIO, ReadIterator
 import inputs
 import panels

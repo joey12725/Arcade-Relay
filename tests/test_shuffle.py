@@ -85,7 +85,6 @@ def test_movies_pooled_vs_individual():
     """movies_as_series=False pools all movies into ONE bucket, so movies
     collectively get one series' worth of slots instead of ten."""
     e = make({"Show": 10}, movies=10)
-    rng = random.Random(5)
     pooled = [v for v in shuffle.order(e, "even_series", rng=random.Random(5),
                                        movies_as_series=False, limit=600)]
     individual = [v for v in shuffle.order(e, "even_series", rng=random.Random(5),
