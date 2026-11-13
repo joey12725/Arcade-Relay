@@ -2,8 +2,14 @@
 
 **Version:** 0.1 (draft for review)
 **Date:** 2026-07-22
-**Owner:** Joey
+**Owner:** Joey Hersh
 **Audience:** Coding agents (Claude Code, Codex, etc.) and human collaborators. This document is intended to be implementation-ready: an agent should be able to pick a milestone and build it.
+
+> This is the design spec the project was built from, kept as written. Two
+> things moved during implementation: the screensaver's media server became
+> **Plex** (see `server/plex.py`), and the ROM pipeline serves games from the
+> owner's own library folder (`ROM_SOURCE_DIR`, see `server/romdl.py`).
+> [architecture.md](architecture.md) describes the system as built.
 
 ---
 
@@ -38,7 +44,7 @@ The non-negotiable core: **absolutely unshakably reliable retro game emulation.*
 │  │ Cabinet   │◄─────────────┼────────┤  arcadectl (CLI)             │
 │  │  cabd     │  wss:// via  │        │  Web UI                      │
 │  │  Pegasus  │  Cloudflare  │        │  Jellyfin (media)            │
-│  │  RetroArch│  Tunnel      │        │  ROMDL (ROM pipeline)        │
+│  │  RetroArch│  Tunnel      │        │  ROM library + delivery      │
 │  │  mpv      │              │        │  skills/ (SKILL.md files)    │
 │  └─────▲─────┘              │        │  state repo (git)            │
 │        │ Moonlight (LAN)    │        └──────────────────────────────┘
@@ -130,7 +136,7 @@ Every requirement from the source conversation, given a stable ID for traceabili
 
 | ID | Req | Pri |
 |----|-----|-----|
-| ROM-1 | Server-side integration with the existing **ROMDL** package (owner's ROM scraper/downloader). | P1 |
+| ROM-1 | The server owns the game library (the owner's own ROM files) and delivers games to the cabinet. | P1 |
 | ROM-2 | Queue up and request games remotely; requests flow: request → download on server → deliver to cabinet → appear in frontend. | P1 |
 | ROM-3 | The whole pipeline is agentically exposed ("get me Metal Slug 3" should be a one-liner to an agent). | P1 |
 
@@ -352,7 +358,7 @@ A dead-simple fullscreen status screen (part of cabd, no dependencies on Pegasus
 - Hosts: the WebSocket hub the cabinet dials into; a REST API (the *only* API — CLI, web UI, and any future surface all consume it); the state repo (reads/writes + git commits with attributed messages, e.g. `arcadectl: set screensaver brightness 60`).
 - Push model: any state change → commit → push rendered diff to cabinet over WS → cabd applies → acks. If cabinet offline, queued and replayed on reconnect.
 - Jellyfin adapter: enumerate libraries/series/movies, mint transcoded stream URLs (480p cap) for the screensaver playlist.
-- ROMDL adapter: see §6.4.
+- ROM delivery adapter: see §6.4.
 - Cabinet presence tracking + event log (game launched, screensaver on/off, disconnects) — queryable, so agents can answer "what's the cabinet doing right now?"
 - The REST API is plain, tokenless-or-single-token HTTP — deliberately trivial for smart-home platforms (Home Assistant `rest_command`, Node-RED, cron) to call (AGT-5): e.g., `POST /screensaver/set {"brightness": 30}` at 10pm nightly.
 
@@ -382,7 +388,7 @@ arcadectl controls save-preset <name> | load-preset <name> | diff <a> <b>
 arcadectl controls map --scope global|system:<sys>|game:<id> --set a=b ...
 arcadectl controls monitor                # stream live button presses (for testing mappings)
 
-arcadectl roms search <query>             # via ROMDL
+arcadectl roms search <query>             # server game library
 arcadectl roms request <query|id> [--system X]
 arcadectl roms queue|status
 arcadectl roms sync                       # force delivery/rescan
@@ -402,8 +408,8 @@ Same REST API. Pages: dashboard (status, screenshot, quick actions: volume slide
 
 ### 6.4 ROM pipeline (ROM-1..3)
 
-- Adapter around the existing **ROMDL** package (interface to be confirmed against its actual API — OQ-4; assumed: search(query) → candidates, download(id) → file(s)).
-- Flow: `request` → queued in arcaded → ROMDL downloads to server staging → checksum → pushed to cabinet over the tunnel (HTTP resume-capable) into the right system folder → cabd triggers Pegasus library rescan → optional scrape of art/metadata → event "ROM ready: <name>" visible in `arcadectl roms status`.
+- Adapter over the server's game library (interface per OQ-4: search(query) → candidates, download(id) → staged, verified file(s)).
+- Flow: `request` → queued in arcaded → the adapter stages a verified copy on the server → checksum → pushed to cabinet over the tunnel (HTTP resume-capable) into the right system folder → cabd triggers Pegasus library rescan → optional scrape of art/metadata → event "ROM ready: <name>" visible in `arcadectl roms status`.
 - Fully agent-drivable: "get Metal Slug 3 on the cabinet" ≡ `arcadectl roms request "metal slug 3" && arcadectl roms sync`.
 
 ### 6.5 Skills & agent onboarding (AGT-1, AGT-2)
@@ -444,7 +450,7 @@ Ordered so the sacred core lands first; each milestone is independently shippabl
 **M3 — Screensaver.** Jellyfin integration; 480p transcode; panscan 4:3 crop; brightness tint live-adjustable; per-source enable/disable; idle in/out; force combo + CLI; offline fallback clips.
 *Accept:* SCR-1..7 each demonstrated; measured stream ≤480p; zero letterbox/pillarbox pixels on the panel; brightness change applies <500ms without playback hiccup.
 
-**M4 — ROM pipeline.** ROMDL adapter; request→deliver→rescan flow; `roms` CLI family.
+**M4 — ROM pipeline.** ROM delivery adapter; request→deliver→rescan flow; `roms` CLI family.
 *Accept:* `arcadectl roms request` for a known title results in the game launchable from the cabinet with art, no human touches.
 
 **M5 — Streaming.** Sunshine/Apollo on desktop; Moonlight entries in Pegasus; Greenlight installed + signed in; both reachable as tiles.
@@ -464,7 +470,7 @@ Ordered so the sacred core lands first; each milestone is independently shippabl
 | OQ-1 | Cabinet display native resolution/aspect (assumed 4:3 panel — what resolution?) | M3 crop math, theme layout |
 | OQ-2 | Cabinet hardware specs (CPU/GPU/RAM/disk) — bounds emulator set & Greenlight (Electron) perf | M1, M5 |
 | OQ-3 | Exact system list to emulate (and any current ROM library to migrate off Batocera, incl. saves) | M1 |
-| OQ-4 | ROMDL's actual API surface (module? CLI? queue semantics?) | M4 |
+| OQ-4 | ROM source API surface (module? CLI? queue semantics?) | M4 |
 | OQ-5 | Desktop OS (Windows assumed) for Sunshine vs Apollo choice | M5 |
 | OQ-6 | Is there an Xbox console for home streaming, and on which network? | STR-3 |
 | OQ-7 | Jellyfin already running, or standing it up (and is the library currently in Plex)? | M3 |
@@ -474,7 +480,7 @@ Ordered so the sacred core lands first; each milestone is independently shippabl
 
 ## 10. Explicitly out of scope
 
-Security/auth hardening (owner decree); Bluetooth (v1); resume-position syncing for screensaver media; scraping infrastructure beyond ROMDL + art scrape; mobile apps; MCP (permanently).
+Security/auth hardening (owner decree); Bluetooth (v1); resume-position syncing for screensaver media; scraping infrastructure beyond box-art lookup; mobile apps; MCP (permanently).
 
 ## 11. Feasibility research notes
 

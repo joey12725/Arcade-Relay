@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Fake Pegasus frontend (ASSUMPTIONS A-8): a real, persistent X window.
+"""Fake Pegasus frontend (docs/assumptions.md A-8): a real, persistent X window.
 
 The watchdog contract (EMU-3) is "focus returns to the frontend within 2s".
 This fake gives the sim a genuine frontend window ("pegasus-fake") that cabd

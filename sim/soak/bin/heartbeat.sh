@@ -1,5 +1,5 @@
 #!/bin/sh
-# Accelerated heartbeat: 4 Hz (vs the spec's 5s — ~20x, ASSUMPTIONS A-7).
+# Accelerated heartbeat: 4 Hz (vs the spec's 5s — ~20x, docs/assumptions.md A-7).
 # One line per attempt: <epoch_ms> OK|FAIL
 set -u
 while true; do

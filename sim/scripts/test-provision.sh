@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # P5 provisioning validation. This environment can't reboot into a kiosk, so
-# validation is static-but-strict (documented in ASSUMPTIONS A-19):
+# validation is static-but-strict (documented in docs/assumptions.md A-19):
 #   shellcheck + bash -n on the install scripts,
 #   systemd-analyze verify on every unit (in a debian container with the
 #   ExecStart binaries stubbed — validates unit syntax/lint, not binaries),

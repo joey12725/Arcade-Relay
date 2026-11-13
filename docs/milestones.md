@@ -1,6 +1,6 @@
-# Roadmap
+# Milestones
 
-Derived from `arcade-cabinet-spec.md` §8. Milestones are worked strictly in order.
+Derived from `docs/spec.md` §8. Milestones are worked strictly in order.
 A milestone is DONE only when its acceptance criteria run as `make accept-mN` and pass
 **3 consecutive times**.
 
@@ -39,7 +39,7 @@ state repo before every launch.
 
 *Accept (`make accept-m1`):* 100 clean scripted launch/exit cycles per system, zero
 hangs/drift/input loss; kill -9 a running "emulator" → frontend focused within 2s.
-Real-hardware parts (real RetroArch behavior, real panel input) → HARDWARE-TODO.md.
+Real-hardware parts (real RetroArch behavior, real panel input) → docs/hardware-checklist.md.
 
 ## M2 — Control plane
 
@@ -56,11 +56,11 @@ via IPC <500ms without hiccup; per-source enable/disable; idle in/out; force CLI
 fallback clips.
 
 *Accept (`make accept-m3`):* SCR-1..7 demonstrated in sim; measured stream ≤480p;
-brightness change <500ms. Physical 4:3 panel verification → HARDWARE-TODO.md.
+brightness change <500ms. Physical 4:3 panel verification → docs/hardware-checklist.md.
 
 ## M4 — ROM pipeline
 
-ROMDL adapter (faked ROMDL backend in sim; interface per spec assumption OQ-4);
+ROM delivery adapter (fake backend in sim; interface per spec assumption OQ-4);
 request→download→deliver→rescan; `roms` CLI family.
 
 *Accept (`make accept-m4`):* `arcadectl roms request` for a known title → launchable
@@ -72,7 +72,7 @@ Moonlight/Greenlight entries (faked binaries); launch/kill via cabd; HOME_COMBO 
 stream cleanly.
 
 *Accept (`make accept-m5`):* stream tile launch→HOME_COMBO exit clean in sim. Real
-SF6@60fps LAN + xCloud → HARDWARE-TODO.md.
+SF6@60fps LAN + xCloud → docs/hardware-checklist.md.
 
 ## M6 — Web UI + skills polish
 
@@ -83,4 +83,4 @@ dimmer and disable Redline" completes it via CLI without human help.
 
 ## Exit
 
-All milestones green ×3 + 8h clean soak → DONE.md + final report.
+All milestones green ×3 + 8h clean soak → docs/acceptance.md + final report.

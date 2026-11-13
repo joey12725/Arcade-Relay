@@ -41,7 +41,7 @@ srv sh -c 'arcadectl cab screenshot > /tmp/shot.png && head -c8 /tmp/shot.png | 
 
 echo "== 4. onboarding docs + all six skills exist and are non-trivial =="
 cd ..
-test -s AGENTS.md && test -e CLAUDE.md || { echo "FAIL: onboarding docs"; exit 1; }
+test -s AGENTS.md || { echo "FAIL: onboarding docs"; exit 1; }
 for s in screensaver audio controllers roms games diagnostics; do
     test -s "skills/$s/SKILL.md" || { echo "FAIL: skills/$s missing"; exit 1; }
     grep -q "arcadectl" "skills/$s/SKILL.md" || { echo "FAIL: skills/$s has no commands"; exit 1; }

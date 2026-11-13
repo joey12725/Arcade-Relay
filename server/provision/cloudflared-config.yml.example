@@ -1,5 +1,5 @@
 # Cloudflare Tunnel config for the arcade server (spec NET-1).
-# One-time interactive setup (see DEPLOY.md):
+# One-time interactive setup (see docs/deploy.md):
 #   cloudflared tunnel login
 #   cloudflared tunnel create arcade
 #   cloudflared tunnel route dns arcade arcade.<your-domain>
@@ -14,7 +14,7 @@ ingress:
     service: http://localhost:8000
   # Remote view: the VNC LISTENER (:5901) is raw TCP and does NOT ride the
   # HTTP hostname above. Expose it as a TCP ingress; VNC clients then reach
-  # it via `cloudflared access tcp` (see DEPLOY.md). Skip this block if you
+  # it via `cloudflared access tcp` (see docs/deploy.md). Skip this block if you
   # only ever VNC from the server's own LAN.
   - hostname: arcade-vnc.<your-domain>
     service: tcp://localhost:5901

@@ -1,7 +1,7 @@
-# DONE — Arcade Cabinet Platform (sim-scope implementation complete)
+# Acceptance record: Arcade Cabinet Platform
 
 **Date:** 2026-07-24 · **Branch:** `claude/arcade-cabinet-impl-nn0cka`
-**Spec:** `arcade-cabinet-spec.md` v0.1 · **Full history:** `state/JOURNAL.md` (37 iterations)
+**Spec:** `docs/spec.md` v0.1 · **Full history:** `state/JOURNAL.md` (37 iterations)
 
 ## Verdict
 
@@ -9,7 +9,7 @@ Every milestone (M-SIM, M0–M6) is certified: each ran its spec acceptance crit
 as `make accept-mN` and passed **3 consecutive times**, every work unit was
 independently verified by an adversarial subagent that re-ran the tests itself, and
 the platform accumulated **8h08m of violation-free chaos soak** (see Soak below).
-Everything that only real hardware can prove is ledgered in `HARDWARE-TODO.md` —
+Everything that only real hardware can prove is ledgered in `docs/hardware-checklist.md` —
 nothing was faked green.
 
 ## Milestones
@@ -47,14 +47,14 @@ fallback, journal iter 33; every segment individually violation-free):
 Zero product violations across all segments and the entire project (the only
 violations ever raised were audit-tooling races and host suspensions — each
 investigated, root-caused, and fixed with the auditor strengthened, never weakened).
-On real hardware, run a continuous window (see HARDWARE-TODO).
+On real hardware, run a continuous window (see docs/hardware-checklist.md).
 
 ## What exists
 
 - `server/` — `arcaded` (WS hub, REST-only API, git state repo w/ commit-per-change,
   Jellyfin adapter w/ genuine 480p transcode, /media tunnel proxy, ROM queue,
   web UI at `/ui`), `arcadectl` (full CLI, --json everywhere, meaningful exit codes),
-  `romdl.py` (fake backend behind the A-5 contract — swap in the real ROMDL here).
+  `romdl.py` (fake backend behind the A-5 contract — the library backend serves real files).
 - `cabinet/` — `cabd` (reconnect-forever link, launcher+watchdog incl. hang
   detection, audio policy enforcement on real PipeWire, screensaver engine w/ mpv
   IPC + offline fallback, local launch socket + `cabd-launch`, renderer that stomps
@@ -62,15 +62,15 @@ On real hardware, run a continuous window (see HARDWARE-TODO).
 - `sim/` — the Docker rig (server + cabinet w/ real Xvfb/mpv/PipeWire + real
   Jellyfin, linked only through Toxiproxy) + soak stack + all test/acceptance
   scripts. `make sim-test / test-m0..m6 / accept-m0..m6 / soak-up / soak-status`.
-- `skills/` + `AGENTS.md`/`CLAUDE.md` — proven cold-start agent onboarding (4/4).
+- `skills/` + `AGENTS.md` — proven cold-start agent onboarding (4/4).
 - `state/` — the config-as-code source of truth.
 
 ## Deploying to real hardware
 
-Work `HARDWARE-TODO.md` top to bottom (Debian install, real RetroArch/Pegasus +
-redblue QML theme + UI-4 audit, evdev combos, Cloudflare tunnel, real ROMDL swap-in,
+Work `docs/hardware-checklist.md` top to bottom (Debian install, real RetroArch/Pegasus +
+redblue QML theme + UI-4 audit, evdev combos, Cloudflare tunnel, real game-library swap-in,
 Sunshine/Moonlight + Greenlight sign-ins, 24h real-scale accept-m0, continuous 8h+
-soak). Assumptions A-1..A-16 in `ASSUMPTIONS.md` record every sim-vs-real judgment
+soak). Assumptions A-1..A-16 in `docs/assumptions.md` record every sim-vs-real judgment
 call, each with its hardware follow-up.
 
 > **Superseded by P1/P8 (see the v2 and v3 sections below).** This paragraph
@@ -101,7 +101,7 @@ Everything the sim can prove is proven; everything it cannot is provisioned,
 documented, and ledgered. The final whole-repo adversarial sweep initially
 returned **NOT-READY** with 5 findings — all were fixed, re-tested, and a
 re-verification returned **READY**. The remaining work is physical:
-`DEPLOY.md` (the runbook) + `HARDWARE-TODO.md` (the on-hardware checklist).
+`docs/deploy.md` (the runbook) + `docs/hardware-checklist.md` (the on-hardware checklist).
 
 ## What was added since v1 (P1–P7)
 
@@ -112,7 +112,7 @@ re-verification returned **READY**. The remaining work is physical:
 | P3 | pegasus-redblue QML theme, state-generated collections (Favorites/systems/Streaming/Steam), steam launch path | PASS; findings applied (Qt5 import, anchored titles, die_with_parent, kill_strays coverage) |
 | P4 | remote view (x11vnc over cabinet-dialed WS tunnel — RFB handshake proven end-to-end), opportunistic save backup (content-sha dedupe), CLI completeness (games list/fuzzy launch, favorites by query, controls diff, roms sync, stream apps/launch, cab logs -f, state diff, screensaver toggle, events, cab reboot/restart-frontend) | PASS ×3; findings applied incl. a state-repo git-flag-injection fix |
 | P5 | provisioning: cabinet kiosk (auto-login → Openbox, systemd user units Restart=always, udev rules) + server (arcaded unit, seeded state repo, cloudflared template); static-but-strict validation (A-19) | PASS; nits applied |
-| P6 | DEPLOY.md runbook (tunnel + VNC TCP ingress, reimage, manual installs, pairing, rollback) | FAIL → 2 real deploy blockers fixed (CABD_LAUNCH path, real session binaries) → re-checked |
+| P6 | docs/deploy.md runbook (tunnel + VNC TCP ingress, reimage, manual installs, pairing, rollback) | FAIL → 2 real deploy blockers fixed (CABD_LAUNCH path, real session binaries) → re-checked |
 | P7 | Full regression: **all 20 test targets green**, accept-m0…m5 **3/3 each**, accept-m6 **3/3 with genuinely cold subagents**; final sweep → 5 findings fixed → **READY** | READY |
 
 ## Bugs the process caught in this phase (none reached the branch green)
@@ -146,19 +146,19 @@ re-verification returned **READY**. The remaining work is physical:
 ## Verifier ledger
 
 ~20 adversarial subagent reviews across the project; every finding applied
-or explicitly ledgered (ASSUMPTIONS A-19/A-20, HARDWARE-TODO). Four verdicts
+or explicitly ledgered (docs/assumptions.md A-19/A-20, docs/hardware-checklist.md). Four verdicts
 caught bugs that would have shipped: supervisor death on cabd crash (M1),
 wireplumber startup race (M2), the P6 deploy blockers, and the final-sweep
 save-backup body cap.
 
 ## What remains (physical-world only)
 
-- `DEPLOY.md` — the ordered runbook (server → tunnel → cabinet reimage →
+- `docs/deploy.md` — the ordered runbook (server → tunnel → cabinet reimage →
   pairing → one-time logins → first-boot walkthrough → rollback).
-- `HARDWARE-TODO.md` — every hardware-only verification, including panel
+- `docs/hardware-checklist.md` — every hardware-only verification, including panel
   input/udev ids, real cores per system, real-Steam window tracking, theme
   render on real Pegasus (A-18), kiosk first boot (A-19).
-- `ASSUMPTIONS.md` A-20 — v1 scope deferrals (per-game mapping scope,
+- `docs/assumptions.md` A-20 — v1 scope deferrals (per-game mapping scope,
   interactive web remapper, input.press/text, lifeline SSH bring-up,
   web-UI library page); none block deploy.
 
@@ -170,7 +170,7 @@ deploy-ready to the limit of what this environment can prove.**
 # DONE v3 — the whole spec (2026-07-25, iterations 54–61)
 
 **Why there is a v3.** DONE v2 declared the project finished with five spec
-surfaces parked in `ASSUMPTIONS.md` A-20 as "v1 scope deferrals". They were
+surfaces parked in `docs/assumptions.md` A-20 as "v1 scope deferrals". They were
 software, not hardware — the sim could prove every one. Deferring them left
 the spec unimplemented, so P8/P9 built and tested them.
 
@@ -239,6 +239,6 @@ is mutation-tested (restoring the old timeout reproduces 13.7s and fails).
 
 ## What remains
 
-Hardware only — `DEPLOY.md` is the runbook, `HARDWARE-TODO.md` the checklist.
+Hardware only — `docs/deploy.md` is the runbook, `docs/hardware-checklist.md` the checklist.
 The single genuine deferral is **CTL-5 Bluetooth controllers**, which the
 spec itself puts out of scope for v1 in four places.

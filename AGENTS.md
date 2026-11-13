@@ -27,7 +27,7 @@ arcadectl screensaver set --subtitles on|off # English subs, best track auto
 arcadectl screensaver sources | enable-source <id> | disable-source <id>
 arcadectl screensaver disable --for 2h
 arcadectl screensaver remove-source <id>  # off the rotation board entirely
-arcadectl screensaver playlists list | select <name>|all   # christmas, nsfw...
+arcadectl screensaver playlists list | select <name>|all   # christmas, late-night...
 arcadectl screensaver playlists create <n> --source <id> | add|remove <n> <id>... | delete <n>
 arcadectl controls map --scope system:snes --set a=b | save-preset <n> | load-preset <n>
 arcadectl controls bindings --scope global | unbind --scope global <btn>
@@ -55,7 +55,6 @@ Exit codes: 0 ok · 1 remote command failed · 2 usage · 3 server unreachable �
 - `themes/pegasus-y2k/` — the cabinet home screen. `pegasus-redblue` is the
   plain fallback.
 - Web UI (secondary to this CLI): `http://<server>:8000/ui`.
-- `docs/UI-BACKEND-GAPS.md` — what the UI shows that the server cannot do
-  yet, and what each one would take. Read before "fixing" an inert control.
+- `docs/` — architecture, the full spec, deployment and hardware notes.
 
 No MCP. No prompts. Everything returns JSON with `--json`.

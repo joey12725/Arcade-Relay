@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # M5 acceptance (spec §8, sim scope): stream tiles launch end-to-end from
 # cabinet controls and HOME_COMBO exits the stream cleanly; xCloud tile
-# best-effort. Real SF6@60fps LAN + real xCloud -> HARDWARE-TODO.md.
+# best-effort. Real SF6@60fps LAN + real xCloud -> docs/hardware-checklist.md.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 

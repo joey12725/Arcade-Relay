@@ -120,7 +120,7 @@ else
 fi
 
 # install.sh refreshes the unit files; the running daemons keep executing the
-# old code until they are restarted (DEPLOY.md §8).
+# old code until they are restarted (docs/deploy.md §8).
 UID_N=$(id -u "$ARCADE_USER")
 runuser -u "$ARCADE_USER" -- env XDG_RUNTIME_DIR="/run/user/$UID_N" \
     systemctl --user daemon-reload 2>/dev/null || true

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# M0 acceptance (spec §8): two criteria, run accelerated (ASSUMPTIONS A-7/A-9):
+# M0 acceptance (spec §8): two criteria, run accelerated (docs/assumptions.md A-7/A-9):
 #   1. Sustained heartbeat delivery >= 99% over a clean window.
 #      Real bar: 24h @ 5s beats. Accelerated: ACCEPT_WINDOW_S (default 1200s)
 #      @ 0.25s beats = 4800 expected beats, measured via arcaded's delivered-

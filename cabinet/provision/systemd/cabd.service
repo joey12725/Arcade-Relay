@@ -22,7 +22,7 @@ Environment=FRONTEND_TITLE=^Pegasus$
 Environment=STATE_CACHE=/var/cache/arcade/state.json
 Environment=CABD_SAVES_DIR=/saves
 # Real session binaries (sim defaults point at /fakes/*). Paths match the
-# DEPLOY.md §3 install steps.
+# docs/deploy.md §3 install steps.
 Environment=STEAM_BIN=/usr/bin/steam
 Environment=MOONLIGHT_BIN=/usr/bin/moonlight-qt
 Environment=GREENLIGHT_BIN=/usr/local/bin/greenlight

@@ -7,7 +7,7 @@
 # systemd USER units (cabd/pegasus/steam, Restart=always) with lingering,
 # and udev rules for stable controller identities.
 #
-# NOT installed here (no Debian packages; see DEPLOY.md): pegasus-fe,
+# NOT installed here (no Debian packages; see docs/deploy.md): pegasus-fe,
 # Steam, Moonlight, Greenlight.
 set -euo pipefail
 

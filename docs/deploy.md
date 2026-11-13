@@ -1,13 +1,13 @@
-# DEPLOY.md — putting this on the real hardware
+# Deploying to real hardware
 
-The sim proved the software (see DONE.md, state/JOURNAL.md). This runbook
+The sim proved the software (see docs/acceptance.md). This runbook
 takes it to the two real machines: the **server** (any Debian/Ubuntu box on
 your home network) and the **cabinet** (the x86 mini-PC currently running
 Batocera — it gets reimaged). Steps are ordered; do the server first so the
 cabinet has something to dial into.
 
 Everything that can only be verified on real hardware is tracked in
-HARDWARE-TODO.md — walk it top to bottom after first boot (§7).
+docs/hardware-checklist.md — walk it top to bottom after first boot (§7).
 
 ---
 
@@ -31,33 +31,54 @@ systemctl status arcaded
 arcadectl --json status        # {"online": false, ...} — no cabinet yet, fine
 ```
 
-### 1.1 Jellyfin (screensaver media source)
+### 1.1 Plex (screensaver media source)
 
-Install Jellyfin on the server (official repo or Docker, your call), listening
-on `http://localhost:8096` (or set `JELLYFIN_URL` in
-`/etc/systemd/system/arcaded.service` and `systemctl daemon-reload &&
-systemctl restart arcaded`). arcaded bootstraps it on first contact: completes
-the startup wizard, creates the `arcade`/`arcade` user, and creates
-`Shows`/`Movies` libraries if missing. Point those libraries at your media.
-The screensaver pulls 480p-capped transcodes; nothing else to configure.
+The screensaver plays shows and movies from a Plex Media Server. Point
+arcaded at it with `PLEX_URL` in `/etc/systemd/system/arcaded.service`
+(default `http://plex:32400`, which is what the container deploy uses), then
+`systemctl daemon-reload && systemctl restart arcaded`.
 
-If your Jellyfin is already set up, either let arcaded use the
-`arcade`/`arcade` account or set `JELLYFIN_TOKEN` in the unit instead.
+- An unclaimed Plex on your LAN answers without a token; arcaded adds the
+  server's subnet to Plex's allowed networks on first contact.
+- A claimed server that requires auth: set `PLEX_TOKEN` (and
+  `PLEX_ALLOW_LAN=0`). The token is sent as `X-Plex-Token` and nothing else
+  changes.
 
-### 1.2 ROM pipeline
+arcaded does its own 480p / 1.5 Mbps ffmpeg transcode (tunable with
+`SCREENSAVER_MAX_HEIGHT`, `SCREENSAVER_MAX_WIDTH`, `SCREENSAVER_VIDEO_BITRATE`),
+so the tunnel budget is enforced server-side and Plex's own transcoder is
+never involved. Pick sources with `arcadectl screensaver sources` and
+`enable-source <id>`.
 
-The production pipeline uses the pinned ROMDL package, server-side
-download client's dedicated `arcade-roms` category, source-hash verification,
-archive extraction, verified cabinet delivery, and Pegasus rescan. See
-`docs/rom-download-verification-2026-10-05/README.md` for the deployed setup,
-sample verification, and retention architecture. The sim explicitly uses a
-fake backend; production does not need a hand-written replacement adapter.
+### 1.2 Game library
 
-### 1.3 Cabinet-side T3 ROMs project
+The ROM queue serves games from a folder you own. Lay it out by system and
+point `ROM_SOURCE_DIR` at it in the unit (or the container environment):
+
+```
+/srv/games/
+├── nes/        Star Patrol.nes, Some Homebrew (World).zip, ...
+├── snes/
+├── genesis/    (megadrive/ and md/ are accepted as aliases)
+├── gba/
+├── psx/        Game.cue + its .bin tracks, or a .zip holding both
+└── arcade/     MAME .zip sets, kept intact
+```
+
+`arcadectl roms request "<title>" --system nes` then finds the file, stages
+a sha256-verified copy (archives are CRC-checked and unpacked, CUE/GDI
+descriptors must only reference tracks that shipped), delivers it to the
+cabinet over the tunnel, verifies it again on arrival, fetches box art and
+rescans Pegasus. Set `ROM_LIBRARY` (and optionally `ROM_LIBRARY_OWNER=uid:gid`)
+to also file delivered games into a shared library folder. Without
+`ROM_SOURCE_DIR` the queue serves a small generated test catalogue, which is
+what the sim uses.
+
+### 1.3 Cabinet-side ROMs project
 
 Cabinet agents can submit requests to the server directly. The **ROMs**
 project is `/roms`; provision installs its `README.md`, `AGENTS.md`,
-`ROM-DOWNLOADS.md`, and `skills/arcade-roms/SKILL.md` (linked as root
+and `skills/arcade-roms/SKILL.md` (linked as root
 `SKILL.md` and through project-local `.agents`/`.claude` skill directories).
 The same skill is installed user-wide for Claude Code (`~/.claude/skills`),
 Codex (`~/.agents/skills`, plus legacy `~/.codex/skills`), and OpenCode
@@ -67,7 +88,7 @@ OpenCode after skill installation.
 `/usr/local/bin/arcadectl` reads `/etc/arcade/cabinet.env`'s `CABD_MEDIA_BASE`
 outside interactive shells. The provisioner seeds that URL only when the
 file does not already exist; `ARCADED_URL` remains an explicit override.
-No download client secrets or torrent client are needed on the cabinet.
+The cabinet needs no credentials for the game library.
 
 For an existing cabinet, install just the client and documentation from an
 updated checkout, without restarting services or running full provisioning:
@@ -76,7 +97,7 @@ updated checkout, without restarting services or running full provisioning:
 sudo python3 cabinet/provision/install-rom-client.py
 cd /roms
 arcadectl --json status
-arcadectl --json roms request "Gunstar Heroes" --system genesis
+arcadectl --json roms request "Star Patrol" --system nes
 arcadectl --json roms status
 ```
 
@@ -202,13 +223,13 @@ curl -X POST https://arcade.<your-domain>/screensaver/set \
      -H 'Content-Type: application/json' -d '{"brightness": 30}'
 ```
 
-Agents: point them at `CLAUDE.md` / `AGENTS.md` in this repo and give them
+Agents: point them at `AGENTS.md` in this repo and give them
 `arcadectl` — every command supports `--json`, exit codes are meaningful,
 `skills/` has worked examples per domain.
 
 ## 7. First-boot hardware walkthrough
 
-Work through **HARDWARE-TODO.md** in order. The high-value early items:
+Work through **docs/hardware-checklist.md** in order. The high-value early items:
 
 1. Panel input: `arcadectl controls monitor --for 10` while mashing buttons —
    every button should stream events. Fix udev ids in
@@ -280,7 +301,7 @@ can't install is reported and skipped.
 
 The interactive half — `tailscale up`, `claude auth login`,
 `codex login --device-auth`, and T3 pairing — must happen once on the cabinet.
-`docs/t3-setup.md` is the full guide; HARDWARE-TODO.md has the ordered
+`docs/t3-setup.md` is the full guide; docs/hardware-checklist.md has the ordered
 checklist. Two things that bite: the agents must be authenticated as the
 **same Linux user** that runs T3, and T3 needs Node **≥24.10** (devtools
 asserts this and fails loudly if the installed Node is older).

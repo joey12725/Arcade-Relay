@@ -1,4 +1,4 @@
-# HARDWARE-TODO
+# Hardware checklist
 
 Things that can only be verified on real hardware. Not faked green in the sim.
 

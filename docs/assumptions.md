@@ -1,4 +1,7 @@
-# ASSUMPTIONS
+# Design assumptions
+
+Every judgment call made while building against the simulation rig instead of
+the real cabinet, recorded so each one can be checked on hardware.
 
 - **A-1 (env):** Loop prompt says "this box is Windows (WSL2)". The actual execution
   environment is a Linux container with native Docker 29.3.1. Proceeding with plain
@@ -9,13 +12,14 @@
 - **A-3 (display, OQ-1):** Cabinet panel assumed 4:3 at 1024×768 for sim (Xvfb geometry).
 - **A-4 (systems, OQ-3):** Initial emulated system list: nes, snes, genesis, arcade
   (fbneo), gba, psx.
-- **A-5 (ROMDL, OQ-4):** ROMDL interface assumed per spec: `search(query) → candidates`,
-  `download(id) → file(s)`; sim uses a faked ROMDL backend honoring that contract.
+- **A-5 (ROM delivery, OQ-4):** ROM source interface assumed per spec: `search(query) → candidates`,
+  `download(id) → file(s)`; sim uses a fake backend honoring that contract, and the
+  production backend serves the owner's own library folder (`ROM_SOURCE_DIR`).
 - **A-6 (tunnel):** Cloudflare Tunnel is simulated by routing cabinet→server WebSocket
   through Toxiproxy; the reconnect/chaos semantics are what matter, not Cloudflare itself.
 - **A-7 (accelerated time):** "24h soak" acceptance runs use accelerated heartbeats
   (e.g. 20× faster) with the ratio recorded in each accept target; an 8h wall-clock clean
-  soak is still required before DONE.md per loop rules.
+  soak is still required before docs/acceptance.md per loop rules.
 - **A-8 (fakes):** Only game/streaming binaries are faked (retroarch, moonlight,
   greenlight, steam, pegasus): scripts that open a real X window on Xvfb, hold it, exit
   on SIGTERM/UDP quit — so watchdog/focus logic is tested against real X behavior.
@@ -28,12 +32,12 @@
   (2) router reboot simulated as toxiproxy container restart (in-memory proxy config
   wiped = dead link) + proxy recreation, cabinet back unaided <=60s with a NEW WS
   connection and a working exec round-trip. 24h wall-clock validation on real
-  hardware -> HARDWARE-TODO.md.
+  hardware -> docs/hardware-checklist.md.
 - **A-10 (accept-m1 scaling):** Spec play window is 5s per cycle; sim cycles use 0.3s
   (~17x, same acceleration convention as A-7/A-9) because the faked emulator has no
   play-time-dependent behavior — the cycle asserts launch, window, config cleanliness,
   kill, and focus recovery. Real-duration EMU-1 cycles on real cores are ledgered in
-  HARDWARE-TODO.md.
+  docs/hardware-checklist.md.
 - **A-11 (/statework ephemerality in sim):** The server's writable git state repo
   (/statework) is seeded from the RO-mounted repo state/ at container start and lives
   in the container fs — container recreation resets runtime mutations (e.g. favorites
@@ -43,11 +47,11 @@
 - **A-12 (sim audio anchor):** PipeWire null sinks discard volume changes while
   SUSPENDED, so the sim cabinet keeps a silent anchor stream playing to hold the sink
   RUNNING. Real ALSA sinks persist volume in the device; still, verify master-volume
-  behavior across sink suspension on real hardware (HARDWARE-TODO).
+  behavior across sink suspension on real hardware (docs/hardware-checklist.md).
 - **A-13 (sim input source):** `controls monitor` (input.monitor RPC) reads button
   events from a FIFO (/tmp/input-events) in sim — there are no evdev devices in a
   container. On real hardware cabd reads evdev (grabbing combos too); that path is in
-  HARDWARE-TODO.md. The RPC surface and CLI are identical either way.
+  docs/hardware-checklist.md. The RPC surface and CLI are identical either way.
 - **A-14 (accept-m2 mute-observation budget):** The spec's 100ms figure (§5.6) is the
   ENGINE's reaction budget, verified by direct event-timestamp measurement at 17-27ms
   (journal iter 20). accept-m2's external observation loop allows 500ms from
@@ -80,7 +84,7 @@
   proxy blocks api/github downloads — verified). The theme is validated with Qt6
   qmllint (0 errors; caught a missing QtMultimedia import) and all generated
   collection metadata is asserted by test-pegasus-meta; the live render + UI-4
-  navigation audit remain HARDWARE-TODO items against real Pegasus.
+  navigation audit remain docs/hardware-checklist.md items against real Pegasus.
 
 ## A-19 — Provisioning validated statically, not by booting a kiosk
 This environment cannot reboot a machine into an X11/Openbox kiosk with
@@ -88,7 +92,7 @@ systemd user sessions. cabinet/provision + server/provision are therefore
 validated by: shellcheck + bash -n (install scripts), systemd-analyze verify
 with stubbed ExecStart binaries in a debian:trixie container (unit
 syntax/lint), udevadm verify (rules), and placeholder-substitution checks
-(make test-provision). Real first-boot on the cabinet is HARDWARE-TODO.
+(make test-provision). Real first-boot on the cabinet is docs/hardware-checklist.md.
 Design decision recorded: Pegasus has ONE supervisor — pegasus.service
 (Restart=always); cabd's spawn loop is disabled via empty FRONTEND_BIN
 (watchdog still refocuses by window title). The spec lists both a

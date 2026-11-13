@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# P8: the spec surfaces previously deferred in ASSUMPTIONS A-20 —
+# P8: the spec surfaces previously deferred in docs/assumptions.md A-20 —
 #   per-game mapping scope (§5.7 layer 3), synthetic input injection
 #   (§5.10 input.press/input.text), lifeline recovery paths (§5.11),
 #   CTL-3 interactive remapper + web UI library page (§6.3).

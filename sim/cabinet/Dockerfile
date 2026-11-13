@@ -1,6 +1,6 @@
 FROM debian:trixie-slim
 
-# Real Xvfb, real mpv, real PipeWire stack (ASSUMPTIONS A-8: only game/streaming
+# Real Xvfb, real mpv, real PipeWire stack (docs/assumptions.md A-8: only game/streaming
 # binaries get faked, the AV/window plumbing is real).
 RUN apt-get update && apt-get install -y --no-install-recommends \
         xvfb x11-utils xdotool wmctrl imagemagick x11vnc \

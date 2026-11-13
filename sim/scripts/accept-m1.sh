@@ -5,7 +5,7 @@
 # first), zero input loss (frontend focus verified every cycle); plus
 # kill -9 a running emulator -> frontend focused within 2s (5 reps,
 # external clock). UI-4 navigation audit + real-Pegasus theming are
-# hardware-scope (HARDWARE-TODO.md).
+# hardware-scope (docs/hardware-checklist.md).
 set -euo pipefail
 cd "$(dirname "$0")/.."
 

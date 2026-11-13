@@ -1,6 +1,6 @@
 name: arcade-soak
 
-# Detached soak stack (ROADMAP M-SIM): same topology as the sim rig, but with
+# Detached soak stack (docs/milestones.md M-SIM): same topology as the sim rig, but with
 # an accelerated heartbeat (4 Hz) and a chaos driver injecting random
 # partitions and kill -9s, forever. `make soak-status` audits the logs for
 # reliability violations. Jellyfin is omitted — soak targets the control link.

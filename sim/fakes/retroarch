@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Fake RetroArch (ASSUMPTIONS A-8): real X window, fake emulator.
+"""Fake RetroArch (docs/assumptions.md A-8): real X window, fake emulator.
 
 Mimics the surfaces cabd relies on (spec §5.4):
   - opens a genuine X11 window on $DISPLAY (via mpv testsrc) titled

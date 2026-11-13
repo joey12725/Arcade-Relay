@@ -4,8 +4,8 @@
 #
 # Sets up: arcaded as a system service (Restart=always), arcadectl on PATH,
 # the state repo seeded from this checkout's state/, and a cloudflared
-# config template. Jellyfin and the Cloudflare tunnel itself are interactive
-# one-time steps — see DEPLOY.md.
+# config template. Plex and the Cloudflare tunnel itself are interactive
+# one-time steps — see docs/deploy.md.
 set -euo pipefail
 
 SRC_DIR=$(cd "$(dirname "$0")/.." && pwd)    # the repo's server/ directory
@@ -46,7 +46,7 @@ install -m 0644 "$SRC_DIR/provision/arcaded.service" \
 systemctl daemon-reload
 systemctl enable --now arcaded.service
 
-# --- cloudflared template (tunnel creation is interactive; DEPLOY.md) ---
+# --- cloudflared template (tunnel creation is interactive; docs/deploy.md) ---
 install -d /etc/cloudflared
 if [ ! -e /etc/cloudflared/config.yml ]; then
     install -m 0644 "$SRC_DIR/provision/cloudflared-config.yml.example" \
@@ -54,4 +54,4 @@ if [ ! -e /etc/cloudflared/config.yml ]; then
 fi
 
 echo "server provisioned: arcaded on :8000, state repo at $STATE_DIR"
-echo "next: Jellyfin + Cloudflare tunnel (DEPLOY.md)"
+echo "next: Plex + Cloudflare tunnel (docs/deploy.md)"

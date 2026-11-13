@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Smoke test for the sim rig (ROADMAP M-SIM). Asserts:
+# Smoke test for the sim rig (docs/milestones.md M-SIM). Asserts:
 #  1. all containers up and healthy
 #  2. cabinet reaches server ONLY via toxiproxy (direct route must fail)
 #  3. chaos is injectable: latency toxic applies; partition (proxy disable)
