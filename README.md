@@ -117,7 +117,7 @@ python3 server/arcadectl state log          # every change above is a commit
 
 ```sh
 pip install pytest ruff
-make test     # ~280 unit tests: combos, bindings, panels, ROM staging, playlists...
+make test     # ~290 unit tests: combos, bindings, panels, ROM staging, playlists...
 make lint
 ```
 

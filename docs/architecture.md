@@ -160,7 +160,7 @@ Both ends update themselves from git, and both refuse to do anything risky:
 
 - `pytest` covers the binding and combo engines, panel calibration, launch
   waits, ROM staging and promotion, playlists, shuffle policies, subtitles,
-  integrations and more (about 280 tests, no hardware needed).
+  integrations and more (nearly 300 tests, no hardware needed).
 - `sim/` is a Docker rig with the real moving parts (Xvfb, mpv, PipeWire,
   Plex) and fake game binaries that open real X windows. All cabinet-server
   traffic goes through Toxiproxy, so partitions, latency and "router reboots"
