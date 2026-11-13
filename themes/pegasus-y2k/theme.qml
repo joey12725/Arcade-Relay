@@ -11,7 +11,7 @@
 //     generated gradient case is the fallback, not the default
 //   - navigation is joystick + accept/back only (UI-4)
 //
-// Assets live in assets/ beside this file; DEPLOY.md copies the repo's
+// Assets live in assets/ beside this file; docs/deploy.md copies the repo's
 // assets/ tree in. Everything degrades to a flat colour if they are missing,
 // so a theme installed without them still works.
 import QtQuick 2.15
@@ -454,6 +454,7 @@ FocusScope {
     AnimatedImage {
         id: mascot
         visible: !!root.mascotGif && status === AnimatedImage.Ready
+        smooth: false   // pixel-art pack: keep edges crisp when scaled
         source: root.mascotGif ? "assets/gifs/" + root.mascotGif.file : ""
         anchors { right: parent.right; rightMargin: u(14)
                   bottom: footer.top; bottomMargin: u(18) }
@@ -474,6 +475,7 @@ FocusScope {
     AnimatedImage {
         id: sticker
         visible: !!root.stickerGif && status === AnimatedImage.Ready
+        smooth: false   // pixel-art pack: keep edges crisp when scaled
         source: root.stickerGif ? "assets/gifs/" + root.stickerGif.file : ""
         anchors { left: parent.left; leftMargin: u(30)
                   bottom: footer.top; bottomMargin: u(26) }

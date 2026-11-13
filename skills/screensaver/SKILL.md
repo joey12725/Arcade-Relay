@@ -43,7 +43,7 @@ contains the id, also run `arcadectl screensaver playlists remove <name> <id>`
 (or `select all`), because an active playlist ignores the board. If the cabinet is offline it converges on
 reconnect (state is pushed on connect).
 
-## Playlists (anime / christmas / halloween / sfw / nsfw ...)
+## Playlists (cartoons / christmas / halloween / late-night ...)
 
 A playlist is a named set of sources. `select <name>` makes the screensaver
 play exactly that set; `select all` returns to the default rotation (every
@@ -58,9 +58,9 @@ $ arcadectl screensaver playlists select all           # back to anime
 ```
 
 - Playlist members play whether or not they are ON in the rotation board, so
-  a seasonal or NSFW title need not be enabled (and leak into the default
-  shuffle) to live in a playlist. **To keep something NSFW off the screen,
-  leave it OFF the board and only put it in an NSFW playlist.** Likewise a
+  a seasonal or late-night title need not be enabled (and leak into the default
+  shuffle) to live in a playlist. **To keep something out of the daytime rotation,
+  leave it OFF the board and only put it in a late-night playlist.** Likewise a
   family-safe playlist is just one that does not contain it.
 - Names are case-insensitive. `all`, `all shows` and `default` mean the
   default rotation; those and `none` / `unknown` / `unavailable` can't be

@@ -2,7 +2,7 @@
 """Regenerate the GIF tag index in both forms the two frontends can read.
 
 The tagged GIF pack encodes its metadata in filenames:
-    <name>_<tag>_<tag>...gif      e.g. cammy_arcade_snes_gen_pc.gif
+    <name>_<tag>_<tag>...gif      e.g. disc_ps1_ps2_dc_sat.gif
 Tags are console shortnames (nes, snes, ps1, arcade, ...) or the literal
 "all" for something that fits anywhere.
 
@@ -15,7 +15,8 @@ files unless QML_XHR_ALLOW_FILE_READ=1, which we cannot set for the Pegasus
 process, so a theme that fetched the JSON would silently render no mascots on
 the cabinet. Importing a .js library has no such restriction.
 
-Run after adding or removing GIFs:
+The pack itself is drawn by generate-sprites.py. Run after adding or
+removing GIFs:
     python3 assets/build-gif-index.py
 """
 import json
@@ -27,22 +28,7 @@ GIFS = HERE / "gifs"
 
 # Blend hints, carried over from the design pack: 0 = plain sprite (drop
 # shadow), 1 = multiply (art baked on a white background), 2 = framed sticker.
-BLEND = {
-    "chute_trial_JAM.gif": 1,
-    "chute_trial_PASS.gif": 1,
-    "cj_gta_san_andreas_ps2_xbox_pc.gif": 1,
-    "cuphead1_ps4_xone_nsw_pc.gif": 1,
-    "lara_croft1_sat_ps1_dc_gbc_gba_ngc_ps2_xbox_nds_ps3_x360_ps4_xone_nsw_pc.gif": 1,
-    "lara_croft3_sat_ps1_dc_gbc_gba_ngc_ps2_xbox_nds_ps3_x360_ps4_xone_nsw_pc.gif": 1,
-    "master_chief1_xbox_x360_xone_xsx_pc.gif": 1,
-    "mega_man1_nes_snes_gb_gbc_gba_ps1_sat_dc_ngc_ps2_xbox_nds_wii_ps3_x360_3ds_wiiu_ps4_xone_nsw_pc.gif": 1,
-    "mercy2_overwatch_ps4_ps5_xone_xsx_nsw_pc.gif": 1,
-    "rango-gun.gif": 2,
-    "sackboy2_ps3_psv_ps4_ps5_pc.gif": 2,
-    "sailor_moon_snes_gen_ps1.gif": 2,
-    "samus1_nes_snes_gb_gba_ngc_nds_wii_3ds_wiiu_nsw.gif": 1,
-    "sparkles_emoji_all.gif": 1,
-}
+BLEND = {}  # the generated pack is all transparent sprites (0)
 
 
 def gif_size(path):
@@ -59,7 +45,7 @@ def gif_size(path):
 
 
 def parse_tags(stem):
-    """'cammy_arcade_snes_gen_pc' -> ('cammy', ['arcade','snes','gen','pc'])."""
+    """'disc_ps1_ps2_dc_sat' -> ('disc', ['ps1','ps2','dc','sat'])."""
     parts = stem.split("_")
     tags, name = [], []
     for part in reversed(parts):
@@ -75,7 +61,7 @@ KNOWN_TAGS = {
     "all", "nes", "snes", "n64", "ngc", "wii", "wiiu", "nds", "3ds", "nsw",
     "gb", "gbc", "gba", "gen", "sms", "gg", "sat", "dc", "ps1", "ps2", "ps3",
     "ps4", "ps5", "psp", "psv", "xbox", "x360", "xone", "xsx", "pc", "arcade",
-    "msx2", "PASS", "JAM",
+    "msx2",
 }
 
 

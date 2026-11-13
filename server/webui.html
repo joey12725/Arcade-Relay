@@ -284,7 +284,8 @@ tbody tr:nth-child(even) { background:#fffbe8; }
 .shrine .t { font-family:var(--cap); font-size:10px; padding:3px 6px; letter-spacing:.06em; }
 .shrine.l .t { color:var(--ink); background:linear-gradient(180deg,#fff,#ffd400); }
 .shrine.r .t { color:#fff; background:linear-gradient(180deg,#5c8bff,var(--blue)); }
-.shrine img { display:block; width:100%; }
+.shrine img { display:block; width:100%; image-rendering:pixelated; }
+img[src*="/assets/deco/"], #party .nyan { image-rendering:pixelated; }
 .shrine .f { font-size:9px; font-weight:bold; color:#ffd400; background:var(--ink);
   padding:3px 6px; text-align:center; }
 @media (max-width:1500px) { .shrine { display:none; } }
@@ -324,7 +325,7 @@ tbody tr:nth-child(even) { background:#fffbe8; }
       <div class="wordmark">ARCADE CONTROL PLANE</div>
       <div class="sub" id="subline">cab-01 &middot; welcome back player one</div>
     </div>
-    <img class="myspace" src="/assets/deco/myspace.gif" alt="hit me up on myspace">
+    <img class="myspace" src="/assets/deco/badge.gif" alt="player one">
     <div class="pills">
       <span class="badge pill" id="pillOnline">&#9679; CONNECTING</span>
       <span class="badge pill" id="pillOps">&#10003; NO PENDING OPS</span>
@@ -349,11 +350,11 @@ tbody tr:nth-child(even) { background:#fffbe8; }
 
 <div class="shrine l">
   <div class="t">WEBMASTER'S SHRINE</div>
-  <img src="/assets/deco/glittergirl.gif" alt="glitter">
+  <img src="/assets/deco/glitter.gif" alt="glitter">
 </div>
 <div class="shrine r">
   <div class="t">CAB-01 APPROVES</div>
-  <img src="/assets/deco/duo.gif" alt="anime">
+  <img src="/assets/gifs/tabby_all.gif" alt="cabinet cat">
   <div class="f">BEST VIEWED IN NETSCAPE 4</div>
 </div>
 <div id="toasts"></div>
@@ -1017,7 +1018,7 @@ VIEWS.saver = () => {
   const plName = (id) => (byId.get(String(id)) || {}).name || id;
 
   const playlists = panel("p-hot", "PLAYLISTS &mdash; NOW PLAYING: " + esc(plActive || "ALL SHOWS"), h`<div class="col" style="gap:10px;">
-      <div class="note">A playlist is a named set of shows or movies (anime, christmas, halloween, sfw, nsfw…).
+      <div class="note">A playlist is a named set of shows or movies (cartoons, christmas, halloween, late-night…).
         Pick one and the screensaver plays <b>only</b> that set, switching right away if it is already
         running. <b>ALL SHOWS</b> is the normal rotation board below. Members play even when they are OFF
         on the board, so keep anything you only want sometimes <b>off the board</b> and in a playlist.
@@ -1923,13 +1924,13 @@ VIEWS.rom = () => {
           <option value="">— pick one —</option>
           ${systems.map((s) => h`<option ${s === S.rom.system ? "selected" : ""}>${esc(s)}</option>`).join("")}
         </select></label>
-      <button data-act="rom-search">SEARCH SOURCES</button>
+      <button data-act="rom-search">SEARCH LIBRARY</button>
       <button class="grey sm" data-act="rom-sync">RETRY ALL FAILED</button>
       <div class="state">backend: ${esc(be.backend || "?")}</div>
     </div>
-    ${cov ? h`<div class="gap"><b>NO LIVE SOURCE FOR ${esc(S.rom.system.toUpperCase())}</b><br>${esc(cov)}</div>` : ""}
-    ${be.backend === "fake" ? gapNote("FAKE ROMDL BACKEND",
-      "<code>ROMDL_BACKEND=fake</code> — this server is serving a generated test catalogue, not real sources. That is the sim's configuration.") : ""}`)}
+    ${cov ? h`<div class="gap"><b>NOTHING IN THE LIBRARY FOR ${esc(S.rom.system.toUpperCase())}</b><br>${esc(cov)}</div>` : ""}
+    ${be.backend === "fake" ? gapNote("FAKE ROM BACKEND",
+      "<code>ROMDL_BACKEND=fake</code> — this server is serving a generated test catalogue. Set <code>ROM_SOURCE_DIR</code> to serve your own library. That is the sim's configuration.") : ""}`)}
   ${panel("p-blue", "QUEUE (" + q.length + ")", h`
     <table><thead><tr><th>TITLE</th><th>STATUS</th><th>DETAIL / ERROR</th><th>ACTIONS</th></tr></thead>
     <tbody>
@@ -2176,9 +2177,9 @@ addEventListener("keydown", (e) => {
   if (S.konami < KONAMI.length) return;
   S.konami = 0;
   const p = document.getElementById("party");
-  p.querySelector(".nyan").style.backgroundImage = "url(/assets/gifs/nyan_cat_all.gif)";
+  p.querySelector(".nyan").style.backgroundImage = "url(/assets/gifs/rocket_all.gif)";
   p.classList.remove("hide");
-  toast("⬆⬆⬇⬇⬅➡⬅➡ B A — nice. have a nyan cat.", "ok");
+  toast("⬆⬆⬇⬇⬅➡⬅➡ B A — nice. blast off.", "ok");
   setTimeout(() => p.classList.add("hide"), 6500);
 });
 addEventListener("hashchange", () => {
