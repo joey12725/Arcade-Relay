@@ -167,6 +167,8 @@ ss = {"on": False, "suppress_until": 0.0, "starting": False,
       # active playlist (server's stored name, None = default rotation) the
       # running screensaver was started from; see recheck_screensaver_playlist
       "playlist": None,
+      # restricted-filter mode (any | hide | only) it was started under
+      "restricted": "any",
       # screensaver.set values with their arrival time: one that lands
       # while a start is in flight is re-applied once mpv is up (the start
       # used the playlist's older snapshot)
@@ -518,17 +520,36 @@ clips_gen = {"n": 0}
 def playlist_cache_key(bundle):
     """What the offline clips depend on: the active playlist's name and
     members, or None for the default rotation (whose source toggles have
-    never invalidated the cache)."""
+    never invalidated the cache) — plus the restricted filter whenever it
+    is on, so clips cached under one setting never play under another
+    (an NSFW clip during an outage with NSFW hidden)."""
     cfg = bundle.get("screensaver.yaml")
     name = active_playlist_name(bundle)
-    if name is None:
-        return None
-    members = ha_local.integrations.normalize_playlists(cfg.get("playlists"))[name]
-    return (name.lower(), tuple(sorted(members["sources"])))
+    mode = restricted_mode(bundle)
+    key = None
+    if name is not None:
+        members = ha_local.integrations.normalize_playlists(cfg.get("playlists"))[name]
+        key = (name.lower(), tuple(sorted(members["sources"])))
+    if mode != "any":
+        key = (key, mode)
+    return key
 
 
 def active_playlist_name(bundle):
     return ha_local.integrations.resolve_active(bundle.get("screensaver.yaml"))
+
+
+def restricted_mode(bundle):
+    return ha_local.integrations.resolve_restricted(bundle.get("screensaver.yaml"))
+
+
+def rotation_of(bundle):
+    """(playlist, restricted mode): what the screensaver should be showing."""
+    return active_playlist_name(bundle), restricted_mode(bundle)
+
+
+def playing_rotation():
+    return ss["playlist"], ss["restricted"]
 
 
 def clear_clip_cache():
@@ -599,7 +620,8 @@ def _restart_unwanted(only_if_on):
 
 
 async def screensaver_on(playlist, brightness, subtitles=False,
-                         playlist_name=None, only_if_on=False):
+                         playlist_name=None, only_if_on=False,
+                         restricted="any"):
     async with game_lock:   # never fight a game launch for the screen
         if game["session"] is not None:
             return {"screensaver": False, "note": "game running"}
@@ -622,6 +644,7 @@ async def screensaver_on(playlist, brightness, subtitles=False,
         ss["on"] = bool(ok)
         if ok:
             ss["playlist"] = playlist_name
+            ss["restricted"] = restricted
             await _apply_raced_settings(t0)
         log(f"screensaver on -> {ss['on']}")
         return {"screensaver": ss["on"]}
@@ -640,7 +663,8 @@ async def _apply_raced_settings(since):
             log(f"screensaver: {key} change during start not applied: {e!r}")
 
 
-async def screensaver_dim_clock(brightness, playlist_name=None, only_if_on=False):
+async def screensaver_dim_clock(brightness, playlist_name=None, only_if_on=False,
+                                restricted="any"):
     """`fallback: dim_clock`: same lifecycle/flag as media playback."""
     async with game_lock:
         if game["session"] is not None:
@@ -653,6 +677,7 @@ async def screensaver_dim_clock(brightness, playlist_name=None, only_if_on=False
         ss["on"] = bool(ok)
         if ok:
             ss["playlist"] = playlist_name
+            ss["restricted"] = restricted
         log(f"screensaver dim clock -> {ss['on']}")
         return {"screensaver": ss["on"], "mode": "dim_clock"}
 
@@ -724,12 +749,12 @@ async def recheck_screensaver_playlist(settle_s=20):
         if not ss["starting"]:
             break
         await asyncio.sleep(1)
-    want = active_playlist_name(state["bundle"])
-    if ss["on"] and not ss["starting"] and ss["playlist"] != want:
-        log(f"screensaver: playing playlist {ss['playlist']!r}, state says "
-            f"{want!r}; restarting")
+    want = rotation_of(state["bundle"])
+    if ss["on"] and not ss["starting"] and playing_rotation() != want:
+        log(f"screensaver: playing {playing_rotation()!r} (playlist, "
+            f"restricted), state says {want!r}; restarting")
         await start_screensaver_now(only_if_on=True)
-        if ss["on"] and ss["playlist"] != want:
+        if ss["on"] and playing_rotation() != want:
             # the new playlist gave nothing to play: leaving the old one on
             # screen would contradict the switch (the server does the same)
             log("screensaver: new playlist has nothing to play; stopping")
@@ -749,17 +774,19 @@ async def _start_screensaver_now(only_if_on=False):
         cfg = state["bundle"].get("screensaver.yaml") or {}
         fallback = cfg.get("fallback", "local_clips")
         clips = local_clips()
-        name = active_playlist_name(state["bundle"])
+        name, mode = rotation_of(state["bundle"])
         if fallback == "off":
             log(f"idle: {why}; fallback is 'off', staying on the frontend")
             await asyncio.sleep(5)
         elif fallback == "dim_clock":
             log(f"idle: {why}; dim clock fallback")
-            await screensaver_dim_clock(cfg.get("brightness", 100), name, only_if_on)
+            await screensaver_dim_clock(cfg.get("brightness", 100), name,
+                                        only_if_on, mode)
         elif clips:
             log(f"idle: {why}; local clips fallback")
             await screensaver_on(clips, cfg.get("brightness", 100),
-                                 cfg.get("subtitles", False), name, only_if_on)
+                                 cfg.get("subtitles", False), name, only_if_on,
+                                 mode)
         else:
             log(f"idle: {why}; no fallback available")
             await asyncio.sleep(5)
@@ -773,7 +800,8 @@ async def _start_screensaver_now(only_if_on=False):
         if pl.get("playlist"):
             await screensaver_on(pl["playlist"], pl.get("brightness", 100),
                                  pl.get("subtitles", False),
-                                 pl.get("active_playlist"), only_if_on)
+                                 pl.get("active_playlist"), only_if_on,
+                                 pl.get("restricted", "any"))
         else:
             # A reachable server with zero enabled sources returns an EMPTY
             # playlist. That used to fall through silently: nothing started,
@@ -1431,9 +1459,10 @@ async def handle_req(ws, data):
                                           params.get("brightness", 100),
                                           params.get("subtitles", False),
                                           params.get("active_playlist"),
-                                          bool(params.get("only_if_on")))
+                                          bool(params.get("only_if_on")),
+                                          params.get("restricted", "any"))
         elif method == "screensaver.on_fallback":
-            name = active_playlist_name(state["bundle"])
+            name, mode = rotation_of(state["bundle"])
             only_if_on = bool(params.get("only_if_on"))
             # Forced on with no server playlist: same decision the idle path
             # makes — including honoring the `fallback:` config key, which
@@ -1446,14 +1475,14 @@ async def handle_req(ws, data):
                 result = {"screensaver": False, "note": "not running"}
             elif fallback == "dim_clock":
                 result = await screensaver_dim_clock(
-                    params.get("brightness", 100), name, only_if_on)
+                    params.get("brightness", 100), name, only_if_on, mode)
             elif fallback == "off":
                 result = {"screensaver": False, "note": "fallback is 'off'"}
             elif clips:
                 result = await screensaver_on(clips,
                                               params.get("brightness", 100),
                                               params.get("subtitles", False),
-                                              name, only_if_on)
+                                              name, only_if_on, mode)
                 log("screensaver forced on from local clips (no sources)")
             else:
                 result = {"screensaver": False, "note": "no cached clips"}
@@ -1555,7 +1584,7 @@ async def handle_req(ws, data):
             save_state_cache(bundle)
             before = playlist_cache_key(state["bundle"])
             after = playlist_cache_key(bundle)
-            switched = active_playlist_name(state["bundle"]) != active_playlist_name(bundle)
+            switched = rotation_of(state["bundle"]) != rotation_of(bundle)
             state["bundle"] = bundle
             if switched:
                 asyncio.create_task(recheck_screensaver_playlist())
@@ -1605,6 +1634,19 @@ async def ha_select_playlist(name):
                 log(f"local Home Assistant: playlist {name!r} -> HTTP {r.status}")
     except Exception as e:  # noqa: BLE001 — server unreachable; nothing to do
         log(f"local Home Assistant: playlist {name!r} failed: {e!r}")
+
+
+async def ha_set_restricted(value):
+    """Home Assistant picked a restricted (NSFW) filter. It lives on the
+    server like playlists, so hand the choice there."""
+    try:
+        tmo = aiohttp.ClientTimeout(total=10)
+        async with aiohttp.ClientSession(timeout=tmo) as s:
+            async with s.post(screensaver.MEDIA_BASE + "/screensaver/restricted",
+                              json={"mode": value}) as r:
+                log(f"local Home Assistant: restricted {value!r} -> HTTP {r.status}")
+    except Exception as e:  # noqa: BLE001 — server unreachable; nothing to do
+        log(f"local Home Assistant: restricted {value!r} failed: {e!r}")
 
 
 async def ha_dispatch(method):
@@ -1697,7 +1739,7 @@ async def main():
         lambda: state["bundle"].get("integrations.yaml", {}),
         cabinet_snapshot, health_report, ha_dispatch, log,
         lambda: state["bundle"].get("screensaver.yaml") or {},
-        ha_select_playlist))
+        ha_select_playlist, ha_set_restricted))
     asyncio.create_task(lifeline_loop(ws_state))
 
     # real hardware: evdev devices feed the same combo engine (A-17)

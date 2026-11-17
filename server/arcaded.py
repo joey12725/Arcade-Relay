@@ -599,6 +599,9 @@ def load_screensaver():
     # with one active, the rotation is exactly that playlist's members.
     d["playlists"] = integrations.normalize_playlists(d.get("playlists"))
     d["active_playlist"] = integrations.resolve_active(d)
+    # The Plex `restricted` (NSFW) label as a filter over that selection:
+    # any (ignore it, the default) | hide | only. See filter_restricted.
+    d["restricted"] = integrations.resolve_restricted(d)
     return d
 
 
@@ -668,6 +671,19 @@ async def screensaver_set_source(request):
 _reported_missing_sources = set()
 
 
+def filter_restricted(chosen, lib, mode):
+    """The selection narrowed by the restricted filter. `hide` keeps titles
+    Plex does not label restricted, `only` keeps those it does. With a
+    filter on, an id the library listing doesn't know is dropped: its
+    label can't be checked, and guessing either way could put NSFW on the
+    screen."""
+    if mode == "any":
+        return list(chosen)
+    want = mode == "only"
+    return [sid for sid in chosen
+            if sid in lib and bool(lib[sid].get("restricted")) == want]
+
+
 async def screensaver_playlist(request=None):
     """Stream URLs (via our /media proxy) for all enabled sources, 480p cap.
     The cabinet reaches these through the same tunnel path as everything
@@ -683,6 +699,7 @@ async def screensaver_playlist(request=None):
         chosen = playlist_members(cfg, active)
     else:
         chosen = [source_id(s) for s in cfg["sources"] if s.get("enabled")]
+    chosen = filter_restricted(chosen, lib, cfg["restricted"])
     for si, sid in enumerate(chosen):
         meta = lib.get(sid) or {}
         try:
@@ -718,6 +735,7 @@ async def screensaver_playlist(request=None):
                               "commercial_count": cfg["commercial_count"],
                               "episode_playlist": episodes,
                               "active_playlist": active,
+                              "restricted": cfg["restricted"],
                               "brightness": cfg["brightness"],
                               "mode": cfg["mode"],
                               "shuffle": policy,
@@ -1009,7 +1027,14 @@ async def screensaver_start(request=None, only_if_on=False):
                     if note == "no cached clips" else
                     f"screensaver not started: {note}")
             active = pl.get("active_playlist")
-            if note in ("no cached clips", "") and active:
+            mode = pl.get("restricted", "any")
+            if note in ("no cached clips", "") and mode != "any":
+                hint = (f"nothing in {('playlist ' + repr(active)) if active else 'the rotation'} "
+                        + ("is tagged restricted" if mode == "only"
+                           else "is left once restricted titles are hidden")
+                        + " — `arcadectl screensaver restricted any` plays "
+                        "the whole selection again")
+            elif note in ("no cached clips", "") and active:
                 what = ("has nothing Plex can play (its ids are no longer in "
                          "the library)"
                          if playlist_members(load_screensaver(), active)
@@ -1238,6 +1263,45 @@ async def select_playlist(name):
 
 async def screensaver_playlists_select(request):
     out, status = await select_playlist((await _json_object(request)).get("name"))
+    return web.json_response(out, status=status)
+
+
+async def set_restricted(value):
+    """Set the restricted (NSFW) filter; returns (payload, http status).
+    `value` is a mode (any | hide | only), a Home Assistant label or an
+    alias such as sfw / nsfw. A change restarts a running screensaver so it
+    takes effect right away, as a playlist switch does."""
+    mode = integrations.parse_restricted(value)
+    if mode is None:
+        return {"error": "restricted must be one of "
+                         + ", ".join(integrations.RESTRICTED_MODES),
+                "available": list(integrations.RESTRICTED_MODES)}, 400
+    cfg = load_screensaver()
+    out = {"restricted": mode,
+           "label": integrations.RESTRICTED_LABELS[mode]}
+    if cfg["restricted"] != mode:
+        cfg["restricted"] = mode
+        _write_yaml(SCREENSAVER_REL, cfg)
+        git_commit(f"arcadectl: screensaver restricted {mode}")
+        push_state_soon()
+        hub.log_event(f"screensaver restricted filter -> {mode}")
+        warning = await _restart_screensaver_if_on()
+        if warning:
+            out["warning"] = warning
+    return out, 200
+
+
+async def screensaver_restricted_get(request):
+    cfg = load_screensaver()
+    mode = cfg["restricted"]
+    return web.json_response({"restricted": mode,
+                              "label": integrations.RESTRICTED_LABELS[mode],
+                              "available": list(integrations.RESTRICTED_MODES)})
+
+
+async def screensaver_restricted_set(request):
+    out, status = await set_restricted(
+        (await _json_object(request)).get("mode"))
     return web.json_response(out, status=status)
 
 
@@ -2434,6 +2498,12 @@ async def _integration_command(kind, payload, leaf):
     """A command arriving from Home Assistant over MQTT."""
     cmd = (payload or "").strip().lower()
     try:
+        if kind == "restricted":
+            out, status = await set_restricted(payload.strip())
+            hub.log_event(f"home assistant: restricted filter {payload.strip()!r} "
+                          + (out.get("error", "failed") if status != 200
+                             else out.get("warning", "ok")))
+            return
         if kind == "playlist":
             out, status = await select_playlist(payload.strip())
             hub.log_event(f"home assistant: playlist {payload.strip()!r} "
@@ -2637,6 +2707,8 @@ app.add_routes([
     web.post("/screensaver/playlists/save", screensaver_playlists_save),
     web.post("/screensaver/playlists/delete", screensaver_playlists_delete),
     web.post("/screensaver/playlists/select", screensaver_playlists_select),
+    web.get("/screensaver/restricted", screensaver_restricted_get),
+    web.post("/screensaver/restricted", screensaver_restricted_set),
     web.get("/screensaver/playlist", screensaver_playlist),
     web.post("/screensaver/disable", screensaver_disable),
     web.post("/screensaver/{action}", screensaver_cmd),

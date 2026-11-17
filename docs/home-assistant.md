@@ -7,12 +7,14 @@ when the UI reads them back.
 
 ## Home Assistant
 
-The cabinet shows up as one device, `arcade_cabinet`, with eleven entities:
+The cabinet shows up as one device, `arcade_cabinet`, with thirteen entities:
 
 | Entity | Kind |
 | --- | --- |
 | Stop game | button |
 | Screensaver | switch |
+| Screensaver playlist | select (`All shows` + every playlist) |
+| Screensaver NSFW filter | select (`Ignore tag` / `Hide NSFW` / `NSFW only`, on Plex's `restricted` label) |
 | Cabinet online | binary sensor (MQTT last will) |
 | Now playing, System, Play time | sensors |
 | CPU, GPU, Memory, CPU temperature, Disk used | sensors |

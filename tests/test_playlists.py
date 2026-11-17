@@ -283,7 +283,7 @@ def test_home_assistant_select_entity_and_state():
 
     pub = integrations.HomeAssistantPublisher({}, lambda _: None)
     pub.playlist_options = options
-    (topic, payload), = [e for e in pub._discovery() if "/select/" in e[0]]
+    (topic, payload), = [e for e in pub._discovery() if "/select/arcade_cabinet/playlist/" in e[0]]
     assert payload["options"] == options
     assert payload["command_topic"].endswith("playlist/set")
 
@@ -304,18 +304,18 @@ def test_publish_reannounces_when_playlists_change():
     snap = integrations.snapshot_from({}, True, screensaver_cfg={
         "playlists": {"xmas": {"sources": ["3"]}}, "active_playlist": "xmas"})
     pub.publish(snap)
-    select_cfg = [p for t, p in published if "/select/" in t]
+    select_cfg = [p for t, p in published if "/select/arcade_cabinet/playlist/" in t]
     assert select_cfg[-1]["options"] == ["All shows", "xmas"]
     state = [p for t, p in published if t.endswith("/state")][-1]
     assert state["playlist"] == "xmas"
 
     published.clear()
     pub.publish(snap)
-    assert not [t for t, _ in published if "/select/" in t]   # unchanged: no re-announce
+    assert not [t for t, _ in published if "/select/arcade_cabinet/playlist/" in t]   # unchanged: no re-announce
     snap2 = integrations.snapshot_from({}, True, screensaver_cfg={
         "playlists": {"xmas": {}, "halloween": {}}})
     pub.publish(snap2)
-    assert [p for t, p in published if "/select/" in t][-1]["options"] == \
+    assert [p for t, p in published if "/select/arcade_cabinet/playlist/" in t][-1]["options"] == \
         ["All shows", "halloween", "xmas"]
 
 
