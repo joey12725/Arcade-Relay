@@ -82,6 +82,33 @@ $ arcadectl screensaver playlists select all           # back to anime
   cabinet's offline clip cache (an in-flight download is discarded too), so
   a link outage doesn't fall back to clips from the previous playlist.
 
+## NSFW filter (Plex `restricted` label)
+
+Titles Plex labels `restricted` (case-insensitive; the label is managed in
+Plex, not here) can be filtered out of — or made the only thing in — the
+current selection, whether that is the rotation board or an active playlist:
+
+```
+$ arcadectl screensaver restricted            # show the current mode
+$ arcadectl screensaver restricted hide       # leave restricted titles out
+$ arcadectl screensaver restricted only       # play only restricted titles
+$ arcadectl screensaver restricted any        # ignore the tag (default)
+```
+
+- `any` is the default and is exactly the old behaviour. `sfw` / `nsfw`
+  are accepted for `hide` / `only`.
+- Same switch on the dashboard (PLAYLISTS → NSFW (restricted tag)) and in
+  Home Assistant: the cabinet device's **Screensaver NSFW filter** select
+  (`Ignore tag` / `Hide NSFW` / `NSFW only`).
+- A change restarts a running screensaver, and clears the cabinet's offline
+  clip cache so an outage never falls back to a clip cached under another
+  setting. If `only` leaves nothing (no restricted titles in the selection)
+  the screensaver stops with a warning, as an empty playlist does.
+- While filtering, an id the Plex listing doesn't know is dropped (its
+  label can't be checked). `arcadectl --json screensaver sources` shows a
+  `restricted` flag per title.
+- Stored as `restricted: any|hide|only` in `state/screensaver.yaml`.
+
 ## Subtitles
 
 One switch: `arcadectl screensaver set --subtitles on|off` (web UI:

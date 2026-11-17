@@ -1016,6 +1016,9 @@ VIEWS.saver = () => {
       ${plNames.map((n) => h`<option value="${esc(n)}" ${(plists[n].sources || []).map(String).indexOf(String(sid)) >= 0 ? "disabled" : ""}>${esc(n)}</option>`).join("")}
     </select>` : "";
   const plName = (id) => (byId.get(String(id)) || {}).name || id;
+  // the Plex `restricted` label as a filter over the selection above
+  const rMode = ovs.restricted || "any";
+  const R_MODES = [["any", "IGNORE TAG"], ["hide", "HIDE NSFW"], ["only", "NSFW ONLY"]];
 
   const playlists = panel("p-hot", "PLAYLISTS &mdash; NOW PLAYING: " + esc(plActive || "ALL SHOWS"), h`<div class="col" style="gap:10px;">
       <div class="note">A playlist is a named set of shows or movies (cartoons, christmas, halloween, late-night…).
@@ -1023,6 +1026,11 @@ VIEWS.saver = () => {
         running. <b>ALL SHOWS</b> is the normal rotation board below. Members play even when they are OFF
         on the board, so keep anything you only want sometimes <b>off the board</b> and in a playlist.
         Home Assistant and <code>arcadectl screensaver playlists</code> switch the same thing.</div>
+      <div class="row" style="gap:8px; align-items:center;">
+        <b style="font-size:12px;" title="Plex's restricted label, applied to whatever is selected below">NSFW (restricted tag):</b>
+        ${R_MODES.map(([m, label]) => h`<button class="sm ${m === rMode ? "lime" : "grey"}" data-act="restricted-set"
+          data-mode="${m}">${label}${m === rMode ? " ✓" : ""}</button>`).join("")}
+      </div>
       <div class="row" style="gap:8px;">
         <button class="sm ${plActive ? "grey" : "lime"}" data-act="pl-select" data-name="">ALL SHOWS${plActive ? "" : " ✓"}</button>
         ${plNames.map((n) => h`<button class="sm ${n === plActive ? "lime" : "grey"}" data-act="pl-select"
@@ -1230,6 +1238,15 @@ ACTIONS["sv-suppress"] = (el) => {
   const s = +el.dataset.secs;
   op(s ? "suppress screensaver " + s + "s" : "resume screensaver",
      () => api("POST", "/screensaver/disable", { seconds: s }));
+};
+ACTIONS["restricted-set"] = (el) => {
+  const label = el.textContent.replace("✓", "").trim().toLowerCase();
+  op("nsfw filter " + label, async () => {
+    const r = await api("POST", "/screensaver/restricted", { mode: el.dataset.mode });
+    if (r && r.warning) toast("⚠ " + r.warning, "warn");
+    else toast("✔ nsfw filter: " + label, "ok");
+    return r;
+  }, null).catch(() => {});
 };
 ACTIONS["pl-name"] = (el) => { S.plName = el.value; paint(); };
 ACTIONS["pl-select"] = (el) => {

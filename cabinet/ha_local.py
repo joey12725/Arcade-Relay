@@ -19,16 +19,19 @@ def command_method(kind, payload):
 
 
 async def run(get_config, get_state, get_health, dispatch, log,
-              get_screensaver=lambda: {}, select_playlist=None):
+              get_screensaver=lambda: {}, select_playlist=None,
+              set_restricted=None):
     loop = asyncio.get_running_loop()
     publisher = None
     previous = None
 
     def on_command(kind, payload, leaf):
-        if kind == "playlist":
-            if select_playlist:
+        if kind in ("playlist", "restricted"):
+            # both live on the server: hand the choice there
+            handler = select_playlist if kind == "playlist" else set_restricted
+            if handler:
                 loop.call_soon_threadsafe(
-                    lambda: asyncio.create_task(select_playlist(payload)))
+                    lambda: asyncio.create_task(handler(payload)))
             return
         method = command_method(kind, payload)
         if method:

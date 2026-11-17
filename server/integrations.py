@@ -102,7 +102,7 @@ class Snapshot:
 
     __slots__ = ("online", "running", "system", "title", "started_at",
                  "elapsed_s", "screensaver", "lifeline", "art_url",
-                 "playlist", "playlists")
+                 "playlist", "playlists", "restricted")
 
     def __init__(self, **kw):
         for k in self.__slots__:
@@ -183,6 +183,46 @@ def playlist_fields(screensaver_cfg):
     return resolve_active(cfg) or ALL_SHOWS, [ALL_SHOWS] + names
 
 
+# The Plex `restricted` label (the NSFW tag the library already carries) as
+# a screensaver filter over whatever is selected (a playlist or the board):
+#   any  - ignore the tag; play the selection as is (the default)
+#   hide - leave restricted titles out
+#   only - play only the restricted titles in the selection
+RESTRICTED_MODES = ("any", "hide", "only")
+RESTRICTED_LABELS = {"any": "Ignore tag", "hide": "Hide NSFW",
+                     "only": "NSFW only"}
+_RESTRICTED_ALIASES = {
+    "any": "any", "ignore": "any", "ignore tag": "any", "all": "any",
+    "default": "any", "off": "any", "none": "any", "both": "any",
+    "hide": "hide", "hide nsfw": "hide", "exclude": "hide", "sfw": "hide",
+    "no nsfw": "hide", "hide restricted": "hide",
+    "only": "only", "nsfw only": "only", "nsfw": "only",
+    "restricted": "only", "restricted only": "only", "only nsfw": "only",
+}
+
+
+def parse_restricted(value):
+    """A restricted-filter mode from a mode name, a Home Assistant label or
+    a common alias (case-insensitive), or None if it is none of those."""
+    if not isinstance(value, str):
+        return None
+    return _RESTRICTED_ALIASES.get(" ".join(value.strip().lower().split()))
+
+
+def resolve_restricted(screensaver_cfg):
+    """The active restricted-filter mode. Shared by the server, Home
+    Assistant and the cabinet; anything missing or hand-mangled is `any`,
+    which is how the screensaver behaved before the filter existed."""
+    cfg = screensaver_cfg if isinstance(screensaver_cfg, dict) else {}
+    return parse_restricted(cfg.get("restricted")) or "any"
+
+
+def restricted_fields(screensaver_cfg):
+    """(active label, option labels) for the Home Assistant filter select."""
+    return (RESTRICTED_LABELS[resolve_restricted(screensaver_cfg)],
+            [RESTRICTED_LABELS[m] for m in RESTRICTED_MODES])
+
+
 def snapshot_from(cab_state, online, base_url=None, art_path=None,
                   screensaver_cfg=None):
     running = cab_state.get("running")
@@ -197,8 +237,10 @@ def snapshot_from(cab_state, online, base_url=None, art_path=None,
     if base_url and art_path:
         art = base_url.rstrip("/") + art_path
     playlist, playlists = playlist_fields(screensaver_cfg)
+    restricted, _ = restricted_fields(screensaver_cfg)
     return Snapshot(online=online, running=running, system=system, title=title,
                     playlist=playlist, playlists=playlists,
+                    restricted=restricted,
                     started_at=cab_state.get("started_at"),
                     elapsed_s=cab_state.get("elapsed_s"),
                     screensaver=bool(cab_state.get("screensaver")),
@@ -391,6 +433,19 @@ class HomeAssistantPublisher:
              "options": list(self.playlist_options),
              "icon": "mdi:playlist-play"},
         ))
+        # The Plex `restricted` (NSFW) label as a filter over that playlist:
+        # ignore it, leave those titles out, or play only them.
+        out.append((
+            f"{self.prefix}/select/{self.node}/restricted/config",
+            {"name": "Screensaver NSFW filter",
+             "unique_id": f"{self.node}_restricted",
+             "device": dev, "availability": avail,
+             "state_topic": state_t,
+             "value_template": "{{ value_json.restricted }}",
+             "command_topic": self.topic("restricted/set"),
+             "options": [RESTRICTED_LABELS[m] for m in RESTRICTED_MODES],
+             "icon": "mdi:eye-off-outline"},
+        ))
         for key, name, unit, icon, cls in (
             ("title", "Now playing", None, "mdi:gamepad-variant", None),
             ("system", "System", None, "mdi:chip", None),
@@ -460,6 +515,7 @@ class HomeAssistantPublisher:
         client.subscribe(self.topic("command"))
         client.subscribe(self.topic("screensaver/set"))
         client.subscribe(self.topic("playlist/set"))
+        client.subscribe(self.topic("restricted/set"))
         client.subscribe(f"{self.prefix}/status")
         client.publish(self.topic("availability"), "online", qos=1, retain=True)
         self.log("home assistant: MQTT connected")
@@ -482,7 +538,9 @@ class HomeAssistantPublisher:
             return
         leaf = msg.topic.rsplit("/", 1)[-1]
         kind = ("screensaver" if msg.topic.endswith("screensaver/set")
-                else "playlist" if msg.topic.endswith("playlist/set") else "media")
+                else "playlist" if msg.topic.endswith("playlist/set")
+                else "restricted" if msg.topic.endswith("restricted/set")
+                else "media")
         self.on_command(kind, payload, leaf)
 
     def announce(self):

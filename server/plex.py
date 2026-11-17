@@ -2,7 +2,7 @@
 """Plex adapter (spec §6.1, replacing the Jellyfin adapter).
 
 Same four-function contract the rest of the server already consumes:
-  items()          -> [{id, name, type, thumb}]  every show + movie
+  items()          -> [{id, name, type, thumb, restricted}]  every show + movie
   episodes_of(id)  -> [rating_key, ...]          playable videos under a source
   image(id)        -> (bytes, content_type)      poster for the sources list
   stream_path(id)  -> "/path?..."                480p-capped transcode, proxied
@@ -34,6 +34,9 @@ ALLOWED_NETWORKS = os.environ.get("PLEX_ALLOWED_NETWORKS", "0.0.0.0/0")
 MAX_HEIGHT = int(os.environ.get("SCREENSAVER_MAX_HEIGHT", "480"))
 MAX_WIDTH = int(os.environ.get("SCREENSAVER_MAX_WIDTH", "854"))
 VIDEO_BITRATE = int(os.environ.get("SCREENSAVER_VIDEO_BITRATE", "1500000"))
+# The label that marks a show or movie NSFW in this library (the
+# screensaver's restricted filter keys off it). Matched case-insensitively.
+RESTRICTED_LABEL = os.environ.get("PLEX_RESTRICTED_LABEL", "restricted")
 
 # kept for API-compatibility with the old adapter's callers
 JF_URL = PLEX_URL
@@ -136,11 +139,33 @@ async def token():
     return PLEX_TOKEN or ""
 
 
+def _restricted_keys_sync(section_key):
+    """Rating keys in a section carrying the restricted label.
+
+    The plain /all listing has no labels, so ask the section for its label
+    directory, then list the items under that one label. A section that
+    has never had the label simply has no such directory. Any Plex error
+    propagates: the restricted filter must never guess.
+    """
+    want = RESTRICTED_LABEL.strip().lower()
+    labels = _req(_url(f"/library/sections/{section_key}/label"))
+    keys = [d.get("key") for d in (labels if labels is not None else [])
+            if (d.get("title") or "").strip().lower() == want and d.get("key")]
+    out = set()
+    for label_key in keys:
+        root = _req(_url(f"/library/sections/{section_key}/all",
+                         label=label_key))
+        out.update(d.get("ratingKey") for d in (root if root is not None else [])
+                   if d.get("ratingKey"))
+    return out
+
+
 def _all_items_sync():
     out = []
     for stype, key in _sections().items():
         if stype not in ("show", "movie"):
             continue
+        restricted = _restricted_keys_sync(key)
         root = _req(_url(f"/library/sections/{key}/all"))
         for d in (root or []):
             rk = d.get("ratingKey")
@@ -151,13 +176,14 @@ def _all_items_sync():
                 "name": d.get("title") or "(untitled)",
                 "type": "Series" if stype == "show" else "Movie",
                 "thumb": f"/thumb/{rk}" if d.get("thumb") else None,
+                "restricted": rk in restricted,
             })
     out.sort(key=lambda i: (i["type"], i["name"]))
     return out
 
 
 async def items():
-    """All Series and Movies: [{id, name, type, thumb}]."""
+    """All Series and Movies: [{id, name, type, thumb, restricted}]."""
     await ensure_setup()
     return await asyncio.to_thread(_all_items_sync)
 

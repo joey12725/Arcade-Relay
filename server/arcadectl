@@ -142,6 +142,11 @@ def main():
     sd.add_argument("--for", dest="duration", required=True,
                     help="e.g. 2h, 30m, 45 (seconds); 0 clears")
 
+    sr = sssub.add_parser("restricted", help="filter on Plex's `restricted` "
+                          "(NSFW) label: any = ignore it (default), hide = "
+                          "leave those titles out, only = play only them")
+    sr.add_argument("mode", nargs="?",
+                    help="any | hide | only (also sfw / nsfw); omit to show")
     pl = sssub.add_parser("playlists", help="named sets of shows (christmas, "
                           "halloween, sfw...) the screensaver can switch between")
     plsub = pl.add_subparsers(dest="plcmd", required=True)
@@ -404,6 +409,9 @@ def main():
             res = call("POST", "/screensaver/set", body)
         elif c == "remove-source":
             res = call("POST", "/screensaver/remove-source", {"id": args.id})
+        elif c == "restricted":
+            res = (call("POST", "/screensaver/restricted", {"mode": args.mode})
+                   if args.mode else call("GET", "/screensaver/restricted"))
         elif c == "playlists":
             pc = args.plcmd
             if pc == "list":
